@@ -1227,6 +1227,17 @@ static void lobby_overlay() {
     static LobbyRow rows[16];
     static Doc d;
     int n = lobby_rows(rows, 16);
+    {   // the number of lines found changing back within a moment: what blinks, in the log
+        static int last_n = -1, logged;
+        static DWORD last_change;
+        DWORD now = GetTickCount();
+        if (n != last_n) {
+            if (last_n >= 0 && now - last_change < 1000 && logged++ < 20)
+                rc_log("ui: lobby lines found %d -> %d after %lu ms", last_n, n, now - last_change);
+            last_n = n;
+            last_change = now;
+        }
+    }
     if (!n || g_chat_tab) return;           // our global chat is over the panel
     char ids[16 * 18 + 1] = "";
     for (int i = 0; i < n; i++) { if (i) strcat(ids, ","); strcat(ids, rows[i].id); }

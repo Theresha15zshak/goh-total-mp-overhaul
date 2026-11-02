@@ -451,7 +451,13 @@ static int under_session_view(uint64_t d) {
 
 static void lb_apply(void *self) {
     int32_t *size = (int32_t *)((uint8_t *)self + LB_LINE_SIZE);
-    if (size[1] > 0 && size[1] < LINE_H && under_session_view((uintptr_t)self)) size[1] = LINE_H;
+    if (size[1] > 0 && size[1] < LINE_H && under_session_view((uintptr_t)self)) {
+        static int logged;
+        if (logged++ < 20)
+            rc_log("pvp: the session list was given lines %d high by %llx: %d", size[1],
+                   (unsigned long long)((uint8_t *)__builtin_return_address(0) - g_base), LINE_H);
+        size[1] = LINE_H;
+    }
     g_lb_apply(self);
 }
 
@@ -479,16 +485,24 @@ static void tall_walk(uint64_t d, int depth, int in_session, int *budget, uint64
 
 void pvp_gui_tick(void) {
     static DWORD at;
+    static uint64_t lb;                  // the session list as last found; checked on every iteration
     DWORD now = GetTickCount();
-    if (!g_base || now - at < 250) return;
-    at = now;
-    uint64_t root = pq((uintptr_t)(g_base + G_DESKTOP)), lb = 0;
-    if (!root || pq(root) != (uintptr_t)(g_base + VT_DESKTOP)) return;
-    int budget = 20000;
-    tall_walk(root, 0, 0, &budget, &lb);
-    if (!lb) return;
+    if (!g_base) return;
+    if (now - at >= 250) {
+        at = now;
+        uint64_t root = pq((uintptr_t)(g_base + G_DESKTOP));
+        if (!root || pq(root) != (uintptr_t)(g_base + VT_DESKTOP)) return;
+        int budget = 20000;
+        lb = 0;
+        tall_walk(root, 0, 0, &budget, &lb);
+    }
+    if (!lb || pq(lb) != (uintptr_t)(g_base + VT_MENU_LISTBOX)) { lb = 0; return; }
     int32_t *size = (int32_t *)(uintptr_t)(lb + LB_LINE_SIZE);
     if (size[1] == LINE_H) return;
+    if (lb == g_tall_listbox) {          // ours taken back by something the hook did not see
+        static int logged;
+        if (logged++ < 20) rc_log("pvp: the session list's lines were %d high again (not through +0x248)", size[1]);
+    }
     int32_t was = size[1];
     size[1] = LINE_H;
     void **vt = *(void ***)(uintptr_t)lb;
