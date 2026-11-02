@@ -1213,6 +1213,16 @@ static void tab_leaders(const Pane &p, float top, float bottom) {
 // ---- MMR under each name in the lobby's player list (pvp.c lobby_rows) ------------------------------------
 static const ImU32 VAN_ITEM = IM_COL32(176, 151, 121, 255);     // the skin's listbox item text
 
+// a player's Steam name as Steam knows it (the lobby's list shows the same), "" if not known yet
+static const char *persona_name(const char *id) {
+    HMODULE h = GetModuleHandleA("steam_api64.dll");
+    auto friends_if = h ? (void *(*)())GetProcAddress(h, "SteamAPI_SteamFriends_v017") : nullptr;
+    auto get = h ? (const char *(*)(void *, uint64_t))GetProcAddress(h, "SteamAPI_ISteamFriends_GetFriendPersonaName") : nullptr;
+    void *fr = friends_if ? friends_if() : nullptr;
+    const char *n = fr && get ? get(fr, _strtoui64(id, nullptr, 10)) : nullptr;
+    return n && strcmp(n, "[unknown]") ? n : "";
+}
+
 static void lobby_overlay() {
     static LobbyRow rows[16];
     static Doc d;
@@ -1235,8 +1245,15 @@ static void lobby_overlay() {
         const char *m = n == 2 ? (m1 ? m1 : mt) : (mt ? mt : m1);
         char text[32];
         snprintf(text, sizeof text, "MMR %s", m ? m : d.state == 1 ? "-" : "...");
-        // under the name, in the room pvp.c makes there (r is the name's own place)
-        ImVec2 at(floorf(r.x * sx + 0.5f), floorf((r.y + r.h) * sy + 0.5f));
+        // On the name's own line, right after the name. Making the lines taller moved the avatars but not the
+        // names (the game draws them where its own layout put them, 2026-11-02), so the lines stay as they are;
+        // the name's width is the player's Steam name in the game's font, as the list shows it.
+        const char *name = persona_name(r.id);
+        float name_w = name[0] && g_game_font ? g_game_font->CalcTextSizeA(g_game_font->FontSize * sy, FLT_MAX, 0, name).x : r.w * sx * 0.6f;
+        float tw = font->CalcTextSizeA(size, FLT_MAX, 0, text).x;
+        float x = r.x * sx + name_w + 8 * sx, right = (r.x + r.w) * sx;
+        if (x + tw > right) x = right - tw;                      // a long name: at the end of its place
+        ImVec2 at(floorf(x + 0.5f), floorf((r.y + r.h * 0.5f) * sy - size * 0.5f + 1 * sy));
         dl->AddText(font, size, ImVec2(at.x + 1, at.y + 1), IM_COL32(0, 0, 0, 200), text);
         dl->AddText(font, size, at, VAN_ITEM, text);
     }
