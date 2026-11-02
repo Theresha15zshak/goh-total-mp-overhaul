@@ -131,6 +131,7 @@ int online_doc(int doc, char *out, size_t n, int *state);   // the last text; st
 void report_init(const char *dir);
 int report_next(const char *me, const char *key, char *body, size_t n, long long *end_time);   // 1 = body to send
 void report_done(long long end_time);       // that match is dealt with (taken, or never will be)
+void replays_rename(const char *me);        // finished autoreplays get names of their own: mode_3v3_map_army_date
 
 // ---- PVP button in the game's Internet / LAN game list (pvp.c): our block over its list of games ----
 extern volatile long g_pvp_on;              // the button was clicked: the block is wanted while the page is up

@@ -243,7 +243,8 @@ static DWORD WINAPI online_thread(LPVOID unused) {
             else { AcquireSRWLockExclusive(&g_lock); g_state = 2; ReleaseSRWLockExclusive(&g_lock); }
         }
         wanted = want;
-        // finished matches out of the game's replays, one at a time (report.c)
+        // finished matches out of the game's replays, one at a time (report.c); and their names
+        if (!last_report || now - last_report >= REPORT_MS) replays_rename(g_id);
         if (g_online_consent == 1 && g_key[0] && (!last_report || now - last_report >= REPORT_MS)) {
             last_report = now | 1;
             long long end = 0;

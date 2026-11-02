@@ -13,6 +13,7 @@
 #include <string.h>
 #include <time.h>
 #include <wctype.h>
+#include <ctype.h>
 #include "goh_replay.h"
 
 // stb_image's zlib decoder, built in goh_replay.c
@@ -191,6 +192,86 @@ static int make_report(const char *ss, const char *me, const char *key, char *bo
     return 1;
 }
 
+static long long filetime_unix(FILETIME ft);
+static int is_autoreplay(const wchar_t *n);
+
+// ---- names: autoreplayN.rep becomes mode_3v3_map_army_date-time.rep -------------------------------------
+// The game names its replays autoreplay1..N and overwrites the oldest once N are taken; a replay with a name
+// of its own is never chosen (530210 tells autoreplays apart). So each finished one gets a name made from its
+// card: Domination_3v3_trenches_ger_2026-11-01_20-00.rep. Renaming keeps the file's time, which is what
+// report_next goes by.
+static void name_part(char *out, size_t n, const char *s) {   // letters, digits, '-' only
+    size_t o = 0;
+    for (; *s && o + 1 < n; s++) out[o++] = (isalnum((unsigned char)*s) || *s == '-') ? *s : '_';
+    out[o] = 0;
+}
+
+static int replay_name(const char *ss, const char *me, wchar_t *out, size_t n) {
+    const char *stop = ss + strlen(ss);
+    char type[32], map[160], start[24], mode[40], mp[96], army[16] = "spec";
+    if (!field(ss, stop, "gameType", type, sizeof type) || !field(ss, stop, "gameStartTime", start, sizeof start)) return 0;
+    if (!field(ss, stop, "map", map, sizeof map)) snprintf(map, sizeof map, "map");
+    snprintf(mode, sizeof mode, "%s", !strcmp(type, "ammunition") ? "Domination" : !strcmp(type, "battle_zones") ? "BattleZones" :
+                                      !strcmp(type, "frontlines") ? "Frontline" : type);
+    // "multi/3v3_trenches:ammunition" -> "trenches"
+    const char *m = strrchr(map, '/') ? strrchr(map, '/') + 1 : map;
+    char shortmap[96];
+    snprintf(shortmap, sizeof shortmap, "%.*s", (int)strcspn(m, ":"), m);
+    const char *u = strchr(shortmap, '_');
+    if (u && u - shortmap <= 4 && strchr(shortmap, 'v') && strchr(shortmap, 'v') < u) memmove(shortmap, u + 1, strlen(u));
+    name_part(mp, sizeof mp, shortmap);
+    // the sides' sizes and our army, from the members
+    const char *mem = strstr(ss, "{members {"), *teams = mem ? strstr(mem, "{teams {") : NULL;
+    int count[8] = {0};
+    for (const char *p = mem; p && teams && (p = strstr(p, "{type ")) && p < teams; p++) {
+        const char *next = strstr(p + 1, "{type ");
+        if (!next || next > teams) next = teams;
+        char t[16], tm[4], id[24], ar[16];
+        if (!field(p, next, "type", t, sizeof t) || strcmp(t, "player") || !field(p, next, "team", tm, sizeof tm)) continue;
+        if (tm[0] >= 'a' && tm[0] <= 'h') count[tm[0] - 'a']++;
+        if (field(p, next, "steamId", id, sizeof id) && !strcmp(id, me) && field(p, next, "army", ar, sizeof ar)) name_part(army, sizeof army, ar);
+    }
+    int a = 0, b = 0;
+    for (int i = 0; i < 8; i++) if (count[i]) { if (!a) a = count[i]; else if (!b) b = count[i]; }
+    time_t t = (time_t)_atoi64(start);
+    struct tm lt;
+    char when[32] = "unknown";
+    if (t > 0 && !localtime_s(&lt, &t)) strftime(when, sizeof when, "%Y-%m-%d_%H-%M", &lt);
+    swprintf(out, n, L"%hs_%dv%d_%hs_%hs_%hs", mode, a, b ? b : a, mp, army, when);
+    return 1;
+}
+
+// every finished autoreplay in our replays folder gets its name; the game is left alone while it may still use
+// the file (a match, a replay or the results page on screen)
+void replays_rename(const char *me) {
+    if (!me[0] || g_live_match || g_ms_results || (g_ctl.state != ST_IDLE && g_ctl.state != ST_OFF)) return;
+    wchar_t docs[MAX_PATH], dir[MAX_PATH], pattern[MAX_PATH];
+    if (FAILED(SHGetFolderPathW(NULL, CSIDL_PERSONAL, NULL, 0, docs))) return;
+    unsigned long long account = _strtoui64(me, NULL, 10) - 76561197960265728ULL;
+    swprintf(dir, MAX_PATH, L"%ls\\My Games\\gates of hell\\profiles\\%llu\\replays", docs, account);
+    swprintf(pattern, MAX_PATH, L"%ls\\autoreplay*.rep", dir);
+    long long now = (long long)time(NULL);
+    WIN32_FIND_DATAW fd;
+    HANDLE f = FindFirstFileW(pattern, &fd);
+    if (f == INVALID_HANDLE_VALUE) return;
+    do {
+        if (!is_autoreplay(fd.cFileName) || now - filetime_unix(fd.ftLastWriteTime) <= SETTLE_S) continue;
+        wchar_t from[MAX_PATH], name[160], to[MAX_PATH];
+        swprintf(from, MAX_PATH, L"%ls\\%ls", dir, fd.cFileName);
+        char *ss = read_ss(from);
+        int ok = ss && replay_name(ss, me, name, 160);
+        free(ss);
+        if (!ok) continue;
+        for (int k = 1; k < 100; k++) {
+            if (k == 1) swprintf(to, MAX_PATH, L"%ls\\%ls.rep", dir, name);
+            else swprintf(to, MAX_PATH, L"%ls\\%ls_%d.rep", dir, name, k);
+            if (MoveFileW(from, to)) { rc_log("replays: %ls -> %ls", fd.cFileName, wcsrchr(to, L'\\') + 1); break; }
+            if (GetLastError() != ERROR_ALREADY_EXISTS && GetLastError() != ERROR_FILE_EXISTS) break;   // in use: next time
+        }
+    } while (FindNextFileW(f, &fd));
+    FindClose(f);
+}
+
 static long long filetime_unix(FILETIME ft) {
     ULARGE_INTEGER u = {.LowPart = ft.dwLowDateTime, .HighPart = ft.dwHighDateTime};
     return (long long)(u.QuadPart / 10000000ULL) - 11644473600LL;
@@ -225,7 +306,7 @@ int report_next(const char *me, const char *key, char *body, size_t n, long long
     wchar_t docs[MAX_PATH], pattern[MAX_PATH], best[MAX_PATH] = L"";
     if (FAILED(SHGetFolderPathW(NULL, CSIDL_PERSONAL, NULL, 0, docs))) return 0;
     unsigned long long account = _strtoui64(me, NULL, 10) - 76561197960265728ULL;
-    swprintf(pattern, MAX_PATH, L"%ls\\My Games\\gates of hell\\profiles\\%llu\\replays\\autoreplay*.rep", docs, account);
+    swprintf(pattern, MAX_PATH, L"%ls\\My Games\\gates of hell\\profiles\\%llu\\replays\\*.rep", docs, account);
     long long after = last_end(), now = (long long)time(NULL), best_end = 0;
     WIN32_FIND_DATAW fd;
     HANDLE f = FindFirstFileW(pattern, &fd);
@@ -233,7 +314,7 @@ int report_next(const char *me, const char *key, char *body, size_t n, long long
     for (int tries = 0;; ) {
         long long written = filetime_unix(fd.ftLastWriteTime);
         // written after the last reported match ended (it is written at the end), and finished
-        if (is_autoreplay(fd.cFileName) && written > after && now - written > SETTLE_S && tries < 64) {
+        if (written > after && now - written > SETTLE_S && tries < 64) {      // ours renamed or not (replays_rename)
             wchar_t file[MAX_PATH];
             swprintf(file, MAX_PATH, L"%ls\\My Games\\gates of hell\\profiles\\%llu\\replays\\%ls", docs, account, fd.cFileName);
             char *ss = read_ss(file);
