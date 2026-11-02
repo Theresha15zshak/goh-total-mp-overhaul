@@ -499,6 +499,17 @@ void pvp_gui_tick(void) {
     g_tall_listbox = lb;
 }
 
+// The session list makes its lines anew when it updates: names found before are then gone (another object, or
+// not on the screen), and the MMR under them blinked out until the next look. One of them gone: a new look then.
+static int names_alive(void **names, int count) {
+    for (int i = 0; i < count; i++) {
+        uint32_t flags = 0;
+        if (pq((uintptr_t)names[i]) != (uintptr_t)(g_base + VT_NAME_VIEW) || !peek((uint8_t *)names[i] + 0x48, &flags, 4) || !(flags & 2))
+            return 0;
+    }
+    return 1;
+}
+
 int lobby_rows(LobbyRow *out, int max) {
     scan_names();
     void *names[MAX_NAMES];
@@ -506,6 +517,14 @@ int lobby_rows(LobbyRow *out, int max) {
     int count = g_name_count;
     memcpy(names, g_names, count * sizeof names[0]);
     ReleaseSRWLockShared(&g_names_lock);
+    if (GetTickCount() - g_scan_at > 100 && !names_alive(names, count)) {     // at most ten looks a second
+        g_scan_at = GetTickCount() - 1000;
+        scan_names();
+        AcquireSRWLockShared(&g_names_lock);
+        count = g_name_count;
+        memcpy(names, g_names, count * sizeof names[0]);
+        ReleaseSRWLockShared(&g_names_lock);
+    }
     int n = 0;
     for (int i = 0; i < count && n < max; i++) {
         int32_t x, y, w, h, rw, rh;
@@ -518,8 +537,6 @@ int lobby_rows(LobbyRow *out, int max) {
         for (int up = 0; up < 3 && item; up++) item = pq(item + 0xf0);
         int32_t lx, ly, lw, lh;
         r->line_bottom = item && place((void *)(uintptr_t)item, 1, &lx, &ly, &lw, &lh, &rw, &rh) ? (float)(ly + lh) : (float)(y + h);
-        static int shown;
-        if (item && n == 2 && shown < 3 && lh != 22) { shown++; rc_log("pvp: lobby lines now: #%d at y %d, %d high; name at y %d", n, ly, lh, y); }
         snprintf(r->id, sizeof r->id, "%llu", (unsigned long long)id);
     }
     return n;
