@@ -420,15 +420,15 @@ static void scan_names(void) {
     if (n != last_n) { rc_log("pvp: lobby names on screen: %d (%d dialogs looked at)", n, 20000 - budget); last_n = n; }
 }
 
-// ---- the lobby's lines taller: each line tells the listbox it is taller ------------------------------------
-// Resizing and moving the lines ourselves (2026-11-02) lost against the listbox, which lays them out again and again
-// at the size each line says it needs: they jumped between 22 and ours. So the line says it: a listbox line
-// (eListboxItem, vtable 1019228) answers "how big are you" through its vtable +0xc0 (a9eb60, the bounding box of
-// its children, also what SetSize asks for an automatic size); for the lines of the lobby's session list only,
-// ours answers at least LINE_H high. The listbox then lays them out itself, names and avatars with them.
+// ---- the lobby's lines taller: the listbox's own resizing of them made taller ---------------------------------
+// Resizing and moving the lines ourselves lost against the listbox, which lays them out again and again: they jumped
+// between 22 and ours; and it never asks a line its size (vtable +0xc0 hooked, never called for them, 2026-11-02).
+// It gives each line its size through the line's SetSize (vtable +0x80, aa2390, packed w | h << 32). That is
+// hooked for listbox lines (eListboxItem, vtable 1019228): for the lines of the lobby's session list, the height
+// asked for becomes LINE_H, whoever asks; the listbox then has the lines at that height.
 #define VT_LINE_ITEM 0x1019228          // eListboxItem
 #define LINE_H 66                       // three times the game's 22: the name and the MMR under it
-static void *(*g_line_size)(void *self, int32_t *out);
+static void (*g_line_set_size)(void *self, uint64_t size);
 
 static int in_session_list(void *line) {
     uint64_t d = (uintptr_t)line;
@@ -439,21 +439,23 @@ static int in_session_list(void *line) {
     return 0;
 }
 
-static void *line_size(void *self, int32_t *out) {
-    void *r = g_line_size(self, out);
-    if (out[1] > 0 && out[1] < LINE_H && in_session_list(self)) {
+static void line_set_size(void *self, uint64_t size) {
+    int32_t h = (int32_t)(size >> 32);
+    if (h > 0 && h < LINE_H && in_session_list(self)) {
         static int logged;
-        if (!logged++) rc_log("pvp: a lobby line asked its size: %dx%d, answered %d high", out[0], out[1], LINE_H);
-        out[1] = LINE_H;
+        if (logged++ < 2)
+            rc_log("pvp: a lobby line sized %dx%d by %llx, made %d high", (int32_t)(uint32_t)size, h,
+                   (unsigned long long)((uint8_t *)__builtin_return_address(0) - g_base), LINE_H);
+        size = (uint32_t)size | (uint64_t)(uint32_t)LINE_H << 32;
     }
-    return r;
+    g_line_set_size(self, size);
 }
 
 static void line_size_install(void (*patch)(void *, const void *, size_t)) {
-    void **slot = (void **)(g_base + VT_LINE_ITEM + 0xc0);
-    if (*slot != (void *)(g_base + 0xa9eb60)) { rc_log("pvp: the listbox line is not as expected, lobby lines as they are"); return; }
-    g_line_size = (void *(*)(void *, int32_t *))*slot;
-    void *ours = (void *)line_size;
+    void **slot = (void **)(g_base + VT_LINE_ITEM + 0x80);
+    if (*slot != (void *)(g_base + 0xaa2390)) { rc_log("pvp: the listbox line is not as expected, lobby lines as they are"); return; }
+    g_line_set_size = (void (*)(void *, uint64_t))*slot;
+    void *ours = (void *)line_set_size;
     patch(slot, &ours, sizeof ours);
 }
 
@@ -476,6 +478,8 @@ int lobby_rows(LobbyRow *out, int max) {
         for (int up = 0; up < 3 && item; up++) item = pq(item + 0xf0);
         int32_t lx, ly, lw, lh;
         r->line_bottom = item && place((void *)(uintptr_t)item, 1, &lx, &ly, &lw, &lh, &rw, &rh) ? (float)(ly + lh) : (float)(y + h);
+        static int shown;
+        if (item && n == 2 && shown < 3 && lh != 22) { shown++; rc_log("pvp: lobby lines now: #%d at y %d, %d high; name at y %d", n, ly, lh, y); }
         snprintf(r->id, sizeof r->id, "%llu", (unsigned long long)id);
     }
     return n;
