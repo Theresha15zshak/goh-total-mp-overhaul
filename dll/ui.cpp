@@ -626,6 +626,7 @@ static const ImU32 VAN_HOVER = IM_COL32(235, 178, 108, 255);    // listbox item,
 static const ImU32 VAN_HOVER_BG = IM_COL32(44, 37, 30, 200);
 static const ImU32 VAN_WARN = IM_COL32(209, 120, 54, 255);      // the skin's "disabled" orange
 static const float VAN_COL[4] = {0.142f, 0.438f, 0.66f, 0.882f};
+static const float VAN_COL_ONLINE[4] = {0.12f, 0.37f, 0.57f, 0.78f};   // the online tab: its last title is wide
 
 static const ImU32 VAN_TAB = IM_COL32(240, 240, 240, 255);      // the page's tabs (ДРУЗЬЯ | ПОСЛЕДНЯЯ ИГРА)
 static const ImU32 VAN_TAB_OFF = IM_COL32(150, 150, 150, 255);
@@ -673,7 +674,7 @@ static const char *mode_name(const char *m) {
     return !strcmp(m, "battle_zones") ? "Зоны боевых действий" : !strcmp(m, "ammunition") ? "Превосходство" : m;
 }
 static void mmr_text(char *out, size_t n, const char *mmr, int games) {
-    if (games <= 0) snprintf(out, n, "\xE2\x80\x94");
+    if (games <= 0) snprintf(out, n, "-");
     else if (games < 10) snprintf(out, n, "%s (калибровка %d/10)", mmr, games);
     else snprintf(out, n, "%s", mmr);
 }
@@ -708,7 +709,7 @@ static void tab_online(const Pane &p, float top, float bottom) {
     online_doc_ids(DOC_RATINGS, ids);
     doc_get(rd, DOC_RATINGS);
     float col[4];
-    for (int i = 0; i < 4; i++) col[i] = p.p0.x + VAN_COL[i] * p.size.x;
+    for (int i = 0; i < 4; i++) col[i] = p.p0.x + VAN_COL_ONLINE[i] * p.size.x;
     float ty = top + (p.row - p.lh) * 0.5f;
     van_text(p.dl, col[0], ty, VAN_TITLE, "Игрок");
     van_text(p.dl, col[1], ty, VAN_TITLE, "Версия баланса");
@@ -731,7 +732,7 @@ static void tab_online(const Pane &p, float top, float bottom) {
         van_text(dl, col[0], yy, c, list[i].name);
         van_text(dl, col[1], yy, same ? c : VAN_WARN, list[i].version);
         van_text(dl, col[2], yy, self ? VAN_TITLE : same ? c : VAN_WARN, self ? "это вы" : same ? "можно играть компетитив" : "другая версия");
-        const char *m1 = "\xE2\x80\x94", *mt = "\xE2\x80\x94";
+        const char *m1 = "-", *mt = "-";
         for (int k = 0; k < rd.n; k++)
             if (rd.nf[k] >= 3 && !strcmp(rd.f[k][0], list[i].id)) (strcmp(rd.f[k][1], "1v1") ? mt : m1) = rd.f[k][2];
         char mm[48];
@@ -778,7 +779,7 @@ static void tab_stats(const Pane &p, float top, float bottom) {
         float yy = ny + (i + 1) * nrow;
         van_text(dl, nc[0], yy, VAN_TEXT, NATIONS[i][1]);
         for (int l = 0; l < 2; l++) {
-            char cell[96] = "\xE2\x80\x94";
+            char cell[96] = "-";
             for (int k = 0; k < d.n; k++)
                 if (d.nf[k] >= 6 && !strcmp(d.f[k][0], "N") && !strcmp(d.f[k][1], lad[l]) && !strcmp(d.f[k][2], NATIONS[i][0])) {
                     int g = atoi(d.f[k][4]), w = atoi(d.f[k][5]);
@@ -826,9 +827,9 @@ static void tab_stats(const Pane &p, float top, float bottom) {
         van_cell(hl, hc[2], yy, hc[3] - hc[2] - 6, c, size);
         van_cell(hl, hc[3], yy, hc[4] - hc[3] - 6, c, nation_name(f[6]));
         van_cell(hl, hc[4], yy, hc[5] - hc[4] - 6, !rated ? VAN_TITLE : won ? VAN_WIN : VAN_WARN, result);
-        van_cell(hl, hc[5], yy, hc[6] - hc[5] - 6, c, f[10][0] ? f[10] : "\xE2\x80\x94");
+        van_cell(hl, hc[5], yy, hc[6] - hc[5] - 6, c, f[10][0] ? f[10] : "-");
         van_cell(hl, hc[6], yy, hc[7] - hc[6] - 6, c, f[11]);
-        if (hot && (f[10][0] || f[11][0])) ImGui::SetTooltip("Союзники: %s\nПротивники: %s", f[10][0] ? f[10] : "\xE2\x80\x94", f[11]);
+        if (hot && (f[10][0] || f[11][0])) ImGui::SetTooltip("Союзники: %s\nПротивники: %s", f[10][0] ? f[10] : "-", f[11]);
         ImGui::PopID();
     }
     if (!shown)
@@ -837,6 +838,55 @@ static void tab_stats(const Pane &p, float top, float bottom) {
                  "равные команды, от 3 минут.");
     else ImGui::Dummy(ImVec2(1, 0));
     ImGui::EndChild();
+}
+
+// ---- Steam avatars (32x32) by SteamID, through the game's own steam_api64.dll ----------------------------------
+// Steam has them at once for friends and players met lately; anyone else is asked for (RequestUserInformation)
+// and looked at again a little later. Made into textures on the render thread, kept for the session.
+struct Avatar { uint64_t id; ID3D11ShaderResourceView *srv; DWORD next; int tries; };
+static Avatar g_avatars[256];
+static int g_navatars;
+
+static ID3D11ShaderResourceView *steam_avatar(const char *id_text) {
+    uint64_t id = _strtoui64(id_text, nullptr, 10);
+    if (!id || !g_dev) return nullptr;
+    Avatar *a = nullptr;
+    for (int i = 0; i < g_navatars && !a; i++) if (g_avatars[i].id == id) a = &g_avatars[i];
+    if (!a) {
+        if (g_navatars >= 256) return nullptr;
+        a = &g_avatars[g_navatars++];
+        *a = Avatar{id, nullptr, 0, 0};
+    }
+    DWORD now = GetTickCount();
+    if (a->srv || a->tries >= 20 || (a->next && (int)(now - a->next) < 0)) return a->srv;
+    a->tries++;
+    a->next = now + 1500;
+    HMODULE h = GetModuleHandleA("steam_api64.dll");
+    if (!h) return nullptr;
+    auto friends_if = (void *(*)())GetProcAddress(h, "SteamAPI_SteamFriends_v017");
+    auto utils_if = (void *(*)())GetProcAddress(h, "SteamAPI_SteamUtils_v010");
+    auto small = (int (*)(void *, uint64_t))GetProcAddress(h, "SteamAPI_ISteamFriends_GetSmallFriendAvatar");
+    auto request = (bool (*)(void *, uint64_t, bool))GetProcAddress(h, "SteamAPI_ISteamFriends_RequestUserInformation");
+    auto size = (bool (*)(void *, int, uint32_t *, uint32_t *))GetProcAddress(h, "SteamAPI_ISteamUtils_GetImageSize");
+    auto rgba = (bool (*)(void *, int, uint8_t *, int))GetProcAddress(h, "SteamAPI_ISteamUtils_GetImageRGBA");
+    void *fr = friends_if ? friends_if() : nullptr, *ut = utils_if ? utils_if() : nullptr;
+    if (!fr || !ut || !small || !request || !size || !rgba) return nullptr;
+    int img = small(fr, id);
+    if (img <= 0) { request(fr, id, false); return nullptr; }     // not there yet: Steam fetches it
+    uint32_t w = 0, hh = 0;
+    if (!size(ut, img, &w, &hh) || !w || !hh || w > 256 || hh > 256) return nullptr;
+    static uint8_t px[256 * 256 * 4];
+    if (!rgba(ut, img, px, (int)(w * hh * 4))) return nullptr;
+    D3D11_TEXTURE2D_DESC td = {};
+    td.Width = w; td.Height = hh; td.MipLevels = 1; td.ArraySize = 1;
+    td.Format = DXGI_FORMAT_R8G8B8A8_UNORM; td.SampleDesc.Count = 1; td.Usage = D3D11_USAGE_IMMUTABLE;
+    td.BindFlags = D3D11_BIND_SHADER_RESOURCE;
+    D3D11_SUBRESOURCE_DATA sd = {px, w * 4, 0};
+    ID3D11Texture2D *tex = nullptr;
+    if (FAILED(g_dev->CreateTexture2D(&td, &sd, &tex))) return nullptr;
+    g_dev->CreateShaderResourceView(tex, nullptr, &a->srv);
+    tex->Release();
+    return a->srv;
 }
 
 static void tab_leaders(const Pane &p, float top, float bottom) {
@@ -885,7 +935,10 @@ static void tab_leaders(const Pane &p, float top, float bottom) {
         mmr_text(mm, sizeof mm, f[3], g);
         snprintf(wr, sizeof wr, "%d%%", g ? w * 100 / g : 0);
         van_text(bl, lc[0], yy, VAN_TITLE, f[0]);
-        van_cell(bl, lc[1], yy, lc[2] - lc[1] - 8, c, f[2]);
+        float av = p.row * 0.8f;                 // the player's Steam avatar, left of the name
+        if (ID3D11ShaderResourceView *img = steam_avatar(f[1]))
+            bl->AddImage((ImTextureID)(intptr_t)img, ImVec2(lc[1], r0.y + (p.row - av) * 0.5f), ImVec2(lc[1] + av, r0.y + (p.row + av) * 0.5f));
+        van_cell(bl, lc[1] + av + 8 * p.sx, yy, lc[2] - lc[1] - av - 16 * p.sx, c, f[2]);
         van_text(bl, lc[2], yy, c, mm);
         van_text(bl, lc[3], yy, c, f[4]);
         van_text(bl, lc[4], yy, c, wr);
@@ -921,7 +974,7 @@ static void lobby_overlay() {
         char text[64];
         if (m1 && mt) snprintf(text, sizeof text, "MMR 1\xC3\x97" "1 %s \xC2\xB7 ком. %s", m1, mt);
         else if (m1 || mt) snprintf(text, sizeof text, "MMR %s%s", m1 ? "1\xC3\x97" "1 " : "", m1 ? m1 : mt);
-        else snprintf(text, sizeof text, d.state == 1 ? "MMR \xE2\x80\x94" : "MMR ...");
+        else snprintf(text, sizeof text, d.state == 1 ? "MMR -" : "MMR ...");
         // under the name (r is the name's own place: its left edge, just below it)
         ImVec2 at(floorf(r.x * sx + 0.5f), floorf((r.y + r.h - 1) * sy + 0.5f));
         dl->AddText(font, size, ImVec2(at.x + 1, at.y + 1), IM_COL32(0, 0, 0, 200), text);
