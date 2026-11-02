@@ -14,6 +14,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <math.h>
 #include "goh_replay.h"
 #include "ui_files.h"
 
@@ -489,6 +490,7 @@ static void tall_walk(uint64_t d, int depth, int in_session, int *budget, Sessio
 
 static int rows_now(void **names, int count, LobbyRow *out, int max);
 static int names_alive(void **names, int count);
+static void publish_rows(const LobbyRow *rows, int n, DWORD now);
 // The MMR under the names is drawn on another thread than the one laying the list out: read there, the lines'
 // places were sometimes caught in the middle of a layout and the MMR blinked to a wrong place (2026-11-02). So the
 // places are read here, on the game's thread between its layouts, and the drawing takes the last copy.
@@ -514,11 +516,7 @@ void pvp_gui_tick(void) {
         rows_at = now;
         LobbyRow rows[16];
         int n = rows_now(f.names, f.n, rows, 16);
-        AcquireSRWLockExclusive(&g_rows_lock);
-        memcpy(g_rows, rows, n * sizeof rows[0]);
-        g_rows_n = n;
-        g_rows_at = now;
-        ReleaseSRWLockExclusive(&g_rows_lock);
+        publish_rows(rows, n, now);
     }
     uint64_t lb = f.listbox;
     if (!lb || pq(lb) != (uintptr_t)(g_base + VT_MENU_LISTBOX)) { f.listbox = 0; return; }
@@ -547,6 +545,54 @@ static int names_alive(void **names, int count) {
             return 0;
     }
     return 1;
+}
+
+// What is drawn is steady: a line's place changes only when it was read the same twice in a row (60 ms), and a
+// line missing from one reading stays for 200 ms; lines are kept in the order of their places. Whatever the list
+// does for a moment while it updates is not drawn. Lines whose spacing is not LINE_H are logged (a few times).
+typedef struct { LobbyRow row, seen; int same; DWORD at; } SteadyRow;
+static SteadyRow g_steady[16];
+static int g_steady_n;
+
+static int same_place(const LobbyRow *a, const LobbyRow *b) {
+    return fabsf(a->x - b->x) < 1 && fabsf(a->y - b->y) < 1 && fabsf(a->line_bottom - b->line_bottom) < 1;
+}
+
+static void publish_rows(const LobbyRow *rows, int n, DWORD now) {
+    for (int i = 0; i < n; i++) {
+        int k = 0;
+        while (k < g_steady_n && strcmp(g_steady[k].row.id, rows[i].id)) k++;
+        if (k == g_steady_n) {                                  // a new one: as it is
+            if (g_steady_n == 16) continue;
+            g_steady_n++;
+            g_steady[k].row = g_steady[k].seen = rows[i];
+            g_steady[k].same = 2;
+        } else if (same_place(&g_steady[k].seen, &rows[i])) {
+            if (++g_steady[k].same >= 2) g_steady[k].row = rows[i];
+        } else {
+            g_steady[k].seen = rows[i];
+            g_steady[k].same = 1;
+        }
+        g_steady[k].at = now;
+        if (i > 0) {
+            static int logged;
+            float gap = rows[i].line_bottom - rows[i - 1].line_bottom;
+            if (fabsf(gap) > 1 && fabsf(fabsf(gap) - LINE_H) > 1 && logged++ < 20)
+                rc_log("pvp: lobby lines %d high apart, not %d (line %d)", (int)gap, LINE_H, i);
+        }
+    }
+    int keep = 0;
+    for (int k = 0; k < g_steady_n; k++) if (now - g_steady[k].at < 200) g_steady[keep++] = g_steady[k];
+    g_steady_n = keep;
+    for (int a = 1; a < g_steady_n; a++)                       // by place, top down
+        for (int b = a; b > 0 && g_steady[b].row.y < g_steady[b - 1].row.y; b--) {
+            SteadyRow t = g_steady[b]; g_steady[b] = g_steady[b - 1]; g_steady[b - 1] = t;
+        }
+    AcquireSRWLockExclusive(&g_rows_lock);
+    for (int k = 0; k < g_steady_n; k++) g_rows[k] = g_steady[k].row;
+    g_rows_n = g_steady_n;
+    g_rows_at = now;
+    ReleaseSRWLockExclusive(&g_rows_lock);
 }
 
 // the lines' places as pvp_gui_tick last read them (none if it has not for half a second: not in a lobby)

@@ -1213,16 +1213,6 @@ static void tab_leaders(const Pane &p, float top, float bottom) {
 // ---- MMR under each name in the lobby's player list (pvp.c lobby_rows) ------------------------------------
 static const ImU32 VAN_ITEM = IM_COL32(176, 151, 121, 255);     // the skin's listbox item text
 
-// a player's Steam name as Steam knows it (the lobby's list shows the same), "" if not known yet
-static const char *persona_name(const char *id) {
-    HMODULE h = GetModuleHandleA("steam_api64.dll");
-    auto friends_if = h ? (void *(*)())GetProcAddress(h, "SteamAPI_SteamFriends_v017") : nullptr;
-    auto get = h ? (const char *(*)(void *, uint64_t))GetProcAddress(h, "SteamAPI_ISteamFriends_GetFriendPersonaName") : nullptr;
-    void *fr = friends_if ? friends_if() : nullptr;
-    const char *n = fr && get ? get(fr, _strtoui64(id, nullptr, 10)) : nullptr;
-    return n && strcmp(n, "[unknown]") ? n : "";
-}
-
 static void lobby_overlay() {
     static LobbyRow rows[16];
     static Doc d;
@@ -1239,9 +1229,19 @@ static void lobby_overlay() {
         }
     }
     if (!n || g_chat_tab) return;           // our global chat is over the panel
-    char ids[16 * 18 + 1] = "";
-    for (int i = 0; i < n; i++) { if (i) strcat(ids, ","); strcat(ids, rows[i].id); }
-    online_doc_ids(DOC_LOBBY, ids);
+    {   // the players asked of the server: sorted, so the same lobby is the same question whatever the lines' order
+        const char *sorted[16];
+        for (int i = 0; i < n; i++) sorted[i] = rows[i].id;
+        for (int a = 1; a < n; a++) for (int b = a; b > 0 && strcmp(sorted[b], sorted[b - 1]) < 0; b--) { const char *t = sorted[b]; sorted[b] = sorted[b - 1]; sorted[b - 1] = t; }
+        char ids[16 * 18 + 1] = "";
+        for (int i = 0; i < n; i++) { if (i) strcat(ids, ","); strcat(ids, sorted[i]); }
+        online_doc_ids(DOC_LOBBY, ids);
+    }
+    // the ladder by the lobby's size, changed only when the size has held for a second
+    static int ladder_n;
+    static DWORD ladder_at;
+    if (n != ladder_n && (!ladder_n || GetTickCount() - ladder_at > 1000)) { ladder_n = n; }
+    if (n == ladder_n) ladder_at = GetTickCount();
     doc_get(d, DOC_LOBBY);
     ImGuiIO &io = ImGui::GetIO();
     ImDrawList *dl = ImGui::GetForegroundDrawList();
@@ -1253,20 +1253,11 @@ static void lobby_overlay() {
         for (int k = 0; k < d.n; k++)
             if (d.nf[k] >= 3 && !strcmp(d.f[k][0], r.id)) (strcmp(d.f[k][1], "1v1") ? mt : m1) = d.f[k][2];
         // the lobby's own ladder: two players are a 1x1, more a team game; the other one if that is all there is
-        const char *m = n == 2 ? (m1 ? m1 : mt) : (mt ? mt : m1);
+        const char *m = ladder_n == 2 ? (m1 ? m1 : mt) : (mt ? mt : m1);
         char text[32];
         snprintf(text, sizeof text, "MMR %s", m ? m : d.state == 1 ? "-" : "...");
-        // right under the name, in the taller line (pvp.c pvp_gui_tick); in a line of the game's 22, after the name
-        ImVec2 at;
-        if (r.line_bottom - (r.y + r.h) >= 12)
-            at = ImVec2(floorf(r.x * sx + 0.5f), floorf((r.y + r.h + 1) * sy + 0.5f));
-        else {
-            const char *name = persona_name(r.id);
-            float name_w = name[0] && g_game_font ? g_game_font->CalcTextSizeA(g_game_font->FontSize * sy, FLT_MAX, 0, name).x : r.w * sx * 0.6f;
-            float tw = font->CalcTextSizeA(size, FLT_MAX, 0, text).x, x = r.x * sx + name_w + 8 * sx, right = (r.x + r.w) * sx;
-            if (x + tw > right) x = right - tw;
-            at = ImVec2(floorf(x + 0.5f), floorf((r.y + r.h * 0.5f) * sy - size * 0.5f + 1 * sy));
-        }
+        // right under the name, in the taller line (pvp.c makes the session list's lines taller)
+        ImVec2 at(floorf(r.x * sx + 0.5f), floorf((r.y + r.h + 1) * sy + 0.5f));
         dl->AddText(font, size, ImVec2(at.x + 1, at.y + 1), IM_COL32(0, 0, 0, 200), text);
         dl->AddText(font, size, at, VAN_ITEM, text);
     }
