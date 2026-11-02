@@ -822,7 +822,6 @@ static void __cdecl main_tick(void) {
     if (g_snapshots) snapshots_tick();
     if (g_pov_on && g_rw == RW_NONE) apply_pov();
     if (g_media_ok && InterlockedExchange(&g_music_stop_vanilla, 0)) stop_game_music();
-    pvp_gui_tick();
     switch (g_rw) {
     case RW_EXIT: {
         struct { void *vt; uint32_t id, pad; uint64_t rest[5]; } ev;

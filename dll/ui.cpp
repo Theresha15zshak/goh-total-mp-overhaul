@@ -1245,11 +1245,10 @@ static void lobby_overlay() {
         const char *m = n == 2 ? (m1 ? m1 : mt) : (mt ? mt : m1);
         char text[32];
         snprintf(text, sizeof text, "MMR %s", m ? m : d.state == 1 ? "-" : "...");
-        // under the name, at the foot of its line (pvp_gui_tick has the game make the lines taller for it);
-        // while a line is still the game's 22, right after the name instead
+        // right under the name, in the taller line (pvp.c line_size); in a line of the game's 22, after the name
         ImVec2 at;
-        if (r.line_bottom - (r.y + r.h) >= 9)
-            at = ImVec2(floorf(r.x * sx + 0.5f), floorf(r.line_bottom * sy - size - 1 * sy + 0.5f));
+        if (r.line_bottom - (r.y + r.h) >= 12)
+            at = ImVec2(floorf(r.x * sx + 0.5f), floorf((r.y + r.h + 1) * sy + 0.5f));
         else {
             const char *name = persona_name(r.id);
             float name_w = name[0] && g_game_font ? g_game_font->CalcTextSizeA(g_game_font->FontSize * sy, FLT_MAX, 0, name).x : r.w * sx * 0.6f;

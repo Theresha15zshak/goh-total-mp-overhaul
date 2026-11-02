@@ -420,75 +420,41 @@ static void scan_names(void) {
     if (n != last_n) { rc_log("pvp: lobby names on screen: %d (%d dialogs looked at)", n, 20000 - budget); last_n = n; }
 }
 
-// ---- the lobby's lines taller, the way the game resizes and moves its own dialogs -----------------------------
-// Writing a line's place and height ourselves moved the avatars but not the names (the name view keeps where it was
-// put), and a MinSize on the line or its content the listbox did not ask for (2026-11-02). So each line gets what
-// the game does to a dialog itself: its SetSize (vtable +0x80, aa2390: clamps, stores, lays its children out again,
-// so the avatar and the name sit in the taller line) and, for the lines below, the new y then the move notice
-// (vtable +0x70, aa2290: alignment, then the children told). This runs on the thread the game lays its interface
-// out on (main_tick, before its GUI update), walking the screen itself four times a second: no pointer of another
-// thread's, nothing changed while the game reads it. When the listbox lays its lines out again (someone joins),
-// they are made tall again on the next tick.
+// ---- the lobby's lines taller: each line tells the listbox it is taller ------------------------------------
+// Resizing and moving the lines ourselves (2026-11-02) lost against the listbox, which lays them out again and again
+// at the size each line says it needs: they jumped between 22 and ours. So the line says it: a listbox line
+// (eListboxItem, vtable 1019228) answers "how big are you" through its vtable +0xc0 (a9eb60, the bounding box of
+// its children, also what SetSize asks for an automatic size); for the lines of the lobby's session list only,
+// ours answers at least LINE_H high. The listbox then lays them out itself, names and avatars with them.
 #define VT_LINE_ITEM 0x1019228          // eListboxItem
-#define LINE_H 36                       // the game's 22 and a line of anka 12 for the MMR
-#define MAX_LINES 32
+#define LINE_H 66                       // three times the game's 22: the name and the MMR under it
+static void *(*g_line_size)(void *self, int32_t *out);
 
-typedef struct { uint64_t item[MAX_LINES]; int32_t y[MAX_LINES]; int n; } Lines;
-
-static void tall_walk(uint64_t d, int depth, int in_session, int *budget, Lines *l) {
-    if (!d || depth > 72 || --*budget < 0) return;
-    uint32_t flags = 0;
-    if (!peek((void *)(d + 0x48), &flags, 4) || !(flags & 2)) return;
-    uint64_t vt = pq(d);
-    if (vt == (uintptr_t)(g_base + VT_SESSION_VIEW)) in_session = 1;
-    if (in_session && vt == (uintptr_t)(g_base + VT_NAME_VIEW)) {
-        uint64_t item = d;
-        for (int up = 0; up < 3 && item; up++) item = pq(item + 0xf0);
-        int32_t pos[2];
-        if (!item || pq(item) != (uintptr_t)(g_base + VT_LINE_ITEM) || l->n >= MAX_LINES || !peek((void *)(item + 0x98), pos, 8)) return;
-        int k = l->n++;
-        while (k > 0 && l->y[k - 1] > pos[1]) { l->item[k] = l->item[k - 1]; l->y[k] = l->y[k - 1]; k--; }
-        l->item[k] = item;
-        l->y[k] = pos[1];
-        return;
+static int in_session_list(void *line) {
+    uint64_t d = (uintptr_t)line;
+    for (int up = 0; up < 12 && d; up++) {
+        d = pq(d + 0xf0);
+        if (d && pq(d) == (uintptr_t)(g_base + VT_SESSION_VIEW)) return 1;
     }
-    uint64_t b = pq(d + 0xd8), e = pq(d + 0xe0);
-    if (!b || e < b || e - b > 8 * 4096) return;
-    for (uint64_t p = b; p < e; p += 8) tall_walk(pq(p), depth + 1, in_session, budget, l);
+    return 0;
 }
 
-void pvp_gui_tick(void) {
-    static DWORD at;
-    DWORD now = GetTickCount();
-    if (!g_base || now - at < 250) return;
-    at = now;
-    uint64_t root = pq((uintptr_t)(g_base + G_DESKTOP));
-    if (!root || pq(root) != (uintptr_t)(g_base + VT_DESKTOP)) return;
-    static Lines l;
-    int budget = 20000, sized = 0, moved = 0;
-    l.n = 0;
-    tall_walk(root, 0, 0, &budget, &l);
-    for (int k = 0; k < l.n; k++) {
-        uint8_t *item = (uint8_t *)(uintptr_t)l.item[k];
-        void **vt = *(void ***)item;
-        int32_t *size = (int32_t *)(item + 0xa0), *pos = (int32_t *)(item + 0x98);
-        if (size[1] != LINE_H) {
-            uint64_t want = (uint32_t)size[0] | (uint64_t)(uint32_t)LINE_H << 32;
-            ((void (*)(void *, uint64_t))vt[0x80 / 8])(item, want);
-            sized++;
-        }
-        int32_t y = l.y[0] + k * LINE_H;
-        if (pos[1] != y) {
-            pos[1] = y;
-            ((void (*)(void *))vt[0x70 / 8])(item);
-            moved++;
-        }
+static void *line_size(void *self, int32_t *out) {
+    void *r = g_line_size(self, out);
+    if (out[1] > 0 && out[1] < LINE_H && in_session_list(self)) {
+        static int logged;
+        if (!logged++) rc_log("pvp: a lobby line asked its size: %dx%d, answered %d high", out[0], out[1], LINE_H);
+        out[1] = LINE_H;
     }
-    static int logged;
-    if ((sized || moved) && logged++ < 4) {
-        rc_log("pvp: lobby lines: %d made %d high, %d moved", sized, LINE_H, moved);
-        if (l.n && logged == 1) log_chain("lobby line", (void *)(uintptr_t)l.item[0]);
-    }
+    return r;
+}
+
+static void line_size_install(void (*patch)(void *, const void *, size_t)) {
+    void **slot = (void **)(g_base + VT_LINE_ITEM + 0xc0);
+    if (*slot != (void *)(g_base + 0xa9eb60)) { rc_log("pvp: the listbox line is not as expected, lobby lines as they are"); return; }
+    g_line_size = (void *(*)(void *, int32_t *))*slot;
+    void *ours = (void *)line_size;
+    patch(slot, &ours, sizeof ours);
 }
 
 int lobby_rows(LobbyRow *out, int max) {
@@ -606,6 +572,7 @@ int pvp_install(uint8_t *exe, const char *dir, uint8_t *(*alloc)(size_t), void (
         patch(exe + FN_PING_MISS, MISS_NEW, 5);
     else
         rc_log("pvp: the lobby ping average is not as expected, left as it is");
+    line_size_install(patch);
     // the pages: their vtable slots point at ours, which call the game's
     void *binds[2] = {(void *)bind_online, (void *)bind_lan}, *cmds[2] = {(void *)cmd_online, (void *)cmd_lan};
     void *dtors[2] = {(void *)dtor_online, (void *)dtor_lan};
