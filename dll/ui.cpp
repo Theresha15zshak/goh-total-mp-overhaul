@@ -1155,7 +1155,8 @@ static const char *CHAT_RULES[] = {
 static void chat_block() {
     float x, y, w, h, rw, rh;
     g_chat_drawn = false;
-    if (!chat_rect(&x, &y, &w, &h, &rw, &rh)) return;
+    bool own_frame = chat_rect(&x, &y, &w, &h, &rw, &rh);       // the Internet page: our empty frame
+    if (!own_frame && (g_live_match || !lobby_chat_rect(&x, &y, &w, &h, &rw, &rh))) return;   // the lobby: over the game's main lobby
     chat_want(g_chat_ch);
     static ChatMsg msgs[CHAT_MAX];
     static ChatStatus st;
@@ -1188,6 +1189,7 @@ static void chat_block() {
     if (g_game_font) ImGui::PushFont(g_game_font);
     ImGui::SetWindowFontScale(sy);
     ImDrawList *dl = ImGui::GetWindowDrawList();
+    if (!own_frame) dl->AddRectFilled(p0, ImVec2(p0.x + size.x, p0.y + size.y), IM_COL32(24, 24, 22, 255));
     float lh = ImGui::GetTextLineHeight(), row = 32 * sy;
     static char menu_id[18], menu_name[ONLINE_NAME];
     bool mod = st.moderator != 0;
@@ -1267,9 +1269,12 @@ static void chat_block() {
                 const char *m1 = "-", *mt = "-";
                 for (int k = 0; k < rd.n; k++)
                     if (rd.nf[k] >= 3 && !strcmp(rd.f[k][0], online[i].id)) (strcmp(rd.f[k][1], "1v1") ? mt : m1) = rd.f[k][2];
-                char mm[64];
-                snprintf(mm, sizeof mm, "MMR 1\xC3\x97" "1: %s  \xC2\xB7  ком.: %s", m1, mt);
-                ImGui::GetWindowDrawList()->AddText(small, small_size, ImVec2(floorf(c.x + av + 6 * sx), floorf(c.y + lh + 1 * sy)), VAN_ITEM, mm);
+                char mm[48];
+                snprintf(mm, sizeof mm, "%s / %s", m1, mt);
+                ImVec2 at(floorf(c.x + av + 6 * sx), floorf(c.y + lh + 1 * sy));
+                ImGui::GetWindowDrawList()->AddText(small, small_size, at, VAN_ITEM, mm);
+                if (ImGui::IsMouseHoveringRect(at, ImVec2(at.x + small->CalcTextSizeA(small_size, FLT_MAX, 0, mm).x, at.y + small_size)))
+                    ImGui::SetTooltip("MMR: 1\xC3\x97" "1 / команды");
             }
             ImGui::SetCursorScreenPos(ImVec2(c.x, c.y + av + 4 * sy));
             ImGui::Dummy(ImVec2(1, 0));

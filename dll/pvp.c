@@ -369,11 +369,19 @@ static DWORD g_scan_at;
 void pvp_page_shown(void *page) { (void)page; }
 
 
+// The chat panel of the lobby (and other pages) has the game's own "main lobby" tab, Steam's global chat:
+// eGUI_ChatChannelViewServiceImpl (vtable 1042c58), on screen while that tab is. Our global chat is drawn over
+// it (ui.cpp), so the tab is ours.
+#define VT_SERVICE_VIEW 0x1042c58
+static void *g_service_walk;                 // found on this walk
+static void *volatile g_service_view;        // ... and the last one
+
 static void walk(uint64_t d, int depth, int in_session, void **found, int *n, int *budget) {
     if (!d || depth > 72 || --*budget < 0 || *n >= MAX_NAMES) return;
     uint32_t flags = 0;
     if (!peek((void *)(d + 0x48), &flags, 4) || !(flags & 2)) return;     // not on screen: nothing under it is
     uint64_t vt = pq(d);
+    if (vt == (uintptr_t)(g_base + VT_SERVICE_VIEW)) { g_service_walk = (void *)d; return; }
     if (vt == (uintptr_t)(g_base + VT_SESSION_VIEW)) in_session = 1;
     if (in_session && vt == (uintptr_t)(g_base + VT_NAME_VIEW)) { found[(*n)++] = (void *)d; return; }
     uint64_t b = pq(d + 0xd8), e = pq(d + 0xe0);
@@ -388,7 +396,14 @@ static void scan_names(void) {
     uint64_t root = pq((uintptr_t)(g_base + G_DESKTOP));
     void *found[MAX_NAMES];
     int n = 0, budget = 20000;
+    g_service_walk = NULL;
     if (root && pq(root) == (uintptr_t)(g_base + VT_DESKTOP)) walk(root, 0, 0, found, &n, &budget);
+    if (g_service_walk != g_service_view) {
+        rc_log("pvp: the game's main lobby chat %s", g_service_walk ? "on screen: ours over it" : "gone");
+        static int chained;
+        if (g_service_walk && !chained++) log_chain("main lobby chat", g_service_walk);
+    }
+    g_service_view = g_service_walk;
     AcquireSRWLockExclusive(&g_names_lock);
     memcpy(g_names, found, n * sizeof found[0]);
     g_name_count = n;
@@ -510,5 +525,19 @@ int pvp_install(uint8_t *exe, const char *dir, uint8_t *(*alloc)(size_t), void (
         patch(exe + PAGES[k].vt, &dtors[k], 8);
     }
     rc_log("pvp: ready");
+    return 1;
+}
+
+// the game's main lobby chat where it is on screen (found by scan_names), for ours to go over it
+int lobby_chat_rect(float *x, float *y, float *w, float *h, float *root_w, float *root_h) {
+    scan_names();
+    void *v = g_service_view;
+    int32_t vx, vy, vw, vh, rw, rh;
+    uint64_t vt = 0;
+    if (!v || !peek(v, &vt, 8) || vt != (uintptr_t)(g_base + VT_SERVICE_VIEW) || covered(v) ||
+        !place(v, 1, &vx, &vy, &vw, &vh, &rw, &rh) || root_of((uintptr_t)v) != pq((uintptr_t)(g_base + G_DESKTOP)) ||
+        vw <= 0 || vh <= 0 || rw <= 0 || rh <= 0 || vw > rw / 2)
+        return 0;
+    *x = (float)vx; *y = (float)vy; *w = (float)vw; *h = (float)vh; *root_w = (float)rw; *root_h = (float)rh;
     return 1;
 }
