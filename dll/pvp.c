@@ -369,19 +369,20 @@ static DWORD g_scan_at;
 void pvp_page_shown(void *page) { (void)page; }
 
 
-// The chat panel of the lobby (and other pages) has the game's own "main lobby" tab, Steam's global chat:
-// eGUI_ChatChannelViewServiceImpl (vtable 1042c58), on screen while that tab is. Our global chat is drawn over
-// it (ui.cpp), so the tab is ours.
-#define VT_SERVICE_VIEW 0x1042c58
-static void *g_service_walk;                 // found on this walk
-static void *volatile g_service_view;        // ... and the last one
+// The chat panel of the lobby (eGUI_ChatView, vtable 1044a10): its tabs on top (MAIN LOBBY | SESSION) and the
+// channel of the tab that is on below them (an eGUI_ChatChannel...View). Our GLOBAL CHAT tab goes after the
+// game's (ui.cpp), and our chat over the channel's place while it is on.
+#define VT_CHAT_VIEW 0x1044a10
+static const uint32_t VT_CHANNEL_VIEWS[] = {0x1042fc0, 0x1042c58, 0x1041bd0, 0x10435e0, 0x1043da0, 0x1042270};
+static void *g_panel_walk;                   // found on this walk
+static void *volatile g_panel;               // ... and the last one
 
 static void walk(uint64_t d, int depth, int in_session, void **found, int *n, int *budget) {
     if (!d || depth > 72 || --*budget < 0 || *n >= MAX_NAMES) return;
     uint32_t flags = 0;
     if (!peek((void *)(d + 0x48), &flags, 4) || !(flags & 2)) return;     // not on screen: nothing under it is
     uint64_t vt = pq(d);
-    if (vt == (uintptr_t)(g_base + VT_SERVICE_VIEW)) { g_service_walk = (void *)d; return; }
+    if (vt == (uintptr_t)(g_base + VT_CHAT_VIEW) && !g_panel_walk) g_panel_walk = (void *)d;
     if (vt == (uintptr_t)(g_base + VT_SESSION_VIEW)) in_session = 1;
     if (in_session && vt == (uintptr_t)(g_base + VT_NAME_VIEW)) { found[(*n)++] = (void *)d; return; }
     uint64_t b = pq(d + 0xd8), e = pq(d + 0xe0);
@@ -396,14 +397,10 @@ static void scan_names(void) {
     uint64_t root = pq((uintptr_t)(g_base + G_DESKTOP));
     void *found[MAX_NAMES];
     int n = 0, budget = 20000;
-    g_service_walk = NULL;
+    g_panel_walk = NULL;
     if (root && pq(root) == (uintptr_t)(g_base + VT_DESKTOP)) walk(root, 0, 0, found, &n, &budget);
-    if (g_service_walk != g_service_view) {
-        rc_log("pvp: the game's main lobby chat %s", g_service_walk ? "on screen: ours over it" : "gone");
-        static int chained;
-        if (g_service_walk && !chained++) log_chain("main lobby chat", g_service_walk);
-    }
-    g_service_view = g_service_walk;
+    if (g_panel_walk != g_panel) rc_log("pvp: the game's chat panel %s", g_panel_walk ? "on screen" : "gone");
+    g_panel = g_panel_walk;
     AcquireSRWLockExclusive(&g_names_lock);
     memcpy(g_names, found, n * sizeof found[0]);
     g_name_count = n;
@@ -528,16 +525,56 @@ int pvp_install(uint8_t *exe, const char *dir, uint8_t *(*alloc)(size_t), void (
     return 1;
 }
 
-// the game's main lobby chat where it is on screen (found by scan_names), for ours to go over it
-int lobby_chat_rect(float *x, float *y, float *w, float *h, float *root_w, float *root_h) {
+// The chat panel's parts, each frame: the shown channel view under it (its top is where the tabs end) and the
+// shown dialogs in the strip above that (the tabs and the "+" button at the right end).
+typedef struct { uint64_t d[64]; int n; } Dialogs;
+
+static void panel_parts(uint64_t d, int depth, uint64_t *channel, Dialogs *all) {
+    if (!d || depth > 24) return;
+    uint32_t flags = 0;
+    if (!peek((void *)(d + 0x48), &flags, 4) || !(flags & 2)) return;
+    uint64_t vt = pq(d);
+    for (size_t i = 0; i < sizeof VT_CHANNEL_VIEWS / sizeof VT_CHANNEL_VIEWS[0]; i++)
+        if (vt == (uintptr_t)(g_base + VT_CHANNEL_VIEWS[i])) { if (!*channel) *channel = d; return; }
+    if (depth && all->n < 64) all->d[all->n++] = d;
+    uint64_t b = pq(d + 0xd8), e = pq(d + 0xe0);
+    if (!b || e < b || e - b > 8 * 512) return;
+    for (uint64_t p = b; p < e; p += 8) panel_parts(pq(p), depth + 1, channel, all);
+}
+
+int chat_panel(ChatPanel *out) {
     scan_names();
-    void *v = g_service_view;
-    int32_t vx, vy, vw, vh, rw, rh;
-    uint64_t vt = 0;
-    if (!v || !peek(v, &vt, 8) || vt != (uintptr_t)(g_base + VT_SERVICE_VIEW) || covered(v) ||
-        !place(v, 1, &vx, &vy, &vw, &vh, &rw, &rh) || root_of((uintptr_t)v) != pq((uintptr_t)(g_base + G_DESKTOP)) ||
-        vw <= 0 || vh <= 0 || rw <= 0 || rh <= 0 || vw > rw / 2)
+    void *v = g_panel;
+    uint64_t vt = 0, channel = 0;
+    int32_t px, py, pw, ph, rw, rh, cx, cy, cw, ch;
+    if (!v || !peek(v, &vt, 8) || vt != (uintptr_t)(g_base + VT_CHAT_VIEW) || covered(v) ||
+        !place(v, 1, &px, &py, &pw, &ph, &rw, &rh) || root_of((uintptr_t)v) != pq((uintptr_t)(g_base + G_DESKTOP)) ||
+        pw <= 0 || ph <= 0 || rw <= 0 || rh <= 0 || pw > rw / 2)
         return 0;
-    *x = (float)vx; *y = (float)vy; *w = (float)vw; *h = (float)vh; *root_w = (float)rw; *root_h = (float)rh;
-    return 1;
+    static Dialogs all;
+    all.n = 0;
+    panel_parts((uintptr_t)v, 0, &channel, &all);
+    if (!channel || !place((void *)channel, 1, &cx, &cy, &cw, &ch, &rw, &rh) || cy <= py || cy - py > ph / 3) return 0;
+    out->x = (float)px; out->y = (float)py; out->w = (float)pw; out->h = (float)ph;
+    out->body_y = (float)cy; out->root_w = (float)rw; out->root_h = (float)rh;
+    out->tabs_r = (float)px;
+    out->ntabs = 0;
+    for (int i = 0; i < all.n; i++) {       // the tabs: in the strip, narrow, not the "+" at the right end
+        int32_t x, y, w, h;
+        if (!place((void *)all.d[i], 1, &x, &y, &w, &h, &rw, &rh) || w <= 0 || h <= 0 || y < py || y + h > cy + 1 ||
+            w > pw / 2 || x + w > px + pw - 40)
+            continue;
+        if (x + w > out->tabs_r) out->tabs_r = (float)(x + w);
+        if (out->ntabs < 8) {
+            float *t = out->tab[out->ntabs++];
+            t[0] = (float)x; t[1] = (float)y; t[2] = (float)w; t[3] = (float)h;
+        }
+    }
+    static int logged;
+    if (!logged++) {
+        rc_log("pvp: chat panel at %d,%d %dx%d, channel from y %d, tabs end at x %.0f (%d parts in the strip)", px, py, pw, ph, cy,
+               out->tabs_r, out->ntabs);
+        for (int i = 0; i < out->ntabs; i++) rc_log("pvp:   tab part %.0f,%.0f %.0fx%.0f", out->tab[i][0], out->tab[i][1], out->tab[i][2], out->tab[i][3]);
+    }
+    return out->tabs_r > px;
 }

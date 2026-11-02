@@ -34,6 +34,7 @@ static volatile bool g_balance_win = true;   // the test build opens with its sw
 static volatile bool g_balance_win;     // balance switch: F7
 #endif
 static volatile bool g_online_win;      // who is online with the mod: F6
+static bool g_chat_tab;                 // the lobby's chat panel shows our GLOBAL CHAT tab (lobby_chat_tab)
 static volatile bool g_chat_drawn;      // the global chat was drawn this frame: mouse and keyboard over it are ours
 static volatile bool g_pvp_drawn;       // the PVP block over the game list was drawn this frame: the mouse over it is ours
 static ImFont *g_game_font;             // the game's anka 15 (the game list's rows), loaded from interface.pak
@@ -1085,7 +1086,7 @@ static void lobby_overlay() {
     static LobbyRow rows[16];
     static Doc d;
     int n = lobby_rows(rows, 16);
-    if (!n) return;
+    if (!n || g_chat_tab) return;           // our global chat is over the panel
     char ids[16 * 18 + 1] = "";
     for (int i = 0; i < n; i++) { if (i) strcat(ids, ","); strcat(ids, rows[i].id); }
     online_doc_ids(DOC_LOBBY, ids);
@@ -1152,11 +1153,52 @@ static const char *CHAT_RULES[] = {
     "3. Ссылки удаляются, кроме discord.gg и youtube.com.",
 };
 
+// The lobby's chat panel: a GLOBAL CHAT tab after the game's, ours over the channel while it is on; a click on
+// one of the game's tabs gives the panel back.
+
+static bool lobby_chat_tab(float *x, float *y, float *w, float *h, float *rw, float *rh) {
+    ChatPanel cp;
+    if (g_live_match || !chat_panel(&cp)) { g_chat_tab = false; return false; }
+    ImGuiIO &io = ImGui::GetIO();
+    float sx = io.DisplaySize.x / cp.root_w, sy = io.DisplaySize.y / cp.root_h;
+    for (int i = 0; i < cp.ntabs; i++) {
+        const float *t = cp.tab[i];
+        if (ImGui::IsMouseClicked(0) && ImGui::IsMouseHoveringRect(ImVec2(t[0] * sx, t[1] * sy), ImVec2((t[0] + t[2]) * sx, (t[1] + t[3]) * sy), false))
+            g_chat_tab = false;
+    }
+    if (g_game_font) ImGui::PushFont(g_game_font);
+    const char *label = "GLOBAL CHAT";
+    float size = (g_game_font ? g_game_font->FontSize : ImGui::GetFontSize()) * sy;
+    ImFont *font = ImGui::GetFont();
+    float tw = font->CalcTextSizeA(size, FLT_MAX, 0, label).x, gap = 12 * sx;
+    float lx = cp.tabs_r * sx + gap, ly = (cp.y + (cp.body_y - cp.y) * 0.5f) * sy - size * 0.5f;
+    ImGui::SetNextWindowPos(ImVec2(lx - gap, cp.y * sy), ImGuiCond_Always);
+    ImGui::SetNextWindowSize(ImVec2(tw + 2 * gap, (cp.body_y - cp.y) * sy), ImGuiCond_Always);
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0, 0));
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowBorderSize, 0);
+    ImGui::Begin("##goh_chat_tab", nullptr, ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoMove |
+                                              ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoBackground |
+                                              ImGuiWindowFlags_NoScrollbar);
+    ImDrawList *dl = ImGui::GetWindowDrawList();
+    ImGui::SetCursorScreenPos(ImVec2(lx, ly));
+    if (ImGui::InvisibleButton("##gtab", ImVec2(tw, size))) g_chat_tab = true;
+    bool hot = ImGui::IsItemHovered();
+    dl->AddText(font, size, ImVec2(floorf(lx - gap + 1), floorf(ly)), VAN_TAB_OFF, "|");
+    dl->AddText(font, size, ImVec2(floorf(lx), floorf(ly)), g_chat_tab ? VAN_TAB : hot ? VAN_HOVER : VAN_TAB_OFF, label);
+    ImGui::End();
+    ImGui::PopStyleVar(2);
+    if (g_game_font) ImGui::PopFont();
+    g_chat_drawn = true;            // the tab takes its clicks
+    if (!g_chat_tab) return false;
+    *x = cp.x; *y = cp.body_y; *w = cp.w; *h = cp.y + cp.h - cp.body_y; *rw = cp.root_w; *rh = cp.root_h;
+    return true;
+}
+
 static void chat_block() {
     float x, y, w, h, rw, rh;
     g_chat_drawn = false;
     bool own_frame = chat_rect(&x, &y, &w, &h, &rw, &rh);       // the Internet page: our empty frame
-    if (!own_frame && (g_live_match || !lobby_chat_rect(&x, &y, &w, &h, &rw, &rh))) return;   // the lobby: over the game's main lobby
+    if (!own_frame && !lobby_chat_tab(&x, &y, &w, &h, &rw, &rh)) return;   // the lobby: its GLOBAL CHAT tab
     chat_want(g_chat_ch);
     static ChatMsg msgs[CHAT_MAX];
     static ChatStatus st;

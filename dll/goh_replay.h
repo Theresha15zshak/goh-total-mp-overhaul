@@ -179,8 +179,10 @@ int pvp_install(uint8_t *exe, const char *dir, uint8_t *(*alloc)(size_t), void (
 int pvp_rect(float *x, float *y, float *w, float *h, float *head_h, float *root_w, float *root_h);
 // the empty frame our layout puts over the friends for the global chat, as pvp_rect; 0 = not on screen
 int chat_rect(float *x, float *y, float *w, float *h, float *root_w, float *root_h);
-// the game's own "main lobby" chat channel where it is on screen (the lobby's chat panel): ours goes over it
-int lobby_chat_rect(float *x, float *y, float *w, float *h, float *root_w, float *root_h);
+// the game's chat panel (the lobby's, with its tabs MAIN LOBBY | SESSION) where it is on screen: its place, where
+// its channel starts below the tabs, the right end of the tabs and each tab's place (game units, as pvp_rect)
+typedef struct { float x, y, w, h, body_y, tabs_r, root_w, root_h; int ntabs; float tab[8][4]; } ChatPanel;
+int chat_panel(ChatPanel *p);
 unsigned char *pvp_pak_file(const char *name, size_t *n);   // an unpacked file of interface.pak, malloc'd
 // the lobby's player list lines on screen (game units, as pvp_rect) and whose they are, with room under each name
 typedef struct { float x, y, w, h, root_w, root_h; char id[18]; } LobbyRow;
