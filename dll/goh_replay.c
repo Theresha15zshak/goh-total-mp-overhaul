@@ -407,6 +407,7 @@ static void __cdecl watch_hit(uint32_t id, void *a1, void *a2) {
     if (id == W_PAGE_SHOW) {
         uintptr_t page = (uintptr_t)a2;
         rc_log("page shown %p, vtable rva %llx", a2, (unsigned long long)(rdq(page) - (uintptr_t)g_base));
+        pvp_page_shown(a2);
         if (is_result_page(page)) {
             g_result_page = page; g_ms_results = 1; g_census_page = page;
             rc_log("results page shown");

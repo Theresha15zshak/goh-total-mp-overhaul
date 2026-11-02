@@ -316,7 +316,69 @@ static void *chat_dtor(void *item, unsigned flags) {
     return g_chat_dtor(item, flags);
 }
 
+// The lines are also found by walking the interface from the screen's root, eDesktop (vtable 1101800), down
+// the children (+0xd8..+0xe0), twice a second: the game may give a line its user without slot 70. The way
+// to the root: the GUI's dialog under the mouse (a791e0 reads 159ca70) or in focus (a84a10 reads 159cc50),
+// or a page's layout, then up the parents.
+#define VT_DESKTOP 0x1101800
+#define G_GUI_HOVER 0x159ca70
+#define G_GUI_FOCUS 0x159cc50
+static void *volatile g_any_page;
+static uint64_t g_root;
+static DWORD g_scan_at;
+static volatile long g_scans_logged;
+
+void pvp_page_shown(void *page) { g_any_page = page; }
+
+static uint64_t pq(uint64_t a) { uint64_t v = 0; peek((void *)a, &v, 8); return v; }
+
+static void walk(uint64_t d, int depth, void **found, int *n, int *budget) {
+    if (!d || depth > 64 || --*budget < 0) return;
+    if (pq(d) == (uintptr_t)(g_base + VT_CHAT_ITEM)) {
+        if (*n < MAX_CHAT_ITEMS) found[(*n)++] = (void *)d;
+        return;
+    }
+    uint64_t b = pq(d + 0xd8), e = pq(d + 0xe0);
+    if (!b || e < b || e - b > 8 * 4096) return;
+    for (uint64_t p = b; p < e; p += 8) walk(pq(p), depth + 1, found, n, budget);
+}
+
+static void scan_lines(void) {
+    DWORD now = GetTickCount();
+    if (now - g_scan_at < 500) return;
+    g_scan_at = now;
+    if (!g_root || pq(g_root) != (uintptr_t)(g_base + VT_DESKTOP)) {     // find the root again
+        uint64_t from[4] = {pq((uintptr_t)(g_base + G_GUI_HOVER)), pq((uintptr_t)(g_base + G_GUI_FOCUS)),
+                            pq((uint64_t)(uintptr_t)g_any_page + 0x58), (uint64_t)(uintptr_t)g_btn};
+        g_root = 0;
+        for (int k = 0; k < 4 && !g_root; k++) {
+            uint64_t d = from[k], up;
+            for (int i = 0; d && i < 64 && (up = pq(d + 0xf0)); i++) d = up;
+            if (d && pq(d) == (uintptr_t)(g_base + VT_DESKTOP)) g_root = d;
+        }
+        static volatile long logged;
+        if (InterlockedIncrement(&logged) <= 3)
+            rc_log("pvp: screen root %llx (from hover %llx, focus %llx)", (unsigned long long)g_root, (unsigned long long)from[0],
+                   (unsigned long long)from[1]);
+    }
+    if (!g_root) return;
+    void *found[MAX_CHAT_ITEMS];
+    int n = 0, budget = 40000;
+    walk(g_root, 0, found, &n, &budget);
+    AcquireSRWLockExclusive(&g_chat_lock);
+    for (int i = 0; i < n; i++) {
+        int j, free_at = -1;
+        for (j = 0; j < MAX_CHAT_ITEMS && g_chat_items[j] != found[i]; j++)
+            if (!g_chat_items[j] && free_at < 0) free_at = j;
+        if (j == MAX_CHAT_ITEMS && free_at >= 0) g_chat_items[free_at] = found[i];
+    }
+    ReleaseSRWLockExclusive(&g_chat_lock);
+    if (n && InterlockedIncrement(&g_scans_logged) <= 3)
+        rc_log("pvp: player list lines found by walking: %d (root %llx, %d dialogs looked at)", n, (unsigned long long)g_root, 40000 - budget);
+}
+
 int lobby_rows(LobbyRow *out, int max) {
+    scan_lines();
     void *items[MAX_CHAT_ITEMS];
     AcquireSRWLockShared(&g_chat_lock);
     memcpy(items, g_chat_items, sizeof items);
@@ -326,8 +388,14 @@ int lobby_rows(LobbyRow *out, int max) {
         if (!items[i]) continue;
         int32_t x, y, w, h, rw, rh;
         uint64_t user = 0, id = 0;
-        if (!place(items[i], 1, &x, &y, &w, &h, &rw, &rh) || w <= 0 || h <= 0) continue;
-        if (!peek((uint8_t *)items[i] + 0x158, &user, 8) || !peek((void *)(user + 8), &id, 8)) continue;
+        int shown = place(items[i], 1, &x, &y, &w, &h, &rw, &rh);
+        peek((uint8_t *)items[i] + 0x158, &user, 8);
+        peek((void *)(user + 8), &id, 8);
+        static volatile long checked;
+        if (InterlockedIncrement(&checked) <= 6)
+            rc_log("pvp: player list line %p: shown %d, size %dx%d, user %llx, id %llu", items[i], shown, w, h,
+                   (unsigned long long)user, (unsigned long long)id);
+        if (!shown || w <= 0 || h <= 0) continue;
         if (id < 76561190000000000ull || id > 76561199999999999ull) continue;
         LobbyRow *r = &out[n++];
         r->x = (float)x; r->y = (float)y; r->w = (float)w; r->h = (float)h; r->root_w = (float)rw; r->root_h = (float)rh;
