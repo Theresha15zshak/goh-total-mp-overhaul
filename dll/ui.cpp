@@ -907,8 +907,8 @@ static void lobby_overlay() {
         if (m1 && mt) snprintf(text, sizeof text, "MMR 1\xC3\x97" "1 %s \xC2\xB7 ком. %s", m1, mt);
         else if (m1 || mt) snprintf(text, sizeof text, "MMR %s%s", m1 ? "1\xC3\x97" "1 " : "", m1 ? m1 : mt);
         else snprintf(text, sizeof text, d.state == 1 ? "MMR \xE2\x80\x94" : "MMR ...");
-        // under the name: the name starts after the avatar, the line ends at the row's bottom
-        ImVec2 at(floorf((r.x + 28) * sx + 0.5f), floorf((r.y + r.h) * sy - size * 0.35f + 0.5f));
+        // under the name (r is the name's own place: its left edge, just below it)
+        ImVec2 at(floorf(r.x * sx + 0.5f), floorf((r.y + r.h - 1) * sy + 0.5f));
         dl->AddText(font, size, ImVec2(at.x + 1, at.y + 1), IM_COL32(0, 0, 0, 200), text);
         dl->AddText(font, size, at, VAN_ITEM, text);
     }
