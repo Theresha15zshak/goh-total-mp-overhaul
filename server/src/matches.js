@@ -1,24 +1,26 @@
-// Rated matches. A player with the mod reports each match they finish; everyone in it is rated, with the mod
-// or without. Rated: Axis vs Allies, Battle Zones or Superiority, equal sides of 1..4, at least 3 minutes.
+// Rated matches. A player with the mod reports each match they finish (the DLL reads it out of the replay the
+// game writes, dll/report.c); everyone in it is rated, with the mod or without. Rated: Axis vs Allies, Battle
+// Zones ("battle_zones") or Domination ("ammunition", «Превосходство»), equal sides of 1..4, at least 3 minutes.
 //
 //   POST /report   text, one field per line:
-//                    reporter SteamID / key / "v1" / mode / sides / map / duration_s / winner ("axis"|"allies")
-//                    then a line per player: "steam_id\tnation\tname"   (nation: ger fin | eng usa rus)
+//                    reporter SteamID / key / "v2" / mode / sides / map / start / end (unix, from the game) /
+//                    winner ("axis"|"allies"), then a line per player: "steam_id\tnation\tname"
+//                    (nation: ger fin | eng usa rus)
 //                  answers "rated", "confirmed", "disputed", "duplicate" or why not (4xx)
 //   GET /ratings?ids=a,b,c     for the lobby: "steam_id\tladder\tmmr\tgames\twins" per known track
 //   GET /player?id=X           "P\tname", then "L\tladder\tmmr\tgames\twins", "N\tladder\tnation\tmmr\tgames\twins",
 //                              "M\tid\tended_at\tmode\tmap\tsize\tnation\twon\tdelta\tstatus\tallies\topponents" (newest first)
 //   GET /leaderboard?ladder=1v1|team   "rank\tsteam_id\tname\tmmr\tgames\twins"
 //
-// The same match comes from several players: it is found again by its players, mode and map within 30
-// minutes. Reports that disagree on the winner make it disputed, and its rating changes are taken back out.
+// The same match comes from several players: it is found again by its mode, map, start time and players.
+// Reports that disagree on the winner make it disputed, and its rating changes are taken back out.
 import { rate, mmr, MU, SIGMA } from './rating.js';
 
 const STEAM_ID = /^7656119\d{10}$/;
 const KEY = /^[0-9a-f]{64}$/;
-const MODES = new Set(['battle_zones', 'superiority']);
+const MODES = new Set(['battle_zones', 'ammunition']);
 const SIDE = { ger: 'axis', fin: 'axis', eng: 'allies', usa: 'allies', rus: 'allies' };
-const MIN_DURATION_S = 180, SAME_MATCH_S = 1800, REPORTS_PER_HOUR = 8, HISTORY = 30;
+const MIN_DURATION_S = 180, MAX_AGE_S = 14 * 86400, REPORTS_PER_HOUR = 30, HISTORY = 30;
 
 const clean = (s, n) => Array.from(s.replace(/[\u0000-\u001f\u007f]/g, '').trim()).slice(0, n).join('') || '?';
 const ladderOf = size => (size === 1 ? '1v1' : 'team');
@@ -28,18 +30,20 @@ async function sha256(s) {
   return [...new Uint8Array(d)].map(b => b.toString(16).padStart(2, '0')).join('');
 }
 
-function parse(body) {
+function parse(body, now) {
   const lines = body.split('\n');
-  const [reporter, key, ver, mode, sides, map, dur, winner] = lines;
-  if (ver !== 'v1') return { err: 'unknown report version' };
+  const [reporter, key, ver, mode, sides, map, startS, endS, winner] = lines;
+  if (ver !== 'v2') return { err: 'unknown report version' };
   if (!STEAM_ID.test(reporter || '') || !KEY.test(key || '')) return { err: 'bad reporter' };
   if (!MODES.has(mode)) return { err: 'mode not rated' };
   if (sides !== 'axis_allies') return { err: 'sides not rated' };
-  const duration = Number(dur);
-  if (!Number.isInteger(duration) || duration < MIN_DURATION_S) return { err: 'too short' };
+  const start = Number(startS), end = Number(endS);
+  if (!Number.isInteger(start) || !Number.isInteger(end) || end > now + 600 || end < now - MAX_AGE_S) return { err: 'bad time' };
+  const duration = end - start;
+  if (duration < MIN_DURATION_S) return { err: 'too short' };
   if (winner !== 'axis' && winner !== 'allies') return { err: 'bad winner' };
   const players = [], seen = new Set();
-  for (const l of lines.slice(8)) {
+  for (const l of lines.slice(9)) {
     if (!l) continue;
     const [id, nation, name = ''] = l.split('\t');
     if (!STEAM_ID.test(id || '') || !SIDE[nation] || seen.has(id)) return { err: 'bad player' };
@@ -49,7 +53,7 @@ function parse(body) {
   const axis = players.filter(p => p.side === 'axis'), allies = players.filter(p => p.side === 'allies');
   if (!axis.length || axis.length !== allies.length || axis.length > 4) return { err: 'sides not equal' };
   if (!seen.has(reporter)) return { err: 'reporter not in the match' };
-  return { reporter, key, mode, map: clean(map || '', 64), duration, winner, players, size: axis.length };
+  return { reporter, key, mode, map: clean(map || '', 64), start, end, duration, winner, players, size: axis.length };
 }
 
 async function tracks(env, ladder, players) {
@@ -66,17 +70,16 @@ async function tracks(env, ladder, players) {
 export async function report(req, env) {
   const body = await req.text();
   if (body.length > 4096) return [413, 'too big'];
-  const r = parse(body);
-  if (r.err) return [400, r.err];
   const now = Math.floor(Date.now() / 1000);
+  const r = parse(body, now);
+  if (r.err) return [400, r.err];
   const held = await env.DB.prepare('SELECT key_hash FROM players WHERE steam_id = ?1').bind(r.reporter).first();
   if (!held || !held.key_hash || held.key_hash !== (await sha256(r.key))) return [403, 'unknown key'];
   const recent = await env.DB.prepare('SELECT count(*) AS n FROM reports WHERE reporter = ?1 AND at > ?2').bind(r.reporter, now - 3600).first();
   if (recent.n >= REPORTS_PER_HOUR) return [429, 'too many reports'];
 
-  const fp = await sha256([r.mode, r.map, ...r.players.map(p => p.id + ':' + p.nation).sort()].join('|'));
-  const old = await env.DB.prepare('SELECT * FROM matches WHERE fp = ?1 AND ended_at > ?2 ORDER BY id DESC LIMIT 1')
-    .bind(fp, now - SAME_MATCH_S).first();
+  const fp = await sha256([r.mode, r.map, r.start, ...r.players.map(p => p.id + ':' + p.nation).sort()].join('|'));
+  const old = await env.DB.prepare('SELECT * FROM matches WHERE fp = ?1 ORDER BY id DESC LIMIT 1').bind(fp).first();
   if (old) return [200, await again(env, old, r, now)];
 
   // a new match: rate everyone on both tracks
@@ -93,7 +96,7 @@ export async function report(req, env) {
   const ins = await env.DB.prepare(
     `INSERT INTO matches (fp, mode, map, size, ladder, duration_s, winner, ended_at, status, reports)
      VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, 'rated', 1)`
-  ).bind(fp, r.mode, r.map, r.size, ladder, r.duration, r.winner, now).run();
+  ).bind(fp, r.mode, r.map, r.size, ladder, r.duration, r.winner, r.end).run();
   const id = ins.meta.last_row_id;
   const put = (pid, nation, x, won) => env.DB.prepare(
     `INSERT INTO ratings (steam_id, ladder, nation, mu, sigma, games, wins) VALUES (?1, ?2, ?3, ?4, ?5, 1, ?6)

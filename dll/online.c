@@ -18,6 +18,7 @@
 #define HOST L"goh-online.goh-mod.workers.dev"
 #define BEAT_MS 120000          // heartbeat (the server counts 5 minutes as online)
 #define LIST_MS 20000           // list refresh while the window is open
+#define REPORT_MS 15000         // a look for finished matches in the replays folder
 #define MAX_BODY 32768
 
 volatile long g_online_consent = -1;
@@ -43,9 +44,10 @@ int online_copy(OnlinePlayer *out, int max, int *state) {
     return n;
 }
 
+// consent_v2: the question covers match reports too (the first one, "consent", only the online list)
 void online_set_consent(int yes) {
     g_online_consent = yes;
-    WritePrivateProfileStringA("online", "consent", yes ? "1" : "0", g_ini);
+    WritePrivateProfileStringA("online", "consent_v2", yes ? "1" : "0", g_ini);
     if (yes) g_beat_now = 1;
     rc_log("online: player said %s", yes ? "yes" : "no");
 }
@@ -218,8 +220,8 @@ static DWORD WINAPI online_thread(LPVOID unused) {
     if (!s) s = WinHttpOpen(L"goh-mod", WINHTTP_ACCESS_TYPE_DEFAULT_PROXY, WINHTTP_NO_PROXY_NAME, WINHTTP_NO_PROXY_BYPASS, 0);
     if (!s) { rc_log("online: WinHttpOpen failed %lu, off", GetLastError()); return 0; }
     WinHttpSetTimeouts(s, 5000, 5000, 5000, 5000);
-    static char buf[MAX_BODY];
-    DWORD last_beat = 0, last_list = 0;
+    static char buf[MAX_BODY], body_r[4096];
+    DWORD last_beat = 0, last_list = 0, last_report = 0;
     int beat_fails = 0;
     long wanted = 0;
     for (;;) {
@@ -241,6 +243,21 @@ static DWORD WINAPI online_thread(LPVOID unused) {
             else { AcquireSRWLockExclusive(&g_lock); g_state = 2; ReleaseSRWLockExclusive(&g_lock); }
         }
         wanted = want;
+        // finished matches out of the game's replays, one at a time (report.c)
+        if (g_online_consent == 1 && g_key[0] && (!last_report || now - last_report >= REPORT_MS)) {
+            last_report = now | 1;
+            long long end = 0;
+            if (report_next(g_id, g_key, body_r, sizeof body_r, &end)) {
+                int st = http(s, L"POST", L"/report", body_r, buf);
+                rc_log("report: match ending %lld sent: %d %.80s", end, st, buf);
+                if (st == 200 || (st >= 400 && st < 500 && st != 429)) {     // taken, or never will be
+                    report_done(end);
+                    AcquireSRWLockExclusive(&g_doc_lock);
+                    g_doc_at[DOC_PLAYER] = 0;                               // the stats tab fetches again
+                    ReleaseSRWLockExclusive(&g_doc_lock);
+                }
+            }
+        }
         fetch_docs(s, buf);
         Sleep(500);
     }
@@ -248,7 +265,8 @@ static DWORD WINAPI online_thread(LPVOID unused) {
 
 void online_start(const char *dir) {
     snprintf(g_ini, sizeof g_ini, "%sgoh_online.ini", dir);
-    g_online_consent = GetPrivateProfileIntA("online", "consent", -1, g_ini);
+    g_online_consent = GetPrivateProfileIntA("online", "consent_v2", -1, g_ini);
+    report_init(dir);
     rc_log("online: consent %ld", g_online_consent);
     CloseHandle(CreateThread(NULL, 0, online_thread, NULL, 0, NULL));
 }

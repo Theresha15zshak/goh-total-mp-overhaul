@@ -127,6 +127,11 @@ void online_want(int doc);                  // on screen this frame
 void online_ratings_ids(const char *ids);   // DOC_RATINGS: whose (comma separated SteamIDs, at most 16)
 int online_doc(int doc, char *out, size_t n, int *state);   // the last text; state 0 none yet, 1 ok, 2 unreachable
 
+// ---- match reports out of the game's own replays (report.c), sent by online.c ----
+void report_init(const char *dir);
+int report_next(const char *me, const char *key, char *body, size_t n, long long *end_time);   // 1 = body to send
+void report_done(long long end_time);       // that match is dealt with (taken, or never will be)
+
 // ---- PVP button in the game's Internet / LAN game list (pvp.c): our block over its list of games ----
 extern volatile long g_pvp_on;              // the button was clicked: the block is wanted while the page is up
 int pvp_install(uint8_t *exe, const char *dir, uint8_t *(*alloc)(size_t), void (*patch)(void *, const void *, size_t));

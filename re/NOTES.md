@@ -375,3 +375,20 @@ destructors 2e72d0 / 2e7350 at slot 0.
 - the game's fonts are AngelCode BMFont binaries (font/*.fnt) with 32-bit RLE TGA pages, stored unpacked in
   interface.pak; glyphs packed per channel (chnl 1 blue, 2 green). The list uses skin main_menu_dark_skin
   (set/registry/main_menu_dark_skin.inc in gamelogic.pak): anka ("Anka/Coder Condensed") size 15.
+
+## Rated matches: the result comes from the game's own replay (2026-11-02) — dll/report.c
+No memory digging needed: after every multiplayer match the game writes
+profiles\<SteamID - 76561197960265728>\replays\autoreplayN.rep, a zip with replay.info, replay.qm (the
+commands) and replay.ss, the session card in the game's text format (UTF-8):
+- {main ...}: {gameType battle_zones|ammunition|...} (ammunition = «Превосходство»/Domination, key
+  mp/game/ammunition in localizations/ru.pak dlg_mp_domination.po), {armySelectionMode alliance} (= «Ось против
+  Союзников», mp/lobby/army_mode/alliance), {bots 0}, {map "multi/3v3_trenches:ammunition"},
+  {gameStartTime unix} {gameEndTime unix};
+- {members {...}{...}}: {type player} {hostId N} {name "..."} {team a|b} {army ger|fin|eng|usa|rus}
+  {doctrine ...} {steamId "7656..."};
+- {teams ...}: {name a} {alliance allies|axis}; {alliances ...} lists the armies of each;
+- {battleInfoLast ...} / {battleInfoTotal ...}: {"<hostId>"|"a"|"b"|"game"|"info" "B64:<zlib>"} binary blocks;
+  battleInfoTotal "info" = "\1" + the winning team's letter (checked against the win flag, the third int
+  after the team name, in the "a"/"b" blocks, on three replays). A match left early has no winner there.
+The memory census (census.c) found the same card as text in memory ({steamId "..."} {steamInfo ...}) and the
+friend list (eSteamFriend) holding most SteamIDs; eSMInfo = the session list's entries.

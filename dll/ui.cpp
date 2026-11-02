@@ -508,8 +508,10 @@ static void balance_window() {
 
 // ---- who is online with the mod -----------------------------------------------------------------------
 static const char *CONSENT_TEXT =
-    "Чтобы вы видели друг друга в списке, мод раз в 2 минуты отправляет на сервер мода "
-    "(goh-online.goh-mod.workers.dev) ваш SteamID, ник Steam и версию баланса. Больше ничего.";
+    "Мод отправляет на сервер мода (goh-online.goh-mod.workers.dev): раз в 2 минуты ваш SteamID, ник Steam "
+    "и версию баланса (список онлайн), а после рейтингового матча (Ось против Союзников, «Зоны боевых действий» "
+    "или «Превосходство») его итог из реплея игры: режим, карту, время, игроков (SteamID, ник, нация) и победителя. "
+    "Больше ничего.";
 
 static void consent_window() {
     float k = ImGui::GetFontSize() / 18.f;
@@ -517,9 +519,9 @@ static void consent_window() {
     ImGui::SetNextWindowPos(ImVec2(io.DisplaySize.x * 0.5f, io.DisplaySize.y * 0.4f), ImGuiCond_Always, ImVec2(0.5f, 0.5f));
     ImGui::SetNextWindowSize(ImVec2(460 * k, 0));
     ImGui::SetNextWindowBgAlpha(0.96f);
-    ImGui::Begin("Мод: игроки онлайн###goh_consent", nullptr, ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoCollapse |
+    ImGui::Begin("Мод: онлайн и рейтинг PVP###goh_consent", nullptr, ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoCollapse |
                                                              ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoMove);
-    ImGui::TextWrapped("Показывать вас в списке игроков с модом, которые сейчас в игре?");
+    ImGui::TextWrapped("Показывать вас в списке игроков с модом и засчитывать ваши матчи в рейтинг PVP?");
     ImGui::Spacing();
     ImGui::TextDisabled("%s", CONSENT_TEXT);
     ImGui::Spacing();
@@ -536,7 +538,7 @@ static void online_list(float bottom) {
     int state = 0;
     int n = online_copy(list, ONLINE_MAX, &state);
     bool me = g_online_consent == 1;
-    if (ImGui::Checkbox("Показывать меня в списке", &me)) online_set_consent(me);
+    if (ImGui::Checkbox("Показывать меня и засчитывать мои матчи", &me)) online_set_consent(me);
     if (ImGui::IsItemHovered()) ImGui::SetTooltip("%s", CONSENT_TEXT);
     if (g_online_held) {
         ImGui::PushStyleColor(ImGuiCol_Text, ACCENT);
@@ -652,7 +654,7 @@ static const char *nation_name(const char *n) {
     return n;
 }
 static const char *mode_name(const char *m) {
-    return !strcmp(m, "battle_zones") ? "Зоны боевых действий" : !strcmp(m, "superiority") ? "Превосходство" : m;
+    return !strcmp(m, "battle_zones") ? "Зоны боевых действий" : !strcmp(m, "ammunition") ? "Превосходство" : m;
 }
 static void mmr_text(char *out, size_t n, const char *mmr, int games) {
     if (games <= 0) snprintf(out, n, "\xE2\x80\x94");
@@ -934,7 +936,7 @@ static void pvp_block() {
     if (g_online_held) snprintf(line, sizeof line, "Ваш SteamID закреплён за другим ключом: напишите автору мода");
     else snprintf(line, sizeof line, state == 2 ? "С модом онлайн: %d  \xC2\xB7  сервер не отвечает" : "С модом онлайн: %d", online_n);
     van_text(dl, col0, fy, state == 2 || g_online_held ? VAN_WARN : VAN_TITLE, line);
-    const char *me_txt = "Показывать меня в списке";
+    const char *me_txt = "Показывать меня и засчитывать мои матчи";
     float box = lh * 0.7f, mw = ImGui::CalcTextSize(me_txt).x;
     ImVec2 b0(p0.x + VAN_COL[2] * size.x, fy + (lh - box) * 0.5f);
     ImGui::SetCursorScreenPos(ImVec2(b0.x, fy));
