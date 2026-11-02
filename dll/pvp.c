@@ -185,15 +185,21 @@ static int command(void *msg) {
         if (InterlockedIncrement(&g_cmds_logged) == 1) { log_chain("button", g_btn); log_chain("list", g_list); }
         return 1;
     }
-    if (id >= 0x15 && id <= 0x21 && g_pvp_on) {     // the page's own buttons bring its list back
-        g_pvp_on = 0;
-        list_shown(1);
+    // The page's own commands leave the block on: the page sends some by itself (seen 2026-11-02: the block went
+    // off with nobody at the PVP button, the list refreshing on its own), and HOST / JOIN take the player to
+    // another page anyway. Only the PVP button puts the list back.
+    if (id >= 0x15 && id <= 0x21 && g_pvp_on) {
+        static uint32_t logged;
+        if (!(logged & 1u << (id - 0x15))) { logged |= 1u << (id - 0x15); rc_log("pvp: page command %#x with the block on", id); }
     }
     return 0;
 }
 
-static void cmd_online(void *self, void *msg) { if (!command(msg)) g_cmd[0](self, msg); }
-static void cmd_lan(void *self, void *msg) { if (!command(msg)) g_cmd[1](self, msg); }
+// after the page's own handling: whatever it did to its list, ours stays over it
+static void after_command(void) { if (g_pvp_on) list_shown(0); }
+
+static void cmd_online(void *self, void *msg) { if (!command(msg)) { g_cmd[0](self, msg); after_command(); } }
+static void cmd_lan(void *self, void *msg) { if (!command(msg)) { g_cmd[1](self, msg); after_command(); } }
 
 static void forget(void *page) {
     if (page != g_page) return;
