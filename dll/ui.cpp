@@ -1146,6 +1146,48 @@ static void chat_name(const char *id, const char *name, ImU32 col, bool verified
     }
 }
 
+// ---- /invite: a button in the chat that takes others to the sender's lobby ---------------------------------
+// The game's lobbies are Steam lobbies (SteamMatchMaking009, "+connect_lobby"): Steam knows which one the player
+// is in (their FriendGameInfo_t), and steam://joinlobby/<app>/<lobby>/<player> makes the running game join it,
+// as accepting a Steam invite does. The message is "/invite <lobby id>"; the sender is the one inviting.
+struct FriendGameInfo { uint64_t game; uint32_t ip; uint16_t port, query_port; uint64_t lobby; };
+
+static uint64_t my_lobby() {
+    HMODULE h = GetModuleHandleA("steam_api64.dll");
+    auto friends_if = h ? (void *(*)())GetProcAddress(h, "SteamAPI_SteamFriends_v017") : nullptr;
+    auto played = h ? (bool (*)(void *, uint64_t, FriendGameInfo *))GetProcAddress(h, "SteamAPI_ISteamFriends_GetFriendGamePlayed") : nullptr;
+    void *fr = friends_if ? friends_if() : nullptr;
+    FriendGameInfo gi = {};
+    uint64_t me = _strtoui64(online_my_id(), nullptr, 10);
+    if (!fr || !played || !me || !played(fr, me, &gi)) return 0;
+    return gi.lobby >> 52 == 0x17 ? gi.lobby : 0;      // a lobby's SteamID: universe 1 (bits 56..63), type 7 "chat" (52..55)
+}
+
+static uint32_t steam_app() {
+    HMODULE h = GetModuleHandleA("steam_api64.dll");
+    auto utils_if = h ? (void *(*)())GetProcAddress(h, "SteamAPI_SteamUtils_v010") : nullptr;
+    auto app = h ? (uint32_t (*)(void *))GetProcAddress(h, "SteamAPI_ISteamUtils_GetAppID") : nullptr;
+    void *ut = utils_if ? utils_if() : nullptr;
+    uint32_t id = ut && app ? app(ut) : 0;
+    return id ? id : 400750;
+}
+
+// "/invite <lobby id>": the lobby, else 0
+static uint64_t invite_lobby(const char *text) {
+    if (strncmp(text, "/invite ", 8)) return 0;
+    const char *d = text + 8;
+    size_t n = strspn(d, "0123456789");
+    return n >= 15 && n <= 20 && !d[n] ? _strtoui64(d, nullptr, 10) : 0;
+}
+
+static void join_lobby(uint64_t lobby, const char *inviter) {
+    if (!lobby || !steam_id_ok(inviter)) return;
+    char url[96];
+    snprintf(url, sizeof url, "steam://joinlobby/%u/%llu/%s", steam_app(), (unsigned long long)lobby, inviter);
+    rc_log("chat: joining lobby %llu of %s", (unsigned long long)lobby, inviter);
+    ShellExecuteA(nullptr, "open", url, nullptr, nullptr, SW_SHOWNORMAL);
+}
+
 static const char *CHAT_RULES[] = {
     "0. Не быть мудаком.",
     "1. Старайтесь не обсуждать других и не переходить на личности и конфликты.",
@@ -1360,7 +1402,11 @@ static void chat_block() {
             chat_name(m.sid, nm, !strcmp(m.sid, my) ? ACCENT : VAN_HOVER, m.verified, mod, menu_id, menu_name);
             if (mod && !strcmp(menu_id, m.sid)) snprintf(menu_name, sizeof menu_name, "%s", m.name);
             ImGui::SameLine();
-            ImGui::TextWrapped("%s", m.text);
+            if (uint64_t lobby = invite_lobby(m.text)) {       // an invite: a button to the sender's lobby
+                if (!strcmp(m.sid, my)) ImGui::TextColored(ImColor(VAN_TAB_OFF), "приглашает в своё лобби");
+                else if (ImGui::SmallButton("Войти в лобби")) join_lobby(lobby, m.sid);
+            } else
+                ImGui::TextWrapped("%s", m.text);
             ImGui::PopID();
         }
         chat_mod_menu(menu_id, menu_name, mod);
@@ -1379,11 +1425,19 @@ static void chat_block() {
     ImGui::PushStyleVar(ImGuiStyleVar_FrameBorderSize, 1);
     bool can = !st.banned && !st.muted_until && g_online_consent == 1;
     ImGui::BeginDisabled(!can);
-    bool enter = ImGui::InputTextWithHint("##chat_in", can ? "Сообщение, Enter - отправить" : "", text, 300 * 3 + 1,
+    bool enter = ImGui::InputTextWithHint("##chat_in", can ? "Сообщение, Enter - отправить. /invite - позвать в своё лобби" : "", text, 300 * 3 + 1,
                                           ImGuiInputTextFlags_EnterReturnsTrue);
     ImGui::EndDisabled();
     ImGui::PopStyleVar(2);
+    static char local_note[96];
     if (enter) {
+        if (!strcmp(text, "/invite") || !strcmp(text, "/инвайт")) {      // the player's own lobby, put in by us
+            uint64_t lobby = my_lobby();
+            rc_log("chat: /invite, lobby %llu", (unsigned long long)lobby);
+            if (lobby) { snprintf(text, sizeof text, "/invite %llu", (unsigned long long)lobby); local_note[0] = 0; }
+            else { snprintf(local_note, sizeof local_note, "Вы не в лобби: создайте игру или зайдите в неё, потом /invite"); text[0] = 0; }
+        } else
+            local_note[0] = 0;
         if (text[0]) chat_send(g_chat_ch, text);
         text[0] = 0;
         ImGui::SetKeyboardFocusHere(-1);         // stay in the line for the next one
@@ -1396,7 +1450,8 @@ static void chat_block() {
         struct tm tmv;
         localtime_s(&tmv, &u);
         strftime(note, sizeof note, "Вам запрещено писать до %d.%m %H:%M", &tmv);
-    } else if (st.sent[0]) snprintf(note, sizeof note, "%s", st.sent);
+    } else if (local_note[0]) snprintf(note, sizeof note, "%s", local_note);
+    else if (st.sent[0]) snprintf(note, sizeof note, "%s", st.sent);
     else if (g_steam_verified != 1) snprintf(note, sizeof note, "Вы пишете как Anonymous: войдите через Steam (вкладка PVP > Моя статистика)");
     if (note[0]) van_text(dl, mx, iy + input_h + 4 * sy, VAN_WARN, note);
 
