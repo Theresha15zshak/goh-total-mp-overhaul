@@ -188,6 +188,7 @@ int chat_rect(float *x, float *y, float *w, float *h, float *root_w, float *root
 typedef struct { float x, y, w, h, body_y, tabs_r, root_w, root_h; int ntabs; float tab[8][4]; } ChatPanel;
 int chat_panel(ChatPanel *p);
 unsigned char *pvp_pak_file(const char *name, size_t *n);   // an unpacked file of interface.pak, malloc'd
+unsigned char *pvp_sound_file(const char *name, size_t *n); // ... of sound\sound.pak
 // the lobby's player list lines on screen (game units, as pvp_rect) and whose they are, with room under each name
 typedef struct { float x, y, w, h, root_w, root_h; char id[18]; } LobbyRow;
 int lobby_rows(LobbyRow *out, int max);

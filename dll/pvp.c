@@ -309,8 +309,10 @@ int pvp_rect(float *x, float *y, float *w, float *h, float *head_h, float *root_
 
 // a file kept unpacked in the game's interface.pak (its fonts are), read from the zip's central directory;
 // malloc'd, NULL if it is not there or packed
-unsigned char *pvp_pak_file(const char *name, size_t *n) {
-    FILE *f = g_pak[0] ? fopen(g_pak, "rb") : NULL;
+static char g_sound_pak[MAX_PATH];
+
+static unsigned char *pak_file(const char *pak, const char *name, size_t *n) {
+    FILE *f = pak[0] ? fopen(pak, "rb") : NULL;
     if (!f) return NULL;
     unsigned char *out = NULL;
     static uint8_t tail[65557];
@@ -355,6 +357,9 @@ unsigned char *pvp_pak_file(const char *name, size_t *n) {
     fclose(f);
     return out;
 }
+
+unsigned char *pvp_pak_file(const char *name, size_t *n) { return pak_file(g_pak, name, n); }
+unsigned char *pvp_sound_file(const char *name, size_t *n) { return pak_file(g_sound_pak, name, n); }
 
 // ---- the lobby's player list: MMR under each name (ui.cpp) ------------------------------------------------
 // Seen in a running game (2026-11-02): the session page's chat panel, eGUI_ChatChannelSessionView (vtable
@@ -493,6 +498,12 @@ static int vt_slot(uint32_t vt, int slot, uint32_t want) {
 // at 43b7ae, becomes PING_PERIOD_MS: the answers come about five times sooner, a small packet per lobby each time.
 #define FN_PING_PERIOD 0x43b7ae
 #define PING_PERIOD_MS 500
+// Each answer (or a ping given up on, as -1) goes to 43bf70: a lost one counts a miss (+0x48, five in a row show
+// the "no answer" icon, -2) and, as the game has it, went into the average too. With pings sent before Steam had
+// the P2P session up, those -1s came back later among the answers and pulled the average under 0: the column
+// went icon, number, icon (2026-11-02). Now a lost ping only counts its miss: at 43bfac, "mov eax,[rdx+48];
+// inc eax" (falling into the store and the average) becomes "inc dword [rdx+48]; jmp 43bfdd" (the five check).
+#define FN_PING_MISS 0x43bfac
 
 void pvp_lobby_pings(void) {
     static const uint8_t REG[7] = {0xc6, 0x05, 0xcc, 0x51, 0x45, 0x01, 0x00};   // the registration, as checked
@@ -508,6 +519,7 @@ void pvp_lobby_pings(void) {
 int pvp_install(uint8_t *exe, const char *dir, uint8_t *(*alloc)(size_t), void (*patch)(void *, const void *, size_t)) {
     g_base = exe;
     snprintf(g_pak, sizeof g_pak, "%s..\\..\\resource\\interface\\interface.pak", dir);
+    snprintf(g_sound_pak, sizeof g_sound_pak, "%s..\\..\\resource\\sound\\sound.pak", dir);
     for (int k = 0; k < 2; k++)
         if (!vt_slot(PAGES[k].vt, 0, PAGES[k].dtor) || !vt_slot(PAGES[k].vt, 20, FN_BIND) || !vt_slot(PAGES[k].vt_cmd, 1, FN_COMMAND)) {
             rc_log("pvp: the game list page is not as expected, no PVP button");
@@ -547,6 +559,11 @@ int pvp_install(uint8_t *exe, const char *dir, uint8_t *(*alloc)(size_t), void (
         patch(exe + FN_PING_PERIOD + 2, &ms, 4);
     } else
         rc_log("pvp: the lobby ping timer is not as expected, left as it is");
+    static const uint8_t MISS[8] = {0x8b, 0x42, 0x48, 0xff, 0xc0, 0x89, 0x42, 0x48}, MISS_NEW[5] = {0xff, 0x42, 0x48, 0xeb, 0x2c};
+    if (!memcmp(exe + FN_PING_MISS, MISS, 8) && exe[FN_PING_MISS + 0x31] == 0x83 && exe[FN_PING_MISS + 0x34] == 0x05)
+        patch(exe + FN_PING_MISS, MISS_NEW, 5);
+    else
+        rc_log("pvp: the lobby ping average is not as expected, left as it is");
     // the pages: their vtable slots point at ours, which call the game's
     void *binds[2] = {(void *)bind_online, (void *)bind_lan}, *cmds[2] = {(void *)cmd_online, (void *)cmd_lan};
     void *dtors[2] = {(void *)dtor_online, (void *)dtor_lan};

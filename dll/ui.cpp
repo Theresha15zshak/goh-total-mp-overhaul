@@ -1115,9 +1115,24 @@ static void lobby_overlay() {
 // name (right click) and the list of punishments in force.
 static int g_chat_ch;                  // 0 RU, 1 EN
 
+// the line being written, and asks for it from the menu on a name
+static char g_chat_text[CHAT_TEXT];
+static bool g_chat_focus;               // put the keyboard in the line, the cursor at its end
+
+// the menu on a name (right click): mention them; their Steam profile; and for a moderator, the punishments
 static void chat_mod_menu(const char *id, const char *name, bool mod) {
-    if (!mod || !ImGui::BeginPopup("##chatmod")) return;
+    if (!ImGui::BeginPopup("##chatmod")) return;
     ImGui::TextDisabled("%s", name);
+    ImGui::Separator();
+    if (ImGui::Selectable("Упомянуть")) {           // "@name " at the end of the line being written
+        char at[ONLINE_NAME + 4];
+        size_t len = strlen(g_chat_text);
+        snprintf(at, sizeof at, "%s@%s ", len && g_chat_text[len - 1] != ' ' ? " " : "", name);
+        if (len + strlen(at) < 300 * 3) strcat(g_chat_text, at);
+        g_chat_focus = true;
+    }
+    if (strncmp(name, "Anonymous", 9) && ImGui::Selectable("Профиль Steam")) open_profile(id);
+    if (!mod) { ImGui::EndPopup(); return; }
     ImGui::Separator();
     static const int DAYS[4] = {1, 3, 7, 30};
     for (int d : DAYS) {
@@ -1131,13 +1146,13 @@ static void chat_mod_menu(const char *id, const char *name, bool mod) {
     ImGui::EndPopup();
 }
 
-// a name: left click the Steam profile (players signed in with Steam), right click (moderators) the menu
+// a name: left click the Steam profile (players signed in with Steam), right click the menu
 static void chat_name(const char *id, const char *name, ImU32 col, bool verified, bool mod, char *menu_id, char *menu_name) {
     ImGui::PushStyleColor(ImGuiCol_Text, verified ? col : VAN_TAB_OFF);
     ImGui::TextUnformatted(name);
     ImGui::PopStyleColor();
     if (verified && ImGui::IsItemClicked(ImGuiMouseButton_Left)) open_profile(id);
-    if (mod && ImGui::IsItemClicked(ImGuiMouseButton_Right)) {
+    if (ImGui::IsItemClicked(ImGuiMouseButton_Right)) {
         snprintf(menu_id, 18, "%s", id);
         snprintf(menu_name, ONLINE_NAME, "%s", name);
         ImGui::OpenPopup("##chatmod");
@@ -1173,6 +1188,30 @@ static void join_lobby(uint64_t lobby, const char *inviter) {
     snprintf(url, sizeof url, "steam://joinlobby/%u/%llu/%s", steam_app(), (unsigned long long)lobby, inviter);
     rc_log("chat: joining lobby %llu of %s", (unsigned long long)lobby, inviter);
     ShellExecuteA(nullptr, "open", url, nullptr, nullptr, SW_SHOWNORMAL);
+}
+
+// ---- mentions: "@name" in a message; the one named hears the game's own chat sound ---------------------------
+static void mention_sound() {
+    static unsigned char *wav;
+    static bool tried;
+    if (!tried) {
+        tried = true;
+        size_t n = 0;
+        wav = pvp_sound_file("gui/multi/chat.wav", &n);       // IMA ADPCM, Windows plays it as it is
+        if (!wav) rc_log("chat: the game's chat sound not found");
+    }
+    if (wav) PlaySoundA((LPCSTR)wav, nullptr, SND_MEMORY | SND_ASYNC | SND_NODEFAULT);
+}
+
+// "@name" in the text, the name in any case, not inside a longer one
+static bool mentions(const char *text, const char *name) {
+    size_t n = strlen(name);
+    if (!n) return false;
+    for (const char *p = strchr(text, '@'); p; p = strchr(p + 1, '@'))
+        if (!_strnicmp(p + 1, name, n) && (!p[1 + n] || p[1 + n] == ' ' || p[1 + n] == ',' || p[1 + n] == '.' || p[1 + n] == '!' ||
+                                            p[1 + n] == '?' || p[1 + n] == ':'))
+            return true;
+    return false;
 }
 
 static const char *CHAT_RULES[] = {
@@ -1290,6 +1329,17 @@ static void chat_block() {
     static OnlinePlayer online[ONLINE_MAX];
     int n = chat_copy(g_chat_ch, msgs, CHAT_MAX, &st), ostate = 0, on = online_copy(online, ONLINE_MAX, &ostate);
     const char *my = online_my_id();
+    // my name in the chat (Anonymous#### until signed in): as the online list has it
+    static char my_name[ONLINE_NAME];
+    for (int i = 0; i < on; i++) if (!strcmp(online[i].id, my)) snprintf(my_name, sizeof my_name, "%s", online[i].name);
+    {   // new messages naming me: the sound, once (not for what was there when the chat opened)
+        static long long heard[2];
+        long long newest = n ? msgs[n - 1].id : 0;
+        if (heard[g_chat_ch] && newest > heard[g_chat_ch])
+            for (int i = 0; i < n; i++)
+                if (msgs[i].id > heard[g_chat_ch] && strcmp(msgs[i].sid, my) && mentions(msgs[i].text, my_name)) { mention_sound(); break; }
+        if (newest > heard[g_chat_ch] || (!heard[g_chat_ch] && st.state == 1)) heard[g_chat_ch] = newest ? newest : 1;
+    }
     ImGuiIO &io = ImGui::GetIO();
     float sx = io.DisplaySize.x / rw, sy = io.DisplaySize.y / rh, pad = 12 * sy;
     ImVec2 p0(x * sx, y * sy), size(w * sx, h * sy);
@@ -1470,6 +1520,10 @@ static void chat_block() {
             if (uint64_t lobby = invite_lobby(m.text)) {       // an invite: a button to the sender's lobby
                 if (!strcmp(m.sid, my)) ImGui::TextColored(ImColor(VAN_TAB_OFF), "приглашает в своё лобби");
                 else if (ImGui::SmallButton("Войти в лобби")) join_lobby(lobby, m.sid);
+            } else if (my_name[0] && mentions(m.text, my_name)) {
+                ImGui::PushStyleColor(ImGuiCol_Text, ACCENT);       // naming me: in the accent colour
+                ImGui::TextWrapped("%s", m.text);
+                ImGui::PopStyleColor();
             } else
                 ImGui::TextWrapped("%s", m.text);
             ImGui::PopID();
@@ -1482,7 +1536,8 @@ static void chat_block() {
     ImGui::EndChild();
 
     // writing
-    static char text[CHAT_TEXT];
+    char *text = g_chat_text;
+    const size_t text_size = sizeof g_chat_text;
     float iy = in0.y;
     ImGui::SetCursorScreenPos(ImVec2(mx, iy));
     ImGui::SetNextItemWidth(mw);
@@ -1490,8 +1545,15 @@ static void chat_block() {
     ImGui::PushStyleVar(ImGuiStyleVar_FrameBorderSize, 1);
     bool can = !st.banned && !st.muted_until && g_online_consent == 1;
     ImGui::BeginDisabled(!can);
+    if (g_chat_focus && can) ImGui::SetKeyboardFocusHere();
+    bool to_end = g_chat_focus;
+    g_chat_focus = false;
     bool enter = ImGui::InputTextWithHint("##chat_in", can ? "Сообщение, Enter - отправить. /invite - позвать в своё лобби" : "", text, 300 * 3 + 1,
-                                          ImGuiInputTextFlags_EnterReturnsTrue);
+                                          ImGuiInputTextFlags_EnterReturnsTrue | ImGuiInputTextFlags_CallbackAlways,
+                                          [](ImGuiInputTextCallbackData *d) -> int {      // after a mention: cursor at the end
+                                              if (*(bool *)d->UserData) { d->CursorPos = d->SelectionStart = d->SelectionEnd = d->BufTextLen; *(bool *)d->UserData = false; }
+                                              return 0;
+                                          }, &to_end);
     ImGui::EndDisabled();
     ImGui::PopStyleVar(2);
     static char local_note[160];
@@ -1499,7 +1561,7 @@ static void chat_block() {
         if (!strcmp(text, "/invite") || !strcmp(text, "/инвайт")) {      // the player's own lobby, put in by us
             uint64_t lobby = my_lobby();
             rc_log("chat: /invite, lobby %llu", (unsigned long long)lobby);
-            if (lobby) { snprintf(text, sizeof text, "/invite %llu", (unsigned long long)lobby); local_note[0] = 0; }
+            if (lobby) { snprintf(text, text_size, "/invite %llu", (unsigned long long)lobby); local_note[0] = 0; }
             else { snprintf(local_note, sizeof local_note, "Не вижу вашего лобби: зайдите в лобби игры и повторите /invite"); text[0] = 0; }
         } else
             local_note[0] = 0;
