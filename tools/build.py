@@ -20,7 +20,7 @@ if VARIANT == 'competitive':
     CFLAGS.append('-DCOMPETITIVE_ONLY')
 
 C_SRC = ['dll/goh_replay.c', 'dll/proxy_iphlpapi.c', 'dll/snap.c', 'dll/keep.c', 'dll/lz.c', 'dll/prof.c', 'dll/balance.c',
-         'dll/online.c', 'dll/pvp.c']
+         'dll/online.c', 'dll/pvp.c', 'dll/census.c']
 CPP_SRC = ['dll/ui.cpp', 'dll/music.cpp'] + [os.path.join(IMGUI, f) for f in
                             ('imgui.cpp', 'imgui_draw.cpp', 'imgui_tables.cpp', 'imgui_widgets.cpp',
                              'backends/imgui_impl_dx11.cpp', 'backends/imgui_impl_win32.cpp')]

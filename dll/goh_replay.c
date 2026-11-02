@@ -321,6 +321,8 @@ static const uint32_t VT_PAGE_GAME_RESULT[] = {0x10403c0, 0x1040490, 0x10404a0, 
 
 MatchStats g_ms;
 volatile long g_ms_results;
+volatile uintptr_t g_census_game, g_census_page;
+int g_census_auto;
 volatile long g_live_match;
 static volatile uintptr_t g_stats;          // stats object of the current match
 static volatile uintptr_t g_result_page;    // eGUI_PageGameResult while it is on screen
@@ -396,16 +398,28 @@ static void __cdecl watch_hit(uint32_t id, void *a1, void *a2) {
     if (id == W_LOAD) { g_load_dialog = a1; g_load_item = a2; g_load_fresh = 1; }
     if (id == W_PRESENT) { if (g_ui_on) ui_present(a1); return; }
     if (id == W_SPAWN) { g_battle_tick = GetTickCount(); spawn_seen((uintptr_t)a1, (uintptr_t)a2); return; }
-    if (id == W_STATS_EVENT || id == W_STATS_EVENT2) { g_battle_tick = GetTickCount(); stats_event((uintptr_t)a2); return; }
+    if (id == W_STATS_EVENT || id == W_STATS_EVENT2) {
+        g_battle_tick = GetTickCount();
+        g_census_game = (uintptr_t)a1;
+        stats_event((uintptr_t)a2);
+        return;
+    }
     if (id == W_PAGE_SHOW) {
         uintptr_t page = (uintptr_t)a2;
         rc_log("page shown %p, vtable rva %llx", a2, (unsigned long long)(rdq(page) - (uintptr_t)g_base));
-        if (is_result_page(page)) { g_result_page = page; g_ms_results = 1; rc_log("results page shown"); }
+        if (is_result_page(page)) {
+            g_result_page = page; g_ms_results = 1; g_census_page = page;
+            rc_log("results page shown");
+            if (g_census_auto) census_run("results page", g_census_game, page);
+        }
         return;
     }
     if (id == W_PAGE_CLOSE) {
         uintptr_t p = (uintptr_t)a2;
-        if (g_result_page && (p == g_result_page || rdq(p) == g_result_page)) { g_result_page = 0; g_ms_results = 0; rc_log("results page closed"); }
+        if (g_result_page && (p == g_result_page || rdq(p) == g_result_page)) {
+            g_result_page = 0; g_ms_results = 0; g_census_page = 0;
+            rc_log("results page closed");
+        }
         return;
     }
     if (n > 2 && id == W_TICK) return;                              // the tick is too chatty to log every call
@@ -1454,6 +1468,8 @@ static void startup(HMODULE self) {
     }
     char ini[MAX_PATH];
     snprintf(ini, sizeof ini, "%sgoh_snapshots.ini", g_dir);
+    census_init(g_base, g_dir, GetPrivateProfileIntA("debug", "census_after", 0, ini));
+    g_census_auto = GetPrivateProfileIntA("debug", "census", 0, ini);
 #ifdef COMPETITIVE_ONLY
     if (0) {
 #else

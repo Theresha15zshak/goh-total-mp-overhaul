@@ -135,6 +135,13 @@ int pvp_install(uint8_t *exe, const char *dir, uint8_t *(*alloc)(size_t), void (
 int pvp_rect(float *x, float *y, float *w, float *h, float *head_h, float *root_w, float *root_h);
 unsigned char *pvp_pak_file(const char *name, size_t *n);   // an unpacked file of interface.pak, malloc'd
 
+// ---- memory census (census.c): where the game keeps a match's players and result; Ctrl+F12 ----
+void census_init(uint8_t *exe, const char *dir, int after_s);
+void census_run(const char *why, uintptr_t game, uintptr_t page);
+extern volatile uintptr_t g_census_game;    // the eGame the last stats event came with
+extern volatile uintptr_t g_census_page;    // the results page while it is up
+extern int g_census_auto;                   // [debug] census=1: also when the results page opens
+
 void rc_send(int cmd, double arg);
 void rc_log(const char *fmt, ...);
 extern int g_ui_draw;                // ui.cpp, [debug] ui_draw=0: the panel draws nothing

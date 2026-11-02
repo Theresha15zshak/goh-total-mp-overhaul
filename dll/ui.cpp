@@ -86,6 +86,10 @@ static void hotkeys() {
         }
         was[i] = down;
     }
+    static bool census_was;                  // Ctrl+F12: memory census (census.c)
+    bool census = fg && (GetAsyncKeyState(VK_F12) & 0x8000) && (GetAsyncKeyState(VK_CONTROL) & 0x8000);
+    if (census && !census_was) census_run("Ctrl+F12", g_census_game, g_census_page);
+    census_was = census;
 }
 
 static LRESULT CALLBACK wndproc(HWND h, UINT m, WPARAM w, LPARAM l) {
