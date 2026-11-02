@@ -75,7 +75,11 @@ static int ends_with(const void *str, const char *ours) {
     if (cap < 15 || size > cap || size > 4096) return 0;
     const char *s = cap > 15 ? *(const char *const *)p : (const char *)p;
     size_t k = strlen(ours);
-    return s && size >= k && !_strnicmp(s + size - k, ours, k) && (size == k || s[size - k - 1] == '/');
+    if (!s) return 0;
+    if (size >= k) return !_strnicmp(s + size - k, ours, k) && (size == k || s[size - k - 1] == '/');
+    // the path as written in an including layout ("views/GameResult.xml"): the tail of ours
+    while (size && (*s == '/' || *s == '\\')) s++, size--;
+    return size && !_strnicmp(ours + k - size, s, size) && ours[k - size - 1] == '/';
 }
 
 static void *open_hook(void *path, uint32_t mode) {

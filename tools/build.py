@@ -120,12 +120,8 @@ PVP_BUTTON = b'''
                                                                                 </BackgroundPanel>'''
 
 
-def ui_header():
-    import zipfile
-    pak, path = 'resource/interface/interface.pak', 'layout/PageMultiplayerCustom.xml'
-    z = zipfile.ZipFile(os.path.join(GAME, pak))
-    info = z.getinfo(path)
-    t = z.read(path)
+def pvp_layout(t):
+    """the game list with a PVP button after JOIN; a commented-out debug block makes the room"""
     a = t.index(b'<!--<StackPanel percent="0.4">')
     b = t.index(b'</StackPanel>-->', a) + len(b'</StackPanel>-->')
     u = t[:a] + t[b:]
@@ -136,15 +132,65 @@ def ui_header():
     u = u.replace(b'gap="55"', b'gap="40"')     # room for a fifth button in the row
     end = u.rindex(b'</Layout>')
     assert len(u) <= len(t)
-    u = u[:end] + b' ' * (len(t) - len(u)) + u[end:]
+    return u[:end] + b' ' * (len(t) - len(u)) + u[end:]
+
+
+def uncomment(t, start, stop):
+    """a commented-out block back in: "<!--" and "-->" become spaces, so the length stays"""
+    a = t.index(start)
+    assert t.count(start) == 1 and t[a - 4:a] == b'<!--', start
+    b = t.index(stop, a) + len(stop)
+    assert t[b:b + 3] == b'-->', stop
+    return t[:a - 4] + b'    ' + t[a:b] + b'   ' + t[b + 3:]
+
+
+def replays_tab(t):
+    """Extras: the Replays tab the game has commented out (what the replay_unlock mod did with a file of its own)"""
+    a = t.rindex(b'\n', 0, t.index(b'<Tab titleKey="main_menu2/replays">')) + 1
+    out = []
+    for l in t[a:].split(b'\n')[:3]:              # the three commented lines: <Tab>, its DialogRef, </Tab>
+        s = l.rstrip(b'\r')
+        assert s.startswith(b'<!--') and s.endswith(b'-->'), s
+        out.append(b'    ' + s[4:-3] + b'   ' + l[len(s):])
+    head = b'\n'.join(out)
+    u = t[:a] + head + t[a + len(head):]
+    assert len(u) == len(t)
+    return u
+
+
+def save_replay_button(t):
+    """the results page's "save replay" button, commented out by the game"""
+    k = t.index(b'id="btn_save_replay"')
+    return uncomment(t, t[t.rindex(b'<DockPanel placement="bottom">', 0, k):k], b'</DockPanel>')
+
+
+# Our versions of a few interface layouts (dll/pvp.c swaps them in the stream the game opened), each the
+# same length as the game's file.
+UI_EDITS = [
+    ('resource/interface/interface.pak', 'layout/PageMultiplayerCustom.xml', pvp_layout),
+    ('resource/interface/interface.pak', 'layout/PageExtras.xml', replays_tab),
+    ('resource/interface/interface.pak', 'layout/views/GameResult.xml', save_replay_button),
+]
+
+
+def ui_header():
+    import zipfile
     out = ['// made by tools/build.py from the game files: do not edit',
-           'typedef struct { const char *pak, *path; unsigned crc; unsigned size; const unsigned char *data; } UiFile;',
-           'static const unsigned char UI_DATA_0[] = {']
-    out += [' ' + ','.join(str(c) for c in u[i:i + 40]) + ',' for i in range(0, len(u), 40)]
-    out += ['};', 'static const UiFile UI_FILES[] = {',
-            '    {"%s", "%s", 0x%08xu, %du, UI_DATA_0},' % (pak, path, info.CRC, info.file_size), '};', '']
+           'typedef struct { const char *pak, *path; unsigned crc; unsigned size; const unsigned char *data; } UiFile;']
+    rows = []
+    for i, (pak, path, edit) in enumerate(UI_EDITS):
+        z = zipfile.ZipFile(os.path.join(GAME, pak))
+        info = z.getinfo(path)
+        t = z.read(path)
+        u = edit(t)
+        assert len(u) == len(t), path
+        out.append('static const unsigned char UI_DATA_%d[] = {' % i)
+        out += [' ' + ','.join(str(c) for c in u[j:j + 40]) + ',' for j in range(0, len(u), 40)]
+        out.append('};')
+        rows.append('    {"%s", "%s", 0x%08xu, %du, UI_DATA_%d},' % (pak, path, info.CRC, info.file_size, i))
+    out += ['static const UiFile UI_FILES[] = {'] + rows + ['};', '']
     h = os.path.join(OBJ, 'ui_files.h')
-    text = '\n'.join(out)
+    text = chr(10).join(out)
     if not os.path.exists(h) or open(h).read() != text:
         open(h, 'w').write(text)
 
