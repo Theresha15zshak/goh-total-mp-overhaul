@@ -517,10 +517,13 @@ static int vt_slot(uint32_t vt, int slot, uint32_t want) {
 // went icon, number, icon (2026-11-02). Now a lost ping only counts its miss: at 43bfac, "mov eax,[rdx+48];
 // inc eax" (falling into the store and the average) becomes "inc dword [rdx+48]; jmp 43bfdd" (the five check).
 #define FN_PING_MISS 0x43bfac
+// Off for now (2026-11-02): the column stayed unreliable to use; the game keeps its own (no column, no service).
+#define LOBBY_PINGS 0
 
 void pvp_lobby_pings(void) {
     static const uint8_t REG[7] = {0xc6, 0x05, 0xcc, 0x51, 0x45, 0x01, 0x00};   // the registration, as checked
     uint8_t now[7], on = 0;
+    if (!LOBBY_PINGS) { rc_log("pvp: the Ping column is off in this build"); return; }
     if (!g_base || !peek(g_base + FN_LOBBY_PINGS_REG, now, 7) || memcmp(now, REG, 7) || !peek(g_base + G_LOBBY_PINGS, &on, 1) || on > 1) {
         rc_log("pvp: the game's lobby pings are not where expected, Ping column off");
         return;
@@ -567,13 +570,17 @@ int pvp_install(uint8_t *exe, const char *dir, uint8_t *(*alloc)(size_t), void (
     int32_t rel = (int32_t)(s - (entry + 5)); memcpy(jmp + 1, &rel, 4);
     patch(entry, jmp, 10);
     static const uint8_t PERIOD[6] = {0x41, 0xb8, 0xc4, 0x09, 0x00, 0x00};       // mov r8d, 2500
-    if (!memcmp(exe + FN_PING_PERIOD, PERIOD, 6)) {
+    if (!LOBBY_PINGS)
+        ;
+    else if (!memcmp(exe + FN_PING_PERIOD, PERIOD, 6)) {
         uint32_t ms = PING_PERIOD_MS;
         patch(exe + FN_PING_PERIOD + 2, &ms, 4);
     } else
         rc_log("pvp: the lobby ping timer is not as expected, left as it is");
     static const uint8_t MISS[8] = {0x8b, 0x42, 0x48, 0xff, 0xc0, 0x89, 0x42, 0x48}, MISS_NEW[5] = {0xff, 0x42, 0x48, 0xeb, 0x2c};
-    if (!memcmp(exe + FN_PING_MISS, MISS, 8) && exe[FN_PING_MISS + 0x31] == 0x83 && exe[FN_PING_MISS + 0x34] == 0x05)
+    if (!LOBBY_PINGS)
+        ;
+    else if (!memcmp(exe + FN_PING_MISS, MISS, 8) && exe[FN_PING_MISS + 0x31] == 0x83 && exe[FN_PING_MISS + 0x34] == 0x05)
         patch(exe + FN_PING_MISS, MISS_NEW, 5);
     else
         rc_log("pvp: the lobby ping average is not as expected, left as it is");

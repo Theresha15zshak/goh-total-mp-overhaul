@@ -23,7 +23,7 @@ What it adds
   PVP: Multiplayer -> Internet -> PVP button. Tabs: Online (who plays with the mod now), My stats
     (MMR, history, win rate by nation), Leaders. Rated: Axis vs Allies in Battle Zones and Domination,
     taken from the replays the game writes after every battle.
-  MMR under names in the lobby, a Ping column in the list of games.
+  MMR under names in the lobby.
   Global chat: above the friends on the Internet page and on the GLOBAL CHAT tab in the lobby (RU and ENG).
     /invite in the chat - a "Join lobby" button for everyone else. Right click on a name: mention, Steam
     profile. Messages are wiped every two hours.

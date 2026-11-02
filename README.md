@@ -13,7 +13,6 @@ people who don't have the mod. Russian and English (it follows the game's langua
   names in the lobby.
 - **Global chat:** RU and ENG channels on the Internet page and a GLOBAL CHAT tab in the lobby; `/invite` puts
   a "Join lobby" button in the chat; right click a name to mention someone (they hear a sound).
-- **Ping column** in the list of games (the game's own, turned on and made faster).
 - **Replays:** a Replays tab in Extras, files named by mode, map, nation and date; pause, speed, seeking (F8);
   match charts (F9).
 - **Sign in through Steam** (Steam OpenID on steamcommunity.com): the mod gets only your SteamID, never a
@@ -25,7 +24,7 @@ people who don't have the mod. Russian and English (it follows the game's langua
 ## Русский
 
 Клиентский мод для Gates of Hell 1.067: PVP-рейтинг (MMR) по реплеям, кнопка PVP со списком онлайна,
-статистикой и лидерами, глобальный чат RU / ENG (с `/invite` и упоминаниями), колонка Ping в списке игр,
+статистикой и лидерами, глобальный чат RU / ENG (с `/invite` и упоминаниями),
 вкладка «Реплеи» с перемоткой и графиками матча, вход через Steam (только SteamID). С игроками без мода
 играть можно. Скачать: [Releases](../../releases), запустить `install.bat`.
 

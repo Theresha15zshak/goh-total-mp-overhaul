@@ -732,7 +732,7 @@ static bool g_about_win = true;
 static const char *ABOUT_RU[] = {
     "PVP-рейтинг (MMR) за «Ось против Союзников»: «Зоны боевых действий» и «Превосходство», 1×1 и команды",
     "Кнопка PVP на странице «Интернет»: кто онлайн с модом, ваша статистика, лидеры",
-    "MMR под никами в лобби, колонка Ping в списке игр",
+    "MMR под никами в лобби",
     "Глобальный чат RU / ENG: на странице «Интернет» и вкладка GLOBAL CHAT в лобби; /invite, упоминания",
     "Реплеи: вкладка в «Дополнительно», перемотка (F8), графики матча (F9)",
     "Вход через Steam: мод получает только SteamID, без пароля",
@@ -740,7 +740,7 @@ static const char *ABOUT_RU[] = {
 static const char *ABOUT_EN[] = {
     "PVP rating (MMR) for Axis vs Allies: Battle Zones and Domination, 1v1 and teams",
     "PVP button on the Internet page: who is online with the mod, your stats, leaders",
-    "MMR under names in the lobby, a Ping column in the list of games",
+    "MMR under names in the lobby",
     "Global chat RU / ENG: on the Internet page and the GLOBAL CHAT tab in the lobby; /invite, mentions",
     "Replays: a tab in Extras, seeking (F8), match charts (F9)",
     "Sign in through Steam: the mod gets only your SteamID, no password",
@@ -748,7 +748,6 @@ static const char *ABOUT_EN[] = {
 static const char *NEWS_RU[] = {
     "Автообновление: кнопка «Обновить» у версии слева внизу (файл проверяется по подписи автора)",
     "Английский язык (по языку игры в Steam)",
-    "Колонка Ping в списке игр: быстрее и без скачков",
     "Чат: правый клик по нику (упомянуть, профиль Steam), звук при упоминании",
     "/invite: кнопка «Войти в лобби» прямо в чате",
     "Аватарки Steam в списке онлайн",
@@ -757,7 +756,6 @@ static const char *NEWS_RU[] = {
 static const char *NEWS_EN[] = {
     "Auto-update: an \"Update\" button by the version, bottom left (the file is checked against the author's signature)",
     "English (follows the game's language in Steam)",
-    "Ping column in the list of games: faster and steady",
     "Chat: right click on a name (mention, Steam profile), a sound when you are mentioned",
     "/invite: a \"Join lobby\" button right in the chat",
     "Steam avatars in the online list",
