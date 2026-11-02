@@ -282,6 +282,61 @@ unsigned char *pvp_pak_file(const char *name, size_t *n) {
     return out;
 }
 
+// ---- the lobby's player list: MMR under each name (ui.cpp) ------------------------------------------------
+// The session page's chat panel lists its members as eTypedListboxItem<shared_ptr<eChatUser>> (vtable
+// 10440d8), eDialogs placed like any other: +0x158 the eChatUser, whose +8 is the SteamID (its constructor
+// 2b02f0 takes it; +0x10 the name). Lines are tracked from the moment they get their user (vtable slot 70,
+// 2b5030) until their destructor (slot 0, 2b47c0).
+#define VT_CHAT_ITEM 0x10440d8
+#define FN_CHAT_ITEM_DTOR 0x2b47c0
+#define FN_CHAT_ITEM_SET 0x2b5030
+#define MAX_CHAT_ITEMS 128
+
+static void *g_chat_items[MAX_CHAT_ITEMS];
+static SRWLOCK g_chat_lock = SRWLOCK_INIT;
+static uint64_t (*g_chat_set)(void *item, void *user);
+static void *(*g_chat_dtor)(void *item, unsigned flags);
+static volatile long g_rows_logged;
+
+static uint64_t chat_set(void *item, void *user) {
+    uint64_t r = g_chat_set(item, user);
+    AcquireSRWLockExclusive(&g_chat_lock);
+    int i, free_at = -1;
+    for (i = 0; i < MAX_CHAT_ITEMS && g_chat_items[i] != item; i++)
+        if (!g_chat_items[i] && free_at < 0) free_at = i;
+    if (i == MAX_CHAT_ITEMS && free_at >= 0) g_chat_items[free_at] = item;
+    ReleaseSRWLockExclusive(&g_chat_lock);
+    return r;
+}
+
+static void *chat_dtor(void *item, unsigned flags) {
+    AcquireSRWLockExclusive(&g_chat_lock);
+    for (int i = 0; i < MAX_CHAT_ITEMS; i++) if (g_chat_items[i] == item) g_chat_items[i] = NULL;
+    ReleaseSRWLockExclusive(&g_chat_lock);
+    return g_chat_dtor(item, flags);
+}
+
+int lobby_rows(LobbyRow *out, int max) {
+    void *items[MAX_CHAT_ITEMS];
+    AcquireSRWLockShared(&g_chat_lock);
+    memcpy(items, g_chat_items, sizeof items);
+    ReleaseSRWLockShared(&g_chat_lock);
+    int n = 0;
+    for (int i = 0; i < MAX_CHAT_ITEMS && n < max; i++) {
+        if (!items[i]) continue;
+        int32_t x, y, w, h, rw, rh;
+        uint64_t user = 0, id = 0;
+        if (!place(items[i], 1, &x, &y, &w, &h, &rw, &rh) || w <= 0 || h <= 0) continue;
+        if (!peek((uint8_t *)items[i] + 0x158, &user, 8) || !peek((void *)(user + 8), &id, 8)) continue;
+        if (id < 76561190000000000ull || id > 76561199999999999ull) continue;
+        LobbyRow *r = &out[n++];
+        r->x = (float)x; r->y = (float)y; r->w = (float)w; r->h = (float)h; r->root_w = (float)rw; r->root_h = (float)rh;
+        snprintf(r->id, sizeof r->id, "%llu", (unsigned long long)id);
+        if (InterlockedIncrement(&g_rows_logged) <= 8) rc_log("pvp: lobby line %s at %d,%d size %dx%d", r->id, x, y, w, h);
+    }
+    return n;
+}
+
 static int vt_slot(uint32_t vt, int slot, uint32_t want) {
     uint64_t v = 0;
     return peek(g_base + vt + 8 * slot, &v, 8) && v == (uintptr_t)(g_base + want);
@@ -333,6 +388,16 @@ int pvp_install(uint8_t *exe, const char *dir, uint8_t *(*alloc)(size_t), void (
         patch(exe + PAGES[k].vt + 8 * 20, &binds[k], 8);
         patch(exe + PAGES[k].vt_cmd + 8, &cmds[k], 8);
         patch(exe + PAGES[k].vt, &dtors[k], 8);
+    }
+    // the lobby's player list
+    if (vt_slot(VT_CHAT_ITEM, 0, FN_CHAT_ITEM_DTOR) && vt_slot(VT_CHAT_ITEM, 70, FN_CHAT_ITEM_SET)) {
+        g_chat_set = (uint64_t (*)(void *, void *))(exe + FN_CHAT_ITEM_SET);
+        g_chat_dtor = (void *(*)(void *, unsigned))(exe + FN_CHAT_ITEM_DTOR);
+        void *set = (void *)chat_set, *dtor = (void *)chat_dtor;
+        patch(exe + VT_CHAT_ITEM + 8 * 70, &set, 8);
+        patch(exe + VT_CHAT_ITEM, &dtor, 8);
+    } else {
+        rc_log("pvp: the lobby's player list is not as expected, no MMR there");
     }
     rc_log("pvp: ready");
     return 1;

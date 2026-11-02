@@ -122,9 +122,9 @@ void online_set_consent(int yes);
 int online_copy(OnlinePlayer *out, int max, int *state);   // state 0 nothing yet, 1 list, 2 server unreachable
 const char *online_my_id(void);             // "" until Steam is up
 // texts of the rating server (server/src/matches.js), fetched while the panel asks for them each frame
-enum { DOC_PLAYER, DOC_BOARD_1V1, DOC_BOARD_TEAM, DOC_RATINGS, DOC_N };
+enum { DOC_PLAYER, DOC_BOARD_1V1, DOC_BOARD_TEAM, DOC_RATINGS, DOC_LOBBY, DOC_N };   // DOC_RATINGS: the online tab
 void online_want(int doc);                  // on screen this frame
-void online_ratings_ids(const char *ids);   // DOC_RATINGS: whose (comma separated SteamIDs, at most 16)
+void online_doc_ids(int doc, const char *ids);   // DOC_RATINGS / DOC_LOBBY: whose (comma separated SteamIDs, at most 16)
 int online_doc(int doc, char *out, size_t n, int *state);   // the last text; state 0 none yet, 1 ok, 2 unreachable
 
 // ---- match reports out of the game's own replays (report.c), sent by online.c ----
@@ -139,6 +139,9 @@ int pvp_install(uint8_t *exe, const char *dir, uint8_t *(*alloc)(size_t), void (
 // being root_w x root_h); 0 = the page is not up
 int pvp_rect(float *x, float *y, float *w, float *h, float *head_h, float *root_w, float *root_h);
 unsigned char *pvp_pak_file(const char *name, size_t *n);   // an unpacked file of interface.pak, malloc'd
+// the lobby's player list lines on screen (game units, as pvp_rect) and whose they are
+typedef struct { float x, y, w, h, root_w, root_h; char id[18]; } LobbyRow;
+int lobby_rows(LobbyRow *out, int max);
 
 // ---- memory census (census.c): where the game keeps a match's players and result; Ctrl+F12 ----
 void census_init(uint8_t *exe, const char *dir, int after_s);

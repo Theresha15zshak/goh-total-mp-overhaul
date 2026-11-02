@@ -166,14 +166,14 @@ volatile DWORD g_doc_want[DOC_N];
 static char *g_doc[DOC_N];
 static int g_doc_state[DOC_N];
 static DWORD g_doc_at[DOC_N];
-static char g_doc_ids[16 * 18 + 1];     // DOC_RATINGS: comma separated SteamIDs
+static char g_doc_ids[DOC_N][16 * 18 + 1];     // DOC_RATINGS, DOC_LOBBY: comma separated SteamIDs
 static SRWLOCK g_doc_lock = SRWLOCK_INIT;
 
 void online_want(int doc) { g_doc_want[doc] = GetTickCount() | 1; }
 
-void online_ratings_ids(const char *ids) {
+void online_doc_ids(int doc, const char *ids) {
     AcquireSRWLockExclusive(&g_doc_lock);
-    if (strcmp(ids, g_doc_ids)) { snprintf(g_doc_ids, sizeof g_doc_ids, "%s", ids); g_doc_at[DOC_RATINGS] = 0; }
+    if (strcmp(ids, g_doc_ids[doc])) { snprintf(g_doc_ids[doc], sizeof g_doc_ids[doc], "%s", ids); g_doc_at[doc] = 0; }
     ReleaseSRWLockExclusive(&g_doc_lock);
 }
 
@@ -193,10 +193,10 @@ static void fetch_docs(HINTERNET s, char *buf) {
         if (!want || now - want > 2000) continue;               // not on screen
         AcquireSRWLockShared(&g_doc_lock);
         int fresh = g_doc_at[d] && now - g_doc_at[d] < DOC_MS;
-        char ids[sizeof g_doc_ids];
-        memcpy(ids, g_doc_ids, sizeof ids);
+        char ids[sizeof g_doc_ids[0]];
+        memcpy(ids, g_doc_ids[d], sizeof ids);
         ReleaseSRWLockShared(&g_doc_lock);
-        if (fresh || (d == DOC_RATINGS && !ids[0])) continue;
+        if (fresh || ((d == DOC_RATINGS || d == DOC_LOBBY) && !ids[0])) continue;
         wchar_t path[400];
         if (d == DOC_PLAYER) swprintf(path, 400, L"/player?id=%hs", g_id);
         else if (d == DOC_BOARD_1V1) swprintf(path, 400, L"/leaderboard?ladder=1v1");

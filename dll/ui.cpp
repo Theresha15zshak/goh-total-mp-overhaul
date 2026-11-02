@@ -36,6 +36,7 @@ static volatile bool g_balance_win;     // balance switch: F7
 static volatile bool g_online_win;      // who is online with the mod: F6
 static volatile bool g_pvp_drawn;       // the PVP block over the game list was drawn this frame: the mouse over it is ours
 static ImFont *g_game_font;             // the game's anka 15 (the game list's rows), loaded from interface.pak
+static ImFont *g_game_font_small;       // anka 12: MMR under the names in the lobby
 static bool g_failed;
 
 static const float SPEEDS[] = {0.25f, 0.5f, 1, 2, 4, 8, 16};
@@ -689,7 +690,7 @@ static void tab_online(const Pane &p, float top, float bottom) {
     const char *my = online_my_id();
     char ids[16 * 18 + 1] = "";
     for (int i = 0; i < n && i < 16; i++) { if (i) strcat(ids, ","); strcat(ids, list[i].id); }
-    online_ratings_ids(ids);
+    online_doc_ids(DOC_RATINGS, ids);
     doc_get(rd, DOC_RATINGS);
     float col[4];
     for (int i = 0; i < 4; i++) col[i] = p.p0.x + VAN_COL[i] * p.size.x;
@@ -881,6 +882,38 @@ static void tab_leaders(const Pane &p, float top, float bottom) {
     ImGui::EndChild();
 }
 
+// ---- MMR under each name in the lobby's player list (pvp.c lobby_rows) ------------------------------------
+static const ImU32 VAN_ITEM = IM_COL32(176, 151, 121, 255);     // the skin's listbox item text
+
+static void lobby_overlay() {
+    static LobbyRow rows[16];
+    static Doc d;
+    int n = lobby_rows(rows, 16);
+    if (!n) return;
+    char ids[16 * 18 + 1] = "";
+    for (int i = 0; i < n; i++) { if (i) strcat(ids, ","); strcat(ids, rows[i].id); }
+    online_doc_ids(DOC_LOBBY, ids);
+    doc_get(d, DOC_LOBBY);
+    ImGuiIO &io = ImGui::GetIO();
+    ImDrawList *dl = ImGui::GetForegroundDrawList();
+    ImFont *font = g_game_font_small ? g_game_font_small : ImGui::GetFont();
+    for (int i = 0; i < n; i++) {
+        const LobbyRow &r = rows[i];
+        float sx = io.DisplaySize.x / r.root_w, sy = io.DisplaySize.y / r.root_h, size = font->FontSize * sy;
+        const char *m1 = nullptr, *mt = nullptr;
+        for (int k = 0; k < d.n; k++)
+            if (d.nf[k] >= 3 && !strcmp(d.f[k][0], r.id)) (strcmp(d.f[k][1], "1v1") ? mt : m1) = d.f[k][2];
+        char text[64];
+        if (m1 && mt) snprintf(text, sizeof text, "MMR 1\xC3\x97" "1 %s \xC2\xB7 ком. %s", m1, mt);
+        else if (m1 || mt) snprintf(text, sizeof text, "MMR %s%s", m1 ? "1\xC3\x97" "1 " : "", m1 ? m1 : mt);
+        else snprintf(text, sizeof text, d.state == 1 ? "MMR \xE2\x80\x94" : "MMR ...");
+        // under the name: the name starts after the avatar, the line ends at the row's bottom
+        ImVec2 at(floorf((r.x + 28) * sx + 0.5f), floorf((r.y + r.h) * sy - size * 0.35f + 0.5f));
+        dl->AddText(font, size, ImVec2(at.x + 1, at.y + 1), IM_COL32(0, 0, 0, 200), text);
+        dl->AddText(font, size, at, VAN_ITEM, text);
+    }
+}
+
 static void pvp_block() {
     float x, y, w, h, head, rw, rh;
     g_pvp_drawn = false;
@@ -959,9 +992,9 @@ static void pvp_block() {
 // ---- the game's own font (a BMFont: .fnt + a 32-bit RLE .tga in interface.pak), for blocks set in its pages ----
 // Glyphs are packed into the texture's channels (each glyph's chnl: 1 blue, 2 green, 4 red, 8 alpha). They go
 // into ImGui's atlas as custom glyphs, their pixels copied in once the atlas is built.
-struct GameGlyph { int rect, x, y, w, h, chnl; };
-static unsigned char *g_game_font_tex;      // its texture, BGRA, top row first
-static int g_game_font_tex_w;
+struct GameGlyph { int rect, x, y, w, h, chnl, tex; };
+static unsigned char *g_font_tex[4];        // each font's texture, BGRA, top row first, until the atlas has them
+static int g_font_tex_w[4], g_font_texs;
 static ImVector<GameGlyph> g_game_glyphs;
 
 static unsigned char *tga_bgra(const unsigned char *b, size_t n, int *w_out, int *h_out) {
@@ -1006,11 +1039,14 @@ static ImFont *add_game_font(ImFontAtlas *atlas, const char *name) {
         if (type == 4) { chars = blk; nchars = len / 20; }
         p += 5 + len;
     }
-    unsigned char *t = page[0] ? pvp_pak_file(page, &tn) : nullptr;
-    g_game_font_tex = t ? tga_bgra(t, tn, &tw, &th) : nullptr;
+    unsigned char *t = page[0] && g_font_texs < 4 ? pvp_pak_file(page, &tn) : nullptr;
+    unsigned char *tex = t ? tga_bgra(t, tn, &tw, &th) : nullptr;
     free(t);
-    if (!g_game_font_tex || !chars || line <= 0) { free(f); rc_log("ui: game font %s not loaded", name); return nullptr; }
-    g_game_font_tex_w = tw;
+    if (!tex || !chars || line <= 0) { free(tex); free(f); rc_log("ui: game font %s not loaded", name); return nullptr; }
+    int ti = g_font_texs++;
+    g_font_tex[ti] = tex;
+    g_font_tex_w[ti] = tw;
+    int before = g_game_glyphs.Size;
     ImFontConfig cfg;
     cfg.SizePixels = (float)line;
     static const ImWchar none[] = {0x20, 0x20, 0};
@@ -1025,17 +1061,17 @@ static ImFont *add_game_font(ImFontAtlas *atlas, const char *name) {
         memcpy(&id, c, 4); memcpy(&x, c + 4, 2); memcpy(&y, c + 6, 2); memcpy(&w, c + 8, 2); memcpy(&h, c + 10, 2);
         memcpy(&xo, c + 12, 2); memcpy(&yo, c + 14, 2); memcpy(&adv, c + 16, 2);
         if (id > 0xffff || c[18] != 0 || x + w > tw || y + h > th) continue;
-        GameGlyph g = {atlas->AddCustomRectFontGlyph(font, (ImWchar)id, w ? w : 1, h ? h : 1, adv, ImVec2(xo, yo)), x, y, w, h, c[19]};
+        GameGlyph g = {atlas->AddCustomRectFontGlyph(font, (ImWchar)id, w ? w : 1, h ? h : 1, adv, ImVec2(xo, yo)), x, y, w, h, c[19], ti};
         g_game_glyphs.push_back(g);
     }
     free(f);
-    rc_log("ui: game font %s, %d glyphs", name, g_game_glyphs.Size);
+    rc_log("ui: game font %s, %d glyphs", name, g_game_glyphs.Size - before);
     return font;
 }
 
 // once the atlas is built: the glyphs' pixels, white with the game's coverage as alpha
 static void fill_game_glyphs(ImFontAtlas *atlas) {
-    if (!g_game_font_tex) return;
+    if (!g_font_texs) return;
     unsigned char *px;
     int w, h;
     atlas->GetTexDataAsRGBA32(&px, &w, &h);
@@ -1044,13 +1080,13 @@ static void fill_game_glyphs(ImFontAtlas *atlas) {
         int ch = g.chnl == 1 ? 0 : g.chnl == 2 ? 1 : g.chnl == 4 ? 2 : 3;
         for (int y = 0; y < g.h; y++)
             for (int x = 0; x < g.w; x++) {
-                const unsigned char *s = g_game_font_tex + ((size_t)(g.y + y) * g_game_font_tex_w + g.x + x) * 4;
+                const unsigned char *s = g_font_tex[g.tex] + ((size_t)(g.y + y) * g_font_tex_w[g.tex] + g.x + x) * 4;
                 unsigned char a = g.chnl == 15 ? s[3] : s[ch];
                 ((ImU32 *)px)[(size_t)(r->Y + y) * w + r->X + x] = IM_COL32(255, 255, 255, a);
             }
     }
-    free(g_game_font_tex);
-    g_game_font_tex = nullptr;
+    for (int i = 0; i < g_font_texs; i++) { free(g_font_tex[i]); g_font_tex[i] = nullptr; }
+    g_font_texs = 0;
 }
 
 static void init_imgui(IDXGISwapChain *sc) {
@@ -1081,6 +1117,7 @@ static void init_imgui(IDXGISwapChain *sc) {
     else
         io.Fonts->AddFontDefault();
     g_game_font = add_game_font(io.Fonts, "anka_15");
+    g_game_font_small = add_game_font(io.Fonts, "anka_12");
 
     rc_log("ui: font loaded");
     ImGui::StyleColorsDark();
@@ -1141,6 +1178,7 @@ static void draw(IDXGISwapChain *sc) {
     if (music_shown()) music_window();
     if (balance_shown()) balance_window();
     pvp_block();
+    lobby_overlay();
     g_online_want = online_shown() || g_pvp_drawn;
     if (online_shown()) online_window();
     if (consent_shown()) consent_window();
