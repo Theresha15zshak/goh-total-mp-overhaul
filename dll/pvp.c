@@ -420,11 +420,20 @@ static void scan_names(void) {
     if (n != last_n) { rc_log("pvp: lobby names on screen: %d (%d dialogs looked at)", n, 20000 - budget); last_n = n; }
 }
 
-// The lines are taller for the MMR under each name: each eListboxItem (eTypedListboxItem<shared_ptr<eChatUser>>,
-// three parents up from the name) gets LINE_EXTRA more height and the ones below move down, every frame, since
-// the listbox puts them back whenever it lays itself out again.
-#define VT_CHAT_USER_ITEM 0x10440d8
+// The lines are taller for the MMR under each name: each line of the list (an eListboxItem, a few parents up
+// from the name) gets LINE_EXTRA more height and the ones below move down, every frame, since the listbox puts
+// them back whenever it lays itself out again. Which class the line is was a guess first (eTypedListboxItem<
+// shared_ptr<eChatUser>>, and nothing was found, 2026-11-02): any of the listbox item classes is taken now.
+static const uint32_t VT_LINE_ITEMS[] = {0x10440d8, 0x103f598, 0x103f850};
 #define LINE_EXTRA 12
+
+static int line_item(uint64_t d) {
+    uint64_t vt = 0;
+    if (!d || !peek((void *)d, &vt, 8)) return 0;
+    for (size_t i = 0; i < sizeof VT_LINE_ITEMS / sizeof VT_LINE_ITEMS[0]; i++)
+        if (vt == (uintptr_t)(g_base + VT_LINE_ITEMS[i])) return 1;
+    return 0;
+}
 
 static void poke(void *p, const void *v, size_t n) {
     SIZE_T put = 0;
@@ -436,9 +445,13 @@ static void taller_lines(void **names, int count) {
     int32_t ys[MAX_NAMES];
     int n = 0;
     for (int i = 0; i < count; i++) {
-        uint64_t d = (uintptr_t)names[i], vt = 0;
-        for (int up = 0; up < 3 && d; up++) d = pq(d + 0xf0);
-        if (!d || !peek((void *)d, &vt, 8) || vt != (uintptr_t)(g_base + VT_CHAT_USER_ITEM)) continue;
+        uint64_t d = (uintptr_t)names[i];
+        for (int up = 0; up < 5 && d && !line_item(d); up++) d = pq(d + 0xf0);
+        if (!line_item(d)) {
+            static int missed;
+            if (!missed++) log_chain("lobby name, no line found above it", names[i]);
+            continue;
+        }
         int32_t pos[2];
         if (!peek((void *)(d + 0x98), pos, 8)) continue;
         int k = n++;
@@ -452,8 +465,7 @@ static void taller_lines(void **names, int count) {
         if (!peek(items[k] + 0xa0, size, 8)) continue;
         int32_t base = size[1] > 22 + LINE_EXTRA / 2 ? size[1] - LINE_EXTRA : size[1];   // the game's own height
         int32_t h = base + LINE_EXTRA, y = ys[0] + k * h;
-        uint64_t vt = 0;
-        if (!peek(items[k], &vt, 8) || vt != (uintptr_t)(g_base + VT_CHAT_USER_ITEM)) continue;   // gone meanwhile
+        if (!line_item((uintptr_t)items[k])) continue;      // gone meanwhile
         if (size[1] != h) poke(items[k] + 0xa4, &h, 4);
         if (ys[k] != y) poke(items[k] + 0x9c, &y, 4);
     }
