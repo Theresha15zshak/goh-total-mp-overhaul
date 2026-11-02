@@ -9,7 +9,8 @@
 //                                        punishment in force
 //          "M\tid\tat_ms\tsteam_id\tname\ttext\tverified"   oldest first, at most 100; players not signed in
 //                                        with Steam (verify.js) write as Anonymous####, verified 0
-//   POST /chat      "steam_id\nkey\nchannel\ntext"            -> "ok" / "muted <until>" / "banned" / "slow" ...
+//   POST /chat      "steam_id\nkey\nchannel\ntext"            -> "ok" / "muted <until>" / "banned" / "slow" / "flood" /
+//                   "repeat" ...; links to sites not in ALLOWED_LINKS are cut out of the text
 //   POST /chatmod   "steam_id\nkey\naction\ntarget\ndays"     moderators only (env.MODERATORS, comma separated):
 //                   mute (days) / ban / unban / del (the target's messages in every channel)
 import { anonName } from './verify.js';
@@ -18,6 +19,18 @@ const STEAM_ID = /^7656119\d{10}$/;
 const KEY = /^[0-9a-f]{64}$/;
 const CHANNELS = new Set(['ru', 'en']);
 const MAX_TEXT = 300, SLOW_MS = 2000, PAGE = 100;
+const BURST_MS = 30000, BURST = 5, REPEAT_MS = 60000;     // at most 5 messages in 30 s; the same text again after a minute
+
+// Links: only to these sites (and their subdomains); any other address in a message becomes "[ссылка удалена]".
+// An address is anything with "://", "www." or a name.tld (Latin letters), with or without a path.
+const ALLOWED_LINKS = ['discord.gg', 'youtube.com', 'youtu.be'];
+const LINK = /\b(?:[a-z][a-z0-9+.-]*:\/\/\S+|www\.\S+|(?:[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.)+[a-z]{2,}(?::\d+)?(?:[\/?#]\S*)?)/gi;
+export function cleanLinks(text) {
+  return text.replace(LINK, m => {
+    const host = m.replace(/^[a-z][a-z0-9+.-]*:\/\//i, '').split(/[\/?#:]/)[0].toLowerCase();
+    return ALLOWED_LINKS.some(d => host === d || host.endsWith('.' + d)) ? m : '[ссылка удалена]';
+  });
+}
 
 async function sha256(s) {
   const d = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(s));
@@ -80,15 +93,19 @@ export async function write(req, env) {
   const body = await req.text();
   if (body.length > 2048) return [413, 'too big'];
   const [id, key, ch, ...rest] = body.split('\n');
-  const text = Array.from(rest.join(' ').replace(/[\u0000-\u001f\u007f]/g, ' ').trim()).slice(0, MAX_TEXT).join('');
+  const text = cleanLinks(Array.from(rest.join(' ').replace(/[\u0000-\u001f\u007f]/g, ' ').trim()).slice(0, MAX_TEXT).join(''));
   if (!CHANNELS.has(ch) || !text) return [400, 'bad'];
   const p = await player(env, id, key);
   if (!p) return [403, 'unknown key'];
   const now = Date.now();
   const pun = await punished(env, id, Math.floor(now / 1000), p.key_hash);
   if (pun) return [403, pun.kind === 'ban' ? 'banned' : 'muted ' + pun.until];
-  const last = await env.DB.prepare('SELECT max(at) AS at FROM chat_messages WHERE steam_id = ?1').bind(id).first();
-  if (last && last.at && now - last.at < SLOW_MS) return [429, 'slow'];
+  const { results: mine } = await env.DB.prepare(
+    'SELECT at, text FROM chat_messages WHERE steam_id = ?1 AND at > ?2 ORDER BY at DESC LIMIT ' + BURST
+  ).bind(id, now - Math.max(BURST_MS, REPEAT_MS)).all();
+  if (mine.length && now - mine[0].at < SLOW_MS) return [429, 'slow'];
+  if (mine.filter(m => now - m.at < BURST_MS).length >= BURST) return [429, 'flood'];
+  if (mine.some(m => m.text === text)) return [429, 'repeat'];
   const verified = p.verified_at ? 1 : 0;
   await env.DB.prepare('INSERT INTO chat_messages (channel, steam_id, name, text, at, verified) VALUES (?1, ?2, ?3, ?4, ?5, ?6)')
     .bind(ch, id, verified ? p.name : anonName(p.key_hash), text, now, verified).run();

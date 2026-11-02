@@ -90,9 +90,38 @@ function page(list) {
 <table><tr><th>Игрок</th><th>Версия</th><th>Был</th></tr>${rows}</table>`;
 }
 
+// Requests per IP address and minute (wrangler.jsonc ratelimits): a game polls the chat every 3 s and the
+// rest far less, so 240 leaves room for a few players behind one address; writing (POST) 40. Over it: 429.
+// This keeps one address from taking the database for itself; requests turned away here still count as
+// requests of the Workers plan (that is only guarded in front of the Worker, by a rule on a domain of our own).
+// Cloudflare's own limiter is loose (counted per location, eventually), so each copy of the Worker also counts
+// for itself: a flood from one address mostly lands on the same few copies.
+const WINDOW_MS = 60000, ALL_PER_MIN = 240, WRITE_PER_MIN = 40;
+const seen = new Map();          // ip -> { at, all, write }: this copy's minute
+
+function counted(ip, post) {
+  const now = Date.now();
+  if (seen.size > 5000) for (const [k, v] of seen) if (now - v.at > WINDOW_MS) seen.delete(k);
+  let c = seen.get(ip);
+  if (!c || now - c.at > WINDOW_MS) seen.set(ip, (c = { at: now, all: 0, write: 0 }));
+  c.all++;
+  if (post) c.write++;
+  return c.all > ALL_PER_MIN || c.write > WRITE_PER_MIN;
+}
+
+async function limited(req, env) {
+  const ip = req.headers.get('cf-connecting-ip') || 'none', post = req.method === 'POST';
+  if (counted(ip, post)) return true;
+  const all = env.LIMIT_ALL ? await env.LIMIT_ALL.limit({ key: ip }) : { success: true };
+  if (!all.success) return true;
+  if (!post || !env.LIMIT_WRITE) return false;
+  return !(await env.LIMIT_WRITE.limit({ key: ip })).success;
+}
+
 export default {
   async fetch(req, env) {
     const url = new URL(req.url);
+    if (await limited(req, env)) return text('too many requests', 429);
     if (url.pathname === '/hb' && req.method === 'POST') return heartbeat(req, env);
     if (url.pathname === '/report' && req.method === 'POST') {
       const [status, msg] = await report(req, env);

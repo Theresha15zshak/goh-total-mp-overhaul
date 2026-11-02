@@ -336,8 +336,10 @@ static void chat_tick(HINTERNET s, char *buf) {
     if (out[0]) {
         snprintf(body, sizeof body, "%s\n%s\n%s\n%s", g_id, g_key, CHAT_CH[out_ch], out);
         int st = http(s, L"POST", L"/chat", body, buf);
-        const char *why = st == 200 ? "" : st == 429 ? "не так часто" : !strncmp(buf, "muted", 5) ? "вам запрещено писать" :
-                          !strcmp(buf, "banned") ? "вы забанены в чате" : st == 403 ? "сервер не знает ваш ключ" : "не отправлено";
+        const char *why = st == 200 ? "" : !strcmp(buf, "flood") ? "слишком много сообщений подряд, подождите" :
+                          !strcmp(buf, "repeat") ? "это сообщение уже было" : st == 429 ? "не так часто" :
+                          !strncmp(buf, "muted", 5) ? "вам запрещено писать" : !strcmp(buf, "banned") ? "вы забанены в чате" :
+                          st == 403 ? "сервер не знает ваш ключ" : "не отправлено";
         AcquireSRWLockExclusive(&g_chat_lock);
         snprintf(g_chat_st.sent, sizeof g_chat_st.sent, "%s", why);
         ReleaseSRWLockExclusive(&g_chat_lock);

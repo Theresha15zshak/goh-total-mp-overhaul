@@ -1145,6 +1145,13 @@ static void chat_name(const char *id, const char *name, ImU32 col, bool verified
     }
 }
 
+static const char *CHAT_RULES[] = {
+    "0. Не быть мудаком.",
+    "1. Старайтесь не обсуждать других и не переходить на личности и конфликты.",
+    "2. Не выкладывайте материалы жестокого, насильственного или сексуального характера.",
+    "3. Ссылки удаляются, кроме discord.gg и youtube.com.",
+};
+
 static void chat_block() {
     float x, y, w, h, rw, rh;
     g_chat_drawn = false;
@@ -1267,7 +1274,14 @@ static void chat_block() {
         if (st.banned) ImGui::TextColored(ImColor(VAN_WARN), "Вы забанены в глобальном чате.");
         else if (st.state == 0 && !n) ImGui::TextColored(ImColor(VAN_TITLE), "Загрузка...");
         else if (st.state == 2 && !n) ImGui::TextColored(ImColor(VAN_WARN), "Сервер мода не отвечает");
-        else if (!n) ImGui::TextColored(ImColor(VAN_TITLE), "Пока тихо. Сообщения стираются каждые два часа.");
+        if (!st.banned) {           // the rules, at the top: only here, every game
+            ImGui::TextColored(ImColor(ACCENT), "Правила чата");
+            ImGui::PushStyleColor(ImGuiCol_Text, VAN_TITLE);
+            for (const char *r : CHAT_RULES) ImGui::TextWrapped("%s", r);
+            ImGui::PopStyleColor();
+            ImGui::Dummy(ImVec2(1, 4 * sy));
+        }
+        if (!st.banned && !n && st.state == 1) ImGui::TextColored(ImColor(VAN_TITLE), "Пока тихо. Сообщения стираются каждые два часа.");
         for (int i = 0; i < n; i++) {
             const ChatMsg &m = msgs[i];
             ImGui::PushID((int)m.id);
