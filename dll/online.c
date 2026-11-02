@@ -158,6 +158,58 @@ static void parse_list(char *t) {
     ReleaseSRWLockExclusive(&g_lock);
 }
 
+// ---- texts the panel shows (stats, leaders, ratings): fetched while it asks for them, every 30 s ----------
+#define DOC_MS 30000
+volatile DWORD g_doc_want[DOC_N];
+static char *g_doc[DOC_N];
+static int g_doc_state[DOC_N];
+static DWORD g_doc_at[DOC_N];
+static char g_doc_ids[16 * 18 + 1];     // DOC_RATINGS: comma separated SteamIDs
+static SRWLOCK g_doc_lock = SRWLOCK_INIT;
+
+void online_want(int doc) { g_doc_want[doc] = GetTickCount() | 1; }
+
+void online_ratings_ids(const char *ids) {
+    AcquireSRWLockExclusive(&g_doc_lock);
+    if (strcmp(ids, g_doc_ids)) { snprintf(g_doc_ids, sizeof g_doc_ids, "%s", ids); g_doc_at[DOC_RATINGS] = 0; }
+    ReleaseSRWLockExclusive(&g_doc_lock);
+}
+
+int online_doc(int doc, char *out, size_t n, int *state) {
+    AcquireSRWLockShared(&g_doc_lock);
+    int ok = g_doc[doc] != NULL;
+    snprintf(out, n, "%s", ok ? g_doc[doc] : "");
+    *state = g_doc_state[doc];
+    ReleaseSRWLockShared(&g_doc_lock);
+    return ok;
+}
+
+static void fetch_docs(HINTERNET s, char *buf) {
+    DWORD now = GetTickCount();
+    for (int d = 0; d < DOC_N; d++) {
+        DWORD want = g_doc_want[d];
+        if (!want || now - want > 2000) continue;               // not on screen
+        AcquireSRWLockShared(&g_doc_lock);
+        int fresh = g_doc_at[d] && now - g_doc_at[d] < DOC_MS;
+        char ids[sizeof g_doc_ids];
+        memcpy(ids, g_doc_ids, sizeof ids);
+        ReleaseSRWLockShared(&g_doc_lock);
+        if (fresh || (d == DOC_RATINGS && !ids[0])) continue;
+        wchar_t path[400];
+        if (d == DOC_PLAYER) swprintf(path, 400, L"/player?id=%hs", g_id);
+        else if (d == DOC_BOARD_1V1) swprintf(path, 400, L"/leaderboard?ladder=1v1");
+        else if (d == DOC_BOARD_TEAM) swprintf(path, 400, L"/leaderboard?ladder=team");
+        else swprintf(path, 400, L"/ratings?ids=%hs", ids);
+        int st = http(s, L"GET", path, NULL, buf);
+        char *copy = st == 200 ? _strdup(buf) : NULL;
+        AcquireSRWLockExclusive(&g_doc_lock);
+        if (copy) { free(g_doc[d]); g_doc[d] = copy; }
+        g_doc_state[d] = copy ? 1 : 2;
+        g_doc_at[d] = now | 1;
+        ReleaseSRWLockExclusive(&g_doc_lock);
+    }
+}
+
 static DWORD WINAPI online_thread(LPVOID unused) {
     load_key();
     while (!steam_me()) Sleep(2000);
@@ -189,6 +241,7 @@ static DWORD WINAPI online_thread(LPVOID unused) {
             else { AcquireSRWLockExclusive(&g_lock); g_state = 2; ReleaseSRWLockExclusive(&g_lock); }
         }
         wanted = want;
+        fetch_docs(s, buf);
         Sleep(500);
     }
 }

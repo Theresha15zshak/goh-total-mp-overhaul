@@ -7,6 +7,8 @@
 #include <dxgi.h>
 #include <stdio.h>
 #include <math.h>
+#include <stdlib.h>
+#include <time.h>
 #include <shellapi.h>
 #include "imgui.h"
 #include "imgui_impl_win32.h"
@@ -603,10 +605,277 @@ static const ImU32 VAN_HOVER_BG = IM_COL32(44, 37, 30, 200);
 static const ImU32 VAN_WARN = IM_COL32(209, 120, 54, 255);      // the skin's "disabled" orange
 static const float VAN_COL[4] = {0.142f, 0.438f, 0.66f, 0.882f};
 
+static const ImU32 VAN_TAB = IM_COL32(240, 240, 240, 255);      // the page's tabs (ДРУЗЬЯ | ПОСЛЕДНЯЯ ИГРА)
+static const ImU32 VAN_TAB_OFF = IM_COL32(150, 150, 150, 255);
+static const ImU32 VAN_WIN = IM_COL32(120, 200, 100, 255);
+
 static void van_text(ImDrawList *dl, float x, float y, ImU32 col, const char *s) { dl->AddText(ImVec2(floorf(x + 0.5f), floorf(y + 0.5f)), col, s); }
 
-static void pvp_block() {
+// cut at the right edge of its column
+static void van_cell(ImDrawList *dl, float x, float y, float w, ImU32 col, const char *s) {
+    ImVec4 clip(x, y - 2, x + w, y + ImGui::GetTextLineHeight() + 2);
+    dl->AddText(ImGui::GetFont(), ImGui::GetFontSize(), ImVec2(floorf(x + 0.5f), floorf(y + 0.5f)), col, s, nullptr, 0, &clip);
+}
+
+static void open_profile(const char *id) {
+    char url[64];
+    snprintf(url, sizeof url, "steam://url/SteamIDPage/%s", id);
+    ShellExecuteA(nullptr, "open", url, nullptr, nullptr, SW_SHOWNORMAL);
+}
+
+// a text of the rating server cut into lines and tab-separated fields, in place
+struct Doc { static const int MAXL = 160; char text[32768]; int n; char *f[MAXL][12]; int nf[MAXL]; int state; };
+
+static void doc_get(Doc &d, int which) {
+    online_want(which);
+    online_doc(which, d.text, sizeof d.text, &d.state);
+    d.n = 0;
+    for (char *line = d.text; *line && d.n < Doc::MAXL;) {
+        char *end = strchr(line, '\n');
+        if (end) *end = 0;
+        int k = 0;
+        d.f[d.n][k++] = line;
+        for (char *q = line; *q && k < 12; q++) if (*q == '\t') { *q = 0; d.f[d.n][k++] = q + 1; }
+        d.nf[d.n++] = k;
+        if (!end) break;
+        line = end + 1;
+    }
+}
+
+static const char *NATIONS[5][2] = {{"ger", "Рейх"}, {"fin", "Финляндия"}, {"eng", "Британия"}, {"usa", "США"}, {"rus", "СССР"}};
+static const char *nation_name(const char *n) {
+    for (auto &x : NATIONS) if (!strcmp(x[0], n)) return x[1];
+    return n;
+}
+static const char *mode_name(const char *m) {
+    return !strcmp(m, "battle_zones") ? "Зоны боевых действий" : !strcmp(m, "superiority") ? "Превосходство" : m;
+}
+static void mmr_text(char *out, size_t n, const char *mmr, int games) {
+    if (games <= 0) snprintf(out, n, "\xE2\x80\x94");
+    else if (games < 10) snprintf(out, n, "%s (калибровка %d/10)", mmr, games);
+    else snprintf(out, n, "%s", mmr);
+}
+
+// what every tab draws in: the block's place, its line height, rows and scale
+struct Pane { ImDrawList *dl; ImVec2 p0, size; float lh, row, sx, sy; };
+
+static int g_pvp_tab;                   // 0 online, 1 my stats, 2 leaders
+static int g_board_team = 1;            // leaders: 0 one on one, 1 teams
+
+// a row that lights up under the mouse; true when clicked
+static bool van_row(const Pane &p, ImDrawList *dl, ImVec2 r0, float h, bool *hot) {
+    ImGui::SetCursorScreenPos(r0);
+    bool click = ImGui::InvisibleButton("##row", ImVec2(p.size.x - 10 * p.sy, h));
+    *hot = ImGui::IsItemHovered();
+    if (*hot) dl->AddRectFilled(r0, ImVec2(r0.x + p.size.x - 10 * p.sy, r0.y + h), VAN_HOVER_BG);
+    return click;
+}
+
+static void van_empty(const Pane &p, ImDrawList *dl, ImVec2 at, const char *msg) {
+    float tw = ImGui::CalcTextSize(msg).x;
+    van_text(dl, at.x + (p.size.x - tw) * 0.5f, at.y + p.row * 1.5f, VAN_TITLE, msg);
+}
+
+static void tab_online(const Pane &p, float top, float bottom) {
     static OnlinePlayer list[ONLINE_MAX];
+    static Doc rd;
+    int state = 0, n = online_copy(list, ONLINE_MAX, &state);
+    const char *my = online_my_id();
+    char ids[16 * 18 + 1] = "";
+    for (int i = 0; i < n && i < 16; i++) { if (i) strcat(ids, ","); strcat(ids, list[i].id); }
+    online_ratings_ids(ids);
+    doc_get(rd, DOC_RATINGS);
+    float col[4];
+    for (int i = 0; i < 4; i++) col[i] = p.p0.x + VAN_COL[i] * p.size.x;
+    float ty = top + (p.row - p.lh) * 0.5f;
+    van_text(p.dl, col[0], ty, VAN_TITLE, "Игрок");
+    van_text(p.dl, col[1], ty, VAN_TITLE, "Версия баланса");
+    van_text(p.dl, col[2], ty, VAN_TITLE, "Совместимость");
+    van_text(p.dl, col[3], ty, VAN_TITLE, "MMR 1\xC3\x97" "1 / ком.");
+    ImGui::SetCursorScreenPos(ImVec2(p.p0.x, top + p.row));
+    ImGui::BeginChild("##online", ImVec2(p.size.x, bottom - top - p.row), ImGuiChildFlags_None, ImGuiWindowFlags_NoBackground);
+    ImGui::SetWindowFontScale(p.sy);
+    ImDrawList *dl = ImGui::GetWindowDrawList();
+    ImVec2 o = ImGui::GetCursorScreenPos();
+    if (state != 1 || n == 0) van_empty(p, dl, o, state == 0 ? "Загрузка..." : state == 2 && !n ? "Сервер мода не отвечает" : "Сейчас никого нет");
+    for (int i = 0; i < n; i++) {
+        ImGui::PushID(i);
+        ImVec2 r0(o.x, o.y + i * p.row);
+        bool hot, click = van_row(p, dl, r0, p.row, &hot);
+        bool self = !strcmp(list[i].id, my), same = !strcmp(list[i].version, g_balance_tag);
+        float yy = r0.y + (p.row - p.lh) * 0.5f;
+        ImU32 c = hot ? VAN_HOVER : VAN_TEXT;
+        if (self) dl->AddRectFilled(ImVec2(r0.x + 14 * p.sx, yy + p.lh * 0.3f), ImVec2(r0.x + 20 * p.sx, yy + p.lh * 0.3f + 6 * p.sy), ACCENT);
+        van_text(dl, col[0], yy, c, list[i].name);
+        van_text(dl, col[1], yy, same ? c : VAN_WARN, list[i].version);
+        van_text(dl, col[2], yy, self ? VAN_TITLE : same ? c : VAN_WARN, self ? "это вы" : same ? "можно играть компетитив" : "другая версия");
+        const char *m1 = "\xE2\x80\x94", *mt = "\xE2\x80\x94";
+        for (int k = 0; k < rd.n; k++)
+            if (rd.nf[k] >= 3 && !strcmp(rd.f[k][0], list[i].id)) (strcmp(rd.f[k][1], "1v1") ? mt : m1) = rd.f[k][2];
+        char mm[48];
+        snprintf(mm, sizeof mm, "%s / %s", m1, mt);
+        van_text(dl, col[3], yy, c, mm);
+        if (click) open_profile(list[i].id);
+        ImGui::PopID();
+    }
+    if (n) ImGui::Dummy(ImVec2(1, 0));
+    ImGui::EndChild();
+}
+
+static void tab_stats(const Pane &p, float top, float bottom) {
+    static Doc d;
+    doc_get(d, DOC_PLAYER);
+    ImDrawList *dl = p.dl;
+    float x0 = p.p0.x + 0.03f * p.size.x, y = top + (p.row - p.lh) * 0.5f;
+    if (!online_my_id()[0] || d.state != 1) {
+        van_empty(p, dl, ImVec2(p.p0.x, top), d.state == 2 ? "Сервер мода не отвечает" : "Загрузка...");
+        return;
+    }
+    // the two ladders
+    const char *lad[2] = {"1v1", "team"}, *lad_name[2] = {"1 НА 1", "КОМАНДЫ (2\xC3\x97" "2, 3\xC3\x97" "3)"};
+    for (int l = 0; l < 2; l++) {
+        float x = x0 + l * 0.5f * p.size.x;
+        van_text(dl, x, y, VAN_TITLE, lad_name[l]);
+        char line[128] = "Ещё не играл";
+        for (int k = 0; k < d.n; k++)
+            if (d.nf[k] >= 5 && !strcmp(d.f[k][0], "L") && !strcmp(d.f[k][1], lad[l])) {
+                int g = atoi(d.f[k][3]), w = atoi(d.f[k][4]);
+                char mm[64];
+                mmr_text(mm, sizeof mm, d.f[k][2], g);
+                snprintf(line, sizeof line, "MMR %s  \xC2\xB7  игр %d  \xC2\xB7  побед %d%%", mm, g, g ? w * 100 / g : 0);
+            }
+        van_text(dl, x, y + p.lh * 1.3f, VAN_TEXT, line);
+    }
+    // by nation
+    float ny = y + p.lh * 3.2f, nrow = p.lh * 1.45f;
+    float nc[3] = {x0, x0 + 0.22f * p.size.x, x0 + 0.58f * p.size.x};
+    van_text(dl, nc[0], ny, VAN_TITLE, "Нация");
+    van_text(dl, nc[1], ny, VAN_TITLE, "1 на 1: MMR \xC2\xB7 игр \xC2\xB7 побед");
+    van_text(dl, nc[2], ny, VAN_TITLE, "Команды: MMR \xC2\xB7 игр \xC2\xB7 побед");
+    for (int i = 0; i < 5; i++) {
+        float yy = ny + (i + 1) * nrow;
+        van_text(dl, nc[0], yy, VAN_TEXT, NATIONS[i][1]);
+        for (int l = 0; l < 2; l++) {
+            char cell[96] = "\xE2\x80\x94";
+            for (int k = 0; k < d.n; k++)
+                if (d.nf[k] >= 6 && !strcmp(d.f[k][0], "N") && !strcmp(d.f[k][1], lad[l]) && !strcmp(d.f[k][2], NATIONS[i][0])) {
+                    int g = atoi(d.f[k][4]), w = atoi(d.f[k][5]);
+                    snprintf(cell, sizeof cell, "%s  \xC2\xB7  %d  \xC2\xB7  %d%%", d.f[k][3], g, g ? w * 100 / g : 0);
+                }
+            van_text(dl, nc[1 + l], yy, VAN_TEXT, cell);
+        }
+    }
+    // history
+    float hy = ny + 6 * nrow + p.lh * 0.6f;
+    static const float HC[7] = {0.03f, 0.13f, 0.37f, 0.43f, 0.55f, 0.67f, 0.83f};
+    static const char *HT[7] = {"Дата", "Режим \xC2\xB7 карта", "Бой", "Нация", "Итог", "Союзники", "Противники"};
+    float hc[8];
+    for (int i = 0; i < 7; i++) hc[i] = p.p0.x + HC[i] * p.size.x;
+    hc[7] = p.p0.x + 0.99f * p.size.x;
+    for (int i = 0; i < 7; i++) van_text(dl, hc[i], hy, VAN_TITLE, HT[i]);
+    ImGui::SetCursorScreenPos(ImVec2(p.p0.x, hy + p.lh * 1.4f));
+    ImGui::BeginChild("##history", ImVec2(p.size.x, bottom - hy - p.lh * 1.4f), ImGuiChildFlags_None, ImGuiWindowFlags_NoBackground);
+    ImGui::SetWindowFontScale(p.sy);
+    ImDrawList *hl = ImGui::GetWindowDrawList();
+    ImVec2 o = ImGui::GetCursorScreenPos();
+    float hrow = p.row * 0.85f;
+    int shown = 0;
+    for (int k = 0; k < d.n; k++) {
+        if (d.nf[k] < 12 || strcmp(d.f[k][0], "M")) continue;
+        char **f = d.f[k];
+        ImGui::PushID(k);
+        ImVec2 r0(o.x, o.y + shown++ * hrow);
+        bool hot;
+        van_row(p, hl, r0, hrow, &hot);
+        float yy = r0.y + (hrow - p.lh) * 0.5f;
+        ImU32 c = hot ? VAN_HOVER : VAN_TEXT;
+        char date[32] = "", what[160], size[16], result[48];
+        time_t t = (time_t)atoll(f[2]);
+        struct tm lt;
+        if (!localtime_s(&lt, &t)) strftime(date, sizeof date, "%d.%m %H:%M", &lt);
+        snprintf(what, sizeof what, "%s \xC2\xB7 %s", mode_name(f[3]), f[4]);
+        snprintf(size, sizeof size, "%s\xC3\x97%s", f[5], f[5]);
+        bool won = atoi(f[7]) != 0, rated = !strcmp(f[9], "rated");
+        int delta = atoi(f[8]);
+        if (rated) snprintf(result, sizeof result, "%s %+d", won ? "Победа" : "Поражение", delta);
+        else snprintf(result, sizeof result, "%s (спорный)", won ? "Победа" : "Поражение");
+        van_cell(hl, hc[0], yy, hc[1] - hc[0] - 6, c, date);
+        van_cell(hl, hc[1], yy, hc[2] - hc[1] - 6, c, what);
+        van_cell(hl, hc[2], yy, hc[3] - hc[2] - 6, c, size);
+        van_cell(hl, hc[3], yy, hc[4] - hc[3] - 6, c, nation_name(f[6]));
+        van_cell(hl, hc[4], yy, hc[5] - hc[4] - 6, !rated ? VAN_TITLE : won ? VAN_WIN : VAN_WARN, result);
+        van_cell(hl, hc[5], yy, hc[6] - hc[5] - 6, c, f[10][0] ? f[10] : "\xE2\x80\x94");
+        van_cell(hl, hc[6], yy, hc[7] - hc[6] - 6, c, f[11]);
+        if (hot && (f[10][0] || f[11][0])) ImGui::SetTooltip("Союзники: %s\nПротивники: %s", f[10][0] ? f[10] : "\xE2\x80\x94", f[11]);
+        ImGui::PopID();
+    }
+    if (!shown)
+        van_text(hl, o.x + 0.03f * p.size.x, o.y + p.lh * 0.5f, VAN_TITLE,
+                 "Рейтинговых игр пока нет. Засчитываются: Ось против Союзников, «Зоны боевых действий» или «Превосходство», "
+                 "равные команды, от 3 минут.");
+    else ImGui::Dummy(ImVec2(1, 0));
+    ImGui::EndChild();
+}
+
+static void tab_leaders(const Pane &p, float top, float bottom) {
+    static Doc d;
+    doc_get(d, g_board_team ? DOC_BOARD_TEAM : DOC_BOARD_1V1);
+    ImDrawList *dl = p.dl;
+    float x0 = p.p0.x + 0.03f * p.size.x, y = top + (p.row - p.lh) * 0.5f;
+    // which ladder, as the page's tabs do it
+    const char *names[2] = {"1 на 1", "Команды"};
+    float x = x0;
+    for (int i = 0; i < 2; i++) {
+        float tw = ImGui::CalcTextSize(names[i]).x;
+        ImGui::SetCursorScreenPos(ImVec2(x, y));
+        ImGui::PushID(100 + i);
+        if (ImGui::InvisibleButton("##lad", ImVec2(tw, p.lh))) g_board_team = i;
+        bool hot = ImGui::IsItemHovered();
+        ImGui::PopID();
+        van_text(dl, x, y, g_board_team == i ? VAN_TAB : hot ? VAN_HOVER : VAN_TAB_OFF, names[i]);
+        x += tw + 14 * p.sx;
+        if (!i) { van_text(dl, x - 9 * p.sx, y, VAN_TAB_OFF, "|"); }
+    }
+    static const float LC[5] = {0.03f, 0.10f, 0.50f, 0.66f, 0.80f};
+    static const char *LT[5] = {"#", "Игрок", "MMR", "Игр", "Побед"};
+    float lc[5];
+    for (int i = 0; i < 5; i++) lc[i] = p.p0.x + LC[i] * p.size.x;
+    float hy = top + p.row;
+    for (int i = 0; i < 5; i++) van_text(dl, lc[i], hy + (p.row - p.lh) * 0.5f, VAN_TITLE, LT[i]);
+    ImGui::SetCursorScreenPos(ImVec2(p.p0.x, hy + p.row));
+    ImGui::BeginChild("##board", ImVec2(p.size.x, bottom - hy - p.row), ImGuiChildFlags_None, ImGuiWindowFlags_NoBackground);
+    ImGui::SetWindowFontScale(p.sy);
+    ImDrawList *bl = ImGui::GetWindowDrawList();
+    ImVec2 o = ImGui::GetCursorScreenPos();
+    const char *my = online_my_id();
+    int shown = 0;
+    for (int k = 0; k < d.n; k++) {
+        if (d.nf[k] < 6) continue;
+        char **f = d.f[k];
+        ImGui::PushID(k);
+        ImVec2 r0(o.x, o.y + shown++ * p.row);
+        bool hot, click = van_row(p, bl, r0, p.row, &hot);
+        float yy = r0.y + (p.row - p.lh) * 0.5f;
+        bool self = !strcmp(f[1], my);
+        ImU32 c = hot ? VAN_HOVER : self ? ACCENT : VAN_TEXT;
+        int g = atoi(f[4]), w = atoi(f[5]);
+        char mm[64], wr[16];
+        mmr_text(mm, sizeof mm, f[3], g);
+        snprintf(wr, sizeof wr, "%d%%", g ? w * 100 / g : 0);
+        van_text(bl, lc[0], yy, VAN_TITLE, f[0]);
+        van_cell(bl, lc[1], yy, lc[2] - lc[1] - 8, c, f[2]);
+        van_text(bl, lc[2], yy, c, mm);
+        van_text(bl, lc[3], yy, c, f[4]);
+        van_text(bl, lc[4], yy, c, wr);
+        if (click) open_profile(f[1]);
+        ImGui::PopID();
+    }
+    if (!shown) van_empty(p, bl, o, d.state == 0 ? "Загрузка..." : d.state == 2 ? "Сервер мода не отвечает" : "Пока никто не сыграл рейтинговых игр");
+    else ImGui::Dummy(ImVec2(1, 0));
+    ImGui::EndChild();
+}
+
+static void pvp_block() {
     float x, y, w, h, head, rw, rh;
     g_pvp_drawn = false;
     if (!g_pvp_on || !pvp_rect(&x, &y, &w, &h, &head, &rw, &rh)) return;
@@ -627,66 +896,43 @@ static void pvp_block() {
                                          ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse);
     if (g_game_font) ImGui::PushFont(g_game_font);
     ImGui::SetWindowFontScale(sy);
-    ImDrawList *dl = ImGui::GetWindowDrawList();
-    float lh = ImGui::GetTextLineHeight(), row = 32 * sy, top = head * sy;
-    float col[4];
-    for (int i = 0; i < 4; i++) col[i] = p0.x + VAN_COL[i] * size.x;
+    Pane p = {ImGui::GetWindowDrawList(), p0, size, ImGui::GetTextLineHeight(), 32 * sy, sx, sy};
+    ImDrawList *dl = p.dl;
+    float lh = p.lh, row = p.row, top = head * sy;
+    float col0 = p0.x + VAN_COL[0] * size.x;
 
-    int state = 0, n = online_copy(list, ONLINE_MAX, &state);
-    const char *my = online_my_id();
-    // column titles, where the page has its own
-    float ty = p0.y + (top > lh ? (top - lh) * 0.5f : 0);
-    van_text(dl, col[0], ty, VAN_TITLE, "Игрок");
-    van_text(dl, col[1], ty, VAN_TITLE, "Версия баланса");
-    van_text(dl, col[2], ty, VAN_TITLE, "Совместимость");
-    van_text(dl, col[3], ty, VAN_TITLE, "Профиль");
-
-    // the rows, scrolling between the titles and the bottom line
-    float foot = row;
-    ImGui::SetCursorScreenPos(ImVec2(p0.x, p0.y + top));
-    ImGui::BeginChild("##rows", ImVec2(size.x, size.y - top - foot), ImGuiChildFlags_None, ImGuiWindowFlags_NoBackground);
-    ImGui::SetWindowFontScale(sy);
-    ImDrawList *rl = ImGui::GetWindowDrawList();
-    ImVec2 origin = ImGui::GetCursorScreenPos();
-    if (state == 0 || state == 2 || n == 0) {
-        const char *msg = state == 0 ? "Загрузка..." : state == 2 && !n ? "Сервер мода не отвечает" : "Сейчас никого нет";
-        float tw = ImGui::CalcTextSize(msg).x;
-        van_text(rl, origin.x + (size.x - tw) * 0.5f, origin.y + row * 1.5f, VAN_TITLE, msg);
-    }
-    for (int i = 0; i < n; i++) {
-        ImGui::PushID(i);
-        ImVec2 r0(origin.x, origin.y + i * row);
-        ImGui::SetCursorScreenPos(r0);
-        bool click = ImGui::InvisibleButton("##row", ImVec2(size.x - 10 * sy, row));
+    // the tabs, where the page has its column titles
+    static const char *TABS[3] = {"ОНЛАЙН", "МОЯ СТАТИСТИКА", "ЛИДЕРЫ"};
+    float tx = p0.x + 0.03f * size.x, ty = p0.y + (top > lh ? (top - lh) * 0.5f : 0);
+    for (int i = 0; i < 3; i++) {
+        float tw = ImGui::CalcTextSize(TABS[i]).x;
+        ImGui::SetCursorScreenPos(ImVec2(tx, ty));
+        ImGui::PushID(200 + i);
+        if (ImGui::InvisibleButton("##tab", ImVec2(tw, lh))) g_pvp_tab = i;
         bool hot = ImGui::IsItemHovered();
-        if (hot) rl->AddRectFilled(r0, ImVec2(r0.x + size.x - 10 * sy, r0.y + row), VAN_HOVER_BG);
-        bool self = !strcmp(list[i].id, my), same = !strcmp(list[i].version, g_balance_tag);
-        float yy = r0.y + (row - lh) * 0.5f;
-        ImU32 c = hot ? VAN_HOVER : VAN_TEXT;
-        if (self) rl->AddRectFilled(ImVec2(r0.x + 14 * sx, yy + lh * 0.3f), ImVec2(r0.x + 20 * sx, yy + lh * 0.3f + 6 * sy), ACCENT);
-        van_text(rl, col[0], yy, c, list[i].name);
-        van_text(rl, col[1], yy, same ? c : VAN_WARN, list[i].version);
-        van_text(rl, col[2], yy, self ? VAN_TITLE : same ? c : VAN_WARN, self ? "это вы" : same ? "можно играть компетитив" : "другая версия");
-        van_text(rl, col[3], yy, hot ? VAN_HOVER : VAN_TITLE, "Steam");
-        if (click) {
-            char url[64];
-            snprintf(url, sizeof url, "steam://url/SteamIDPage/%s", list[i].id);
-            ShellExecuteA(nullptr, "open", url, nullptr, nullptr, SW_SHOWNORMAL);
-        }
         ImGui::PopID();
+        van_text(dl, tx, ty, g_pvp_tab == i ? VAN_TAB : hot ? VAN_HOVER : VAN_TAB_OFF, TABS[i]);
+        tx += tw + 18 * sx;
+        if (i < 2) van_text(dl, tx - 11 * sx, ty, VAN_TAB_OFF, "|");
     }
-    if (n) ImGui::Dummy(ImVec2(1, 0));
-    ImGui::EndChild();
 
-    // bottom line: how many, the server, our consent
+    float foot = row, content = p0.y + top, bottom = p0.y + size.y - foot;
+    if (g_pvp_tab == 0) tab_online(p, content, bottom);
+    else if (g_pvp_tab == 1) tab_stats(p, content, bottom);
+    else tab_leaders(p, content, bottom);
+
+    // bottom line: the server, our consent
+    int state = 0;
     float fy = p0.y + size.y - foot + (foot - lh) * 0.5f;
     char line[160];
+    static OnlinePlayer all[ONLINE_MAX];
+    int online_n = online_copy(all, ONLINE_MAX, &state);
     if (g_online_held) snprintf(line, sizeof line, "Ваш SteamID закреплён за другим ключом: напишите автору мода");
-    else snprintf(line, sizeof line, state == 2 && n ? "С модом онлайн: %d  \xC2\xB7  сервер не отвечает" : "С модом онлайн: %d", n);
-    van_text(dl, col[0], fy, state == 2 || g_online_held ? VAN_WARN : VAN_TITLE, line);
+    else snprintf(line, sizeof line, state == 2 ? "С модом онлайн: %d  \xC2\xB7  сервер не отвечает" : "С модом онлайн: %d", online_n);
+    van_text(dl, col0, fy, state == 2 || g_online_held ? VAN_WARN : VAN_TITLE, line);
     const char *me_txt = "Показывать меня в списке";
     float box = lh * 0.7f, mw = ImGui::CalcTextSize(me_txt).x;
-    ImVec2 b0(col[2], fy + (lh - box) * 0.5f);
+    ImVec2 b0(p0.x + VAN_COL[2] * size.x, fy + (lh - box) * 0.5f);
     ImGui::SetCursorScreenPos(ImVec2(b0.x, fy));
     bool me = g_online_consent == 1;
     if (ImGui::InvisibleButton("##me", ImVec2(box + 8 * sx + mw, lh))) online_set_consent(!me);

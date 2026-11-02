@@ -121,6 +121,11 @@ void online_start(const char *dir);
 void online_set_consent(int yes);
 int online_copy(OnlinePlayer *out, int max, int *state);   // state 0 nothing yet, 1 list, 2 server unreachable
 const char *online_my_id(void);             // "" until Steam is up
+// texts of the rating server (server/src/matches.js), fetched while the panel asks for them each frame
+enum { DOC_PLAYER, DOC_BOARD_1V1, DOC_BOARD_TEAM, DOC_RATINGS, DOC_N };
+void online_want(int doc);                  // on screen this frame
+void online_ratings_ids(const char *ids);   // DOC_RATINGS: whose (comma separated SteamIDs, at most 16)
+int online_doc(int doc, char *out, size_t n, int *state);   // the last text; state 0 none yet, 1 ok, 2 unreachable
 
 // ---- PVP button in the game's Internet / LAN game list (pvp.c): our block over its list of games ----
 extern volatile long g_pvp_on;              // the button was clicked: the block is wanted while the page is up
