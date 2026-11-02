@@ -326,7 +326,7 @@ int g_census_auto;
 volatile long g_live_match;
 static volatile uintptr_t g_stats;          // stats object of the current match
 static volatile uintptr_t g_result_page;    // eGUI_PageGameResult while it is on screen
-static volatile LONG g_kills[MAX_PLAYER_BYTE], g_deaths[MAX_PLAYER_BYTE];   // by actor player byte
+static volatile LONG g_kills[2][MAX_PLAYER_BYTE], g_deaths[2][MAX_PLAYER_BYTE];   // [0 infantry, 1 vehicles] by actor player byte
 static volatile LONG g_player_rec[MAX_PLAYER_BYTE];   // actor player byte -> record player number + 1, learned at spawns
 static volatile LONG g_match_seq;           // bumped by the first purchase of a match
 static volatile DWORD g_battle_tick;        // GetTickCount of the last purchase or stats event: the simulation runs
@@ -353,7 +353,7 @@ static void spawn_seen(uintptr_t stats, uintptr_t req) {
     // a new match: another stats object, or the same one again with the clock back at the start (replay reloaded)
     if (stats != g_stats || now < last_ms - 5000) {
         rc_log("match stats %p", (void *)stats);
-        for (int i = 0; i < MAX_PLAYER_BYTE; i++) g_kills[i] = g_deaths[i] = g_player_rec[i] = 0;
+        for (int i = 0; i < MAX_PLAYER_BYTE; i++) g_kills[0][i] = g_kills[1][i] = g_deaths[0][i] = g_deaths[1][i] = g_player_rec[i] = 0;
         g_stats = stats;
         InterlockedIncrement(&g_match_seq);
         logged = 0;
@@ -367,6 +367,21 @@ static void spawn_seen(uintptr_t stats, uintptr_t req) {
     if (logged++ < 6) rc_log("spawn: player#%d, unit owner byte %d", rec, pb);
 }
 
+// infantry or not: the victim's class from its RTTI (eHuman), remembered per vtable
+static int is_human(uintptr_t actor) {
+    static uintptr_t vts[32];
+    static int kinds[32], n;
+    uintptr_t vt = rdq(actor);
+    for (int i = 0; i < n; i++) if (vts[i] == vt) return kinds[i];
+    uintptr_t col = rdq(vt - 8);
+    uint32_t td = 0;
+    char name[24] = "";
+    if (col && rd((void *)(col + 12), &td, 4) && td < 0x2000000) rd(g_base + td + 16, name, sizeof name - 1);
+    int human = !strncmp(name, ".?AVeHuman@", 11);
+    if (n < 32) { vts[n] = vt; kinds[n++] = human; }
+    return human;
+}
+
 static void stats_event(uintptr_t ev) {
     static int logged;
     int32_t type = 0;
@@ -378,8 +393,9 @@ static void stats_event(uintptr_t ev) {
     test_record(type, vp, type == EV_KILLED ? kp : 0);   // other events may leave that byte unset
     if (type != EV_KILLED || !victim) return;
     music_kill();
-    if (vp < MAX_PLAYER_BYTE) InterlockedIncrement(&g_deaths[vp]);
-    if (kp < MAX_PLAYER_BYTE && kp != vp) InterlockedIncrement(&g_kills[kp]);   // no killer: the game puts the victim's owner there
+    int veh = !is_human(victim);
+    if (vp < MAX_PLAYER_BYTE) InterlockedIncrement(&g_deaths[veh][vp]);
+    if (kp < MAX_PLAYER_BYTE && kp != vp) InterlockedIncrement(&g_kills[veh][kp]);   // no killer: the game puts the victim's owner there
     if (logged++ < 6) rc_log("kill: owner byte %d killed by %d", vp, kp);
 }
 
@@ -1086,7 +1102,7 @@ static void apply_pov(void) {
 static void match_tick(void) {
     static LONG seq;
     static int last_ms;
-    static float prev_army[MS_PLAYERS], lost[MS_PLAYERS];
+    static float prev_army[MS_PLAYERS], lost[MS_PLAYERS], bought[MS_PLAYERS];   // limit points lost / bought so far
     uintptr_t st = g_stats;
     // once the match is over nothing may touch what was collected: not the results page, not the menus
     if (!st || g_ms_results) return;
@@ -1105,11 +1121,12 @@ static void match_tick(void) {
         seq = g_match_seq;
         g_ms.n = 0;
         InterlockedIncrement(&g_ms.epoch);
-        for (int i = 0; i < MS_PLAYERS; i++) prev_army[i] = lost[i] = 0;
+        for (int i = 0; i < MS_PLAYERS; i++) { prev_army[i] = lost[i] = bought[i] = 0; g_ms.name[i][0] = 0; }
         last_ms = -1000000;
     }
     for (int i = 0; i < n; i++) {
         if (army[i] < prev_army[i]) lost[i] += prev_army[i] - army[i];
+        else bought[i] += army[i] - prev_army[i];
         prev_army[i] = army[i];
     }
     long k = g_ms.n;
@@ -1128,23 +1145,46 @@ static void match_tick(void) {
             if (j == 0 || f[1] > income) { budget = f[0]; income = f[1]; spent = f[2]; }
         }
         // kills and deaths are counted by the units' owner byte; spawns told us which player that is
-        long kills = 0, deaths = 0;
+        long kills[2] = {0}, deaths[2] = {0};
         for (int p = 0; p < MAX_PLAYER_BYTE; p++)
-            if (mapped ? g_player_rec[p] == ids[i] + 1 : p == ids[i]) { kills += g_kills[p]; deaths += g_deaths[p]; }
+            if (mapped ? g_player_rec[p] == ids[i] + 1 : p == ids[i])
+                for (int v = 0; v < 2; v++) { kills[v] += g_kills[v][p]; deaths[v] += g_deaths[v][p]; }
         g_ms.id[i] = ids[i];
         g_ms.v[MS_SPENT][i][k] = spent;
-        g_ms.v[MS_INCOME][i][k] = income;
+        g_ms.v[MS_ARMY_MP][i][k] = bought[i] > 0 ? army[i] * spent / bought[i] : 0;   // MP per limit point bought, on the field
         g_ms.v[MS_BUDGET][i][k] = budget;
         g_ms.v[MS_ARMY][i][k] = army[i];
         g_ms.v[MS_LOST][i][k] = lost[i];
-        g_ms.v[MS_KILLS][i][k] = (float)kills;
-        g_ms.v[MS_DEATHS][i][k] = (float)deaths;
+        g_ms.v[MS_KILLS_INF][i][k] = (float)kills[0];
+        g_ms.v[MS_KILLS_VEH][i][k] = (float)kills[1];
+        g_ms.v[MS_DEATHS_INF][i][k] = (float)deaths[0];
+        g_ms.v[MS_DEATHS_VEH][i][k] = (float)deaths[1];
     }
     g_ms.players = n;
     g_ms.t_ms[k] = now;
     MemoryBarrier();
     g_ms.n = k + 1;
     last_ms = now;
+}
+
+// the charts' players by name: from the replay on screen, or after a live match from the replay it wrote;
+// tried every 3 s until found, once per match
+static void names_tick(void) {
+    static long done_epoch = -1;
+    static DWORD tried;
+    if (g_ms.n < 2 || done_epoch == g_ms.epoch || GetTickCount() - tried < 3000) return;
+    int replay = g_ctl.state == ST_REPLAY || g_ctl.state == ST_SEEKING || g_ctl.state == ST_REWIND;
+    if (!replay && !g_ms_results) return;
+    tried = GetTickCount();
+    static char names[MS_PLAYERS * 2][64];
+    memset(names, 0, sizeof names);
+    if (!replay_player_names(replay ? g_ctl.path : "", names, MS_PLAYERS * 2)) return;
+    for (int i = 0; i < g_ms.players && i < MS_PLAYERS; i++) {
+        int id = g_ms.id[i];
+        if (id >= 0 && id < MS_PLAYERS * 2 && names[id][0]) snprintf(g_ms.name[i], sizeof g_ms.name[i], "%s", names[id]);
+    }
+    done_epoch = g_ms.epoch;
+    rc_log("charts: players' names from the replay");
 }
 
 // a battle is loaded and on screen: live game of any kind, skirmish or replay, until "Exit game mode"
@@ -1355,6 +1395,7 @@ static DWORD WINAPI worker(LPVOID _) {
         handle_cmd(core);
         record_tick();
         match_tick();
+        names_tick();
         int battle = in_battle();
         g_balance_locked = battle || core;      // the roster of a running match or replay is already read
         g_live_match = battle && !core;
@@ -1480,7 +1521,7 @@ static void startup(HMODULE self) {
         rc_log("snapshots: game heap %s", ok ? "in our range" : "NOT moved (import slots not found)");
         g_snapshots = ok;
         g_snap_test = ok && GetPrivateProfileIntA("snapshots", "test", 0, ini);
-        g_auto_prep = ok && GetPrivateProfileIntA("snapshots", "prepare", 1, ini);
+        g_auto_prep = ok && GetPrivateProfileIntA("snapshots", "prepare_v2", 0, ini);   // off for now (2026-11-02)
         g_profile = ok && GetPrivateProfileIntA("snapshots", "profile", 0, ini);
         if (g_snap_test) rc_log("snapshots: test armed (at %d s of a replay, jump back to %d s)", TEST_AT_MS / 1000, TEST_BACK_MS / 1000);
     }

@@ -195,6 +195,78 @@ static int make_report(const char *ss, const char *me, const char *key, char *bo
 static long long filetime_unix(FILETIME ft);
 static int is_autoreplay(const wchar_t *n);
 
+// ---- players' names for the match charts ------------------------------------------------------------------
+// battleInfoTotal has a block per member keyed by its hostId; the block starts with length-prefixed team,
+// army and hostId, a 0, then the player number (player#N, what the charts go by). The card's members give
+// hostId -> name.
+static int numbers_to_names(const char *ss, char names[][64], int max) {
+    const char *stop = ss + strlen(ss), *bi = strstr(ss, "{battleInfoTotal"), *mem = strstr(ss, "{members {");
+    const char *teams = mem ? strstr(mem, "{teams {") : NULL;
+    if (!bi || !mem || !teams) return 0;
+    int found = 0;
+    for (const char *p = bi; (p = strstr(p, "{\"")) && p < stop; p++) {
+        const char *k = p + 2, *ke = strchr(k, '"');
+        if (!ke || ke - k > 8 || strncmp(ke, "\" \"B64:", 7)) continue;
+        char host[12];
+        snprintf(host, sizeof host, "%.*s", (int)(ke - k), k);
+        if (strspn(host, "0123456789") != strlen(host)) continue;           // "a", "b", "game", "info"
+        const char *b = ke + 7, *be = strchr(b, '"');
+        if (!be || be - b > 1 << 20) continue;
+        uint8_t *raw = malloc(be - b);
+        int n = raw ? b64(b, be - b, raw, be - b) : -1, len = 0;
+        uint8_t *d = n > 0 ? (uint8_t *)stbi_zlib_decode_malloc((const char *)raw, n, &len) : NULL;
+        free(raw);
+        int at = 0, number = -1;
+        for (int f = 0; d && f < 3 && at < len; f++) at += 1 + d[at];        // team, army, hostId
+        if (d && at + 1 < len && d[at] == 0) number = d[at + 1];
+        free(d);
+        if (number < 0 || number >= max) continue;
+        // the member with that hostId
+        char pat[24];
+        snprintf(pat, sizeof pat, "{hostId %s}", host);
+        const char *m = strstr(mem, pat);
+        if (!m || m > teams) continue;
+        const char *next = strstr(m + 1, "{type ");
+        if (!next || next > teams) next = teams;
+        if (field(m, next, "name", names[number], 64)) found++;
+    }
+    return found > 0;
+}
+
+int replay_player_names(const char *rel, char names[][64], int max) {
+    const char *me = online_my_id();
+    if (!me[0]) return 0;
+    wchar_t docs[MAX_PATH], file[MAX_PATH] = L"";
+    if (FAILED(SHGetFolderPathW(NULL, CSIDL_PERSONAL, NULL, 0, docs))) return 0;
+    unsigned long long account = _strtoui64(me, NULL, 10) - 76561197960265728ULL;
+    if (rel && rel[0]) {
+        while (*rel == '/' || *rel == '\\') rel++;
+        wchar_t w[260];
+        MultiByteToWideChar(CP_UTF8, 0, rel, -1, w, 260);
+        swprintf(file, MAX_PATH, L"%ls\\My Games\\gates of hell\\profiles\\%llu\\%ls", docs, account, w);
+    } else {                                    // after a live match: the replay it just wrote
+        wchar_t pattern[MAX_PATH];
+        swprintf(pattern, MAX_PATH, L"%ls\\My Games\\gates of hell\\profiles\\%llu\\replays\\*.rep", docs, account);
+        WIN32_FIND_DATAW fd;
+        HANDLE f = FindFirstFileW(pattern, &fd);
+        long long best = (long long)time(NULL) - 600;
+        if (f == INVALID_HANDLE_VALUE) return 0;
+        do {
+            long long w = filetime_unix(fd.ftLastWriteTime);
+            if (w > best) {
+                best = w;
+                swprintf(file, MAX_PATH, L"%ls\\My Games\\gates of hell\\profiles\\%llu\\replays\\%ls", docs, account, fd.cFileName);
+            }
+        } while (FindNextFileW(f, &fd));
+        FindClose(f);
+    }
+    if (!file[0]) return 0;
+    char *ss = read_ss(file);
+    int ok = ss && numbers_to_names(ss, names, max);
+    free(ss);
+    return ok;
+}
+
 // ---- names: autoreplayN.rep becomes mode_3v3_map_army_date-time.rep -------------------------------------
 // The game names its replays autoreplay1..N and overwrites the oldest once N are taken; a replay with a name
 // of its own is never chosen (530210 tells autoreplays apart). So each finished one gets a name made from its

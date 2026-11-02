@@ -42,6 +42,7 @@ static bool g_failed;
 static const float SPEEDS[] = {0.25f, 0.5f, 1, 2, 4, 8, 16};
 static const char *SPEED_LABELS[] = {"\xC2\xBC\xC3\x97", "\xC2\xBD\xC3\x97", "1\xC3\x97", "2\xC3\x97", "4\xC3\x97", "8\xC3\x97", "16\xC3\x97"};
 static const ImU32 ACCENT = IM_COL32(217, 164, 65, 255);
+static const bool SHOW_PREPARE = false;  // "prepare the whole replay": off and its button hidden for now (2026-11-02)
 
 #ifdef COMPETITIVE_ONLY
 static bool panel_shown() { return false; }
@@ -145,7 +146,7 @@ static void panel() {
         ImGui::SameLine(0, 10 * k);
         if (c.preparing) {
             if (ImGui::Button("Стоп")) rc_send(CMD_PREPARE, 0);
-        } else if (!c.duration_s || c.snap_to_ms < c.duration_s * 1000 - 30000) {
+        } else if (SHOW_PREPARE && (!c.duration_s || c.snap_to_ms < c.duration_s * 1000 - 30000)) {   // hidden for now
             if (ImGui::Button("Подготовить")) rc_send(CMD_PREPARE, 1);
             if (ImGui::IsItemHovered())
                 ImGui::SetTooltip("Прогнать реплей до конца на максимальной скорости и вернуться сюда.\n"
@@ -271,6 +272,8 @@ static float nice_ceil(float v) {
 }
 
 // one series for every player over game time; hovering shows the values at that moment
+static void player_label(char *out, size_t n, const MatchStats &s, int p);
+
 static void chart(const char *id, int series, const char *title, float height) {
     const MatchStats &s = g_ms;
     int n = (int)s.n, players = s.players;
@@ -331,10 +334,18 @@ static void chart(const char *id, int series, const char *title, float height) {
         for (int p = 0; p < players; p++) {
             if (!g_player_on[p]) continue;
             dl->AddCircleFilled(ImVec2(x, Y(s.v[series][p][lo])), 3.5f * k, PLAYER_COL[p]);
-            ImGui::TextColored(ImGui::ColorConvertU32ToFloat4(PLAYER_COL[p]), "Игрок %d: %.0f", s.id[p], s.v[series][p][lo]);
+            char who[72];
+            player_label(who, sizeof who, s, p);
+            ImGui::TextColored(ImGui::ColorConvertU32ToFloat4(PLAYER_COL[p]), "%s: %.0f", who, s.v[series][p][lo]);
         }
         ImGui::EndTooltip();
     }
+}
+
+// a player's name from the replay, or their number until it is known
+static void player_label(char *out, size_t n, const MatchStats &s, int p) {
+    if (s.name[p][0]) snprintf(out, n, "%s", s.name[p]);
+    else snprintf(out, n, "Игрок %d", s.id[p]);
 }
 
 static void charts() {
@@ -358,8 +369,9 @@ static void charts() {
                                                   g_player_on[p] ? PLAYER_COL[p] : IM_COL32(90, 90, 90, 255), 2 * k);
         ImGui::Dummy(ImVec2(h, h));
         ImGui::SameLine(0, 4 * k);
-        char label[32];
-        snprintf(label, sizeof label, "Игрок %d##pl%d", s.id[p], p);
+        char who[72], label[96];
+        player_label(who, sizeof who, s, p);
+        snprintf(label, sizeof label, "%s##pl%d", who, p);
         if (!g_player_on[p]) ImGui::PushStyleColor(ImGuiCol_Text, ImGui::GetStyle().Colors[ImGuiCol_TextDisabled]);
         if (ImGui::Selectable(label, false, 0, ImGui::CalcTextSize(label, nullptr, true))) g_player_on[p] = !g_player_on[p];
         if (!g_player_on[p]) ImGui::PopStyleColor();
@@ -373,7 +385,7 @@ static void charts() {
             ImGui::EndTabItem();
         }
         if (ImGui::BeginTabItem("Экономика")) {
-            chart("##income", MS_INCOME, "Заработано очков, всего", half);
+            chart("##armymp", MS_ARMY_MP, "Стоимость армии на поле, ЛС (оценка)", half);
             chart("##budget", MS_BUDGET, "Очки на руках", half);
             ImGui::EndTabItem();
         }
@@ -382,12 +394,15 @@ static void charts() {
             ImGui::EndTabItem();
         }
         if (ImGui::BeginTabItem("Убийства")) {
-            chart("##kills", MS_KILLS, "Убито бойцов и техники противника, всего", full);
+            chart("##kills_inf", MS_KILLS_INF, "Убито пехоты противника, всего", half);
+            chart("##kills_veh", MS_KILLS_VEH, "Уничтожено техники противника, всего", half);
             ImGui::EndTabItem();
         }
         if (ImGui::BeginTabItem("Потери")) {
-            chart("##deaths", MS_DEATHS, "Потеряно бойцов и техники, всего", half);
-            chart("##lost", MS_LOST, "Потеряно стоимости армии (очки лимита), всего", half);
+            float third = (full - 2 * ImGui::GetStyle().ItemSpacing.y) / 3;
+            chart("##deaths_inf", MS_DEATHS_INF, "Потеряно пехоты, всего", third);
+            chart("##deaths_veh", MS_DEATHS_VEH, "Потеряно техники, всего", third);
+            chart("##lost", MS_LOST, "Потеряно стоимости армии (очки лимита), всего", third);
             ImGui::EndTabItem();
         }
         ImGui::EndTabBar();

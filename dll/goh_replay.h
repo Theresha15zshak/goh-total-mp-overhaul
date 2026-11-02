@@ -30,7 +30,9 @@ typedef struct {
 extern Ctl g_ctl;
 
 // ---- match charts: per-player history, one sample per game second ----
-enum { MS_SPENT, MS_INCOME, MS_BUDGET, MS_ARMY, MS_LOST, MS_KILLS, MS_DEATHS, MS_SERIES };
+// MS_ARMY_MP: army on the field in manpower, estimated: limit points on the field x the player's MP spent per
+// limit point bought. Kills and losses apart for infantry (eHuman) and vehicles (everything else).
+enum { MS_SPENT, MS_ARMY_MP, MS_BUDGET, MS_ARMY, MS_LOST, MS_KILLS_INF, MS_KILLS_VEH, MS_DEATHS_INF, MS_DEATHS_VEH, MS_SERIES };
 #define MS_PLAYERS 8
 #define MS_SAMPLES 7200         // two hours
 
@@ -39,6 +41,7 @@ typedef struct {
     volatile long epoch;        // bumped when a new match starts
     int32_t players;
     int32_t id[MS_PLAYERS];     // player number as the game's log writes it (player#N)
+    char name[MS_PLAYERS][64];  // UTF-8, from the replay's card once known ("" until then)
     int32_t t_ms[MS_SAMPLES];
     float v[MS_SERIES][MS_PLAYERS][MS_SAMPLES];
 } MatchStats;
@@ -131,6 +134,9 @@ int online_doc(int doc, char *out, size_t n, int *state);   // the last text; st
 void report_init(const char *dir);
 int report_next(const char *me, const char *key, char *body, size_t n, long long *end_time);   // 1 = body to send
 void report_done(long long end_time);       // that match is dealt with (taken, or never will be)
+// player number (player#N) -> name, from a replay's card: rel is the game's profile-relative path
+// ("//replays/x.rep"), "" for the newest replay written in the last 10 minutes; 1 when found
+int replay_player_names(const char *rel, char names[][64], int max);
 void replays_rename(const char *me);        // finished autoreplays get names of their own: mode_3v3_map_army_date
 
 // ---- PVP button in the game's Internet / LAN game list (pvp.c): our block over its list of games ----
