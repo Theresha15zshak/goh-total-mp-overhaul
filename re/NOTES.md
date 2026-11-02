@@ -392,3 +392,7 @@ commands) and replay.ss, the session card in the game's text format (UTF-8):
   after the team name, in the "a"/"b" blocks, on three replays). A match left early has no winner there.
 The memory census (census.c) found the same card as text in memory ({steamId "..."} {steamInfo ...}) and the
 friend list (eSteamFriend) holding most SteamIDs; eSMInfo = the session list's entries.
+- Why old replays vanish (2026-11-02): nothing deletes them; 52ebb0 overwrites the oldest autoreplay once
+  every name 1..N is taken, N = 5 in the game. The full DLL makes N 9999; the competitive-only build did not
+  (now it does), and a game without the DLL (or a friend's) is back at 5. 530210 only tells whether a name is
+  an autoreplay; a replay renamed to something else is never chosen for overwriting.
