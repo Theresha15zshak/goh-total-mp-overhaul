@@ -5,10 +5,13 @@
 // with and goes on to Steam's own, untouched (the registers and the stack as they were).
 //
 // Slots in the interface's vtable, read from the flat API thunks of the game's steam_api64.dll (each is
-// "mov rax,[rcx]; jmp [rax+slot*8]"): 15 LeaveLobby, 18 GetLobbyMemberByIndex (returns a CSteamID through a
+// "mov rax,[rcx]; jmp [rax+slot*8]"): 14 JoinLobby, 15 LeaveLobby, 18 GetLobbyMemberByIndex (returns a CSteamID through a
 // hidden pointer: the lobby is in r8, not rdx), 20 SetLobbyData, 24 GetLobbyMemberData, 25 SetLobbyMemberData,
 // 26 SendLobbyChatMsg, 33 SetLobbyType, 34 SetLobbyJoinable. Steam answers members' calls only for lobbies the
 // player is in; the lobby list (GetLobbyData of other lobbies) goes through slots not watched here.
+// Seen in a lobby the player hosted (2026-11-02): SetLobbyType and SetLobbyData with it, a lobby SteamID
+// 0186xxxxxxxxxxxx (universe 1, account type 8 "chat", the lobby instance flag). Steam's LobbyEnter /
+// LobbyCreated callbacks, listened for through SteamAPI_RegisterCallback, never came.
 #include <windows.h>
 #include <stdint.h>
 #include <string.h>
@@ -28,6 +31,7 @@ volatile uint64_t goh_mm_tick;
                          "movq %rax, goh_mm_seq+" #off "(%rip)\n"               \
                          "jmpq *goh_mm_orig+" #off "(%rip)\n");                 \
     }
+STUB(14, 112)
 STUB(15, 120)
 STUB(18, 144)
 STUB(20, 160)
@@ -38,55 +42,12 @@ STUB(33, 264)
 STUB(34, 272)
 
 static const struct { int slot; void (*stub)(void); } HOOKS[] = {
-    {15, stub_15}, {18, stub_18}, {20, stub_20}, {24, stub_24}, {25, stub_25}, {26, stub_26}, {33, stub_33}, {34, stub_34},
+    {14, stub_14}, {15, stub_15}, {18, stub_18}, {20, stub_20}, {24, stub_24}, {25, stub_25}, {26, stub_26}, {33, stub_33}, {34, stub_34},
 };
 
-static int is_lobby(uint64_t id) { return id >> 52 == 0x17; }   // universe 1, account type 7 ("chat")
-
-// ---- Steam's own word: the callbacks it sends every listener when the player enters or creates a lobby ----
-// The stubs above saw nothing in a lobby (2026-11-02): the game asked Steam about none of it through them. The
-// game dispatches Steam callbacks the old way (it imports SteamAPI_RegisterCallback / SteamAPI_RunCallbacks),
-// so a listener of ours gets them too, on the thread the game runs them on.
-// CCallbackBase as steam_api_common.h has it: vtable, uint8 flags, int callback id; MSVC puts the two Run
-// overloads in its vtable in reverse order, and both only read the parameter here, so one function serves both.
-#define CB_LOBBY_ENTER 504               // LobbyEnter_t: uint64 lobby, uint32 permissions, bool locked, uint32 response
-#define CB_LOBBY_CREATED 513             // LobbyCreated_t: EResult (padded to 8), uint64 lobby
-typedef struct Listener { void **vt; uint8_t flags; int callback; } Listener;
-static volatile uint64_t g_cb_lobby, g_cb_seq;
-
-static void cb_enter(Listener *self, void *p) {
-    uint64_t lobby;
-    uint32_t response;
-    memcpy(&lobby, p, 8);
-    memcpy(&response, (uint8_t *)p + 16, 4);
-    rc_log("lobby: entered %llu (response %u)", (unsigned long long)lobby, response);
-    if (response == 1 && is_lobby(lobby)) { g_cb_lobby = lobby; g_cb_seq = InterlockedIncrement64((volatile LONG64 *)&goh_mm_tick); }
-}
-static void cb_created(Listener *self, void *p) {
-    uint32_t result;
-    uint64_t lobby;
-    memcpy(&result, p, 4);
-    memcpy(&lobby, (uint8_t *)p + 8, 8);
-    rc_log("lobby: created %llu (result %u)", (unsigned long long)lobby, result);
-    if (result == 1 && is_lobby(lobby)) { g_cb_lobby = lobby; g_cb_seq = InterlockedIncrement64((volatile LONG64 *)&goh_mm_tick); }
-}
-static int size_enter(Listener *self) { return 24; }
-static int size_created(Listener *self) { return 16; }
-static void *VT_ENTER[3] = {(void *)cb_enter, (void *)cb_enter, (void *)size_enter};
-static void *VT_CREATED[3] = {(void *)cb_created, (void *)cb_created, (void *)size_created};
-static Listener g_enter = {VT_ENTER}, g_created = {VT_CREATED};
-
-static void listen_lobbies(void) {
-    HMODULE h = GetModuleHandleA("steam_api64.dll");
-    void (*reg)(void *, int) = h ? (void (*)(void *, int))GetProcAddress(h, "SteamAPI_RegisterCallback") : NULL;
-    if (!reg) { rc_log("lobby: no SteamAPI_RegisterCallback"); return; }
-    reg(&g_enter, CB_LOBBY_ENTER);
-    reg(&g_created, CB_LOBBY_CREATED);
-    rc_log("lobby: listening for Steam's lobby callbacks");
-}
+static int is_lobby(uint64_t id) { return id >> 52 == 0x18; }   // universe 1, account type 8 (k_EAccountTypeChat)
 
 void steam_lobby_watch(void) {
-    listen_lobbies();
     HMODULE h = GetModuleHandleA("steam_api64.dll");
     void *(*mm_if)(void) = h ? (void *(*)(void))GetProcAddress(h, "SteamAPI_SteamMatchmaking_v009") : NULL;
     void *mm = mm_if ? mm_if() : NULL;
@@ -106,7 +67,7 @@ void steam_lobby_watch(void) {
 }
 
 uint64_t steam_lobby_now(void) {
-    uint64_t best = g_cb_lobby, best_seq = best ? g_cb_seq : 0;
+    uint64_t best = 0, best_seq = 0;
     for (size_t i = 0; i < sizeof HOOKS / sizeof HOOKS[0]; i++) {
         int s = HOOKS[i].slot;
         if (s == 15) continue;
@@ -120,7 +81,7 @@ uint64_t steam_lobby_now(void) {
             if (goh_mm_seq[s]) rc_log("lobby: slot %d last called #%llu with %llx / %llx", s, (unsigned long long)goh_mm_seq[s],
                                       (unsigned long long)goh_mm_rdx[s], (unsigned long long)goh_mm_r8[s]);
         }
-        rc_log("lobby: none seen (callbacks: %llu)", (unsigned long long)g_cb_lobby);
+        rc_log("lobby: none seen");
     }
     return best;
 }
