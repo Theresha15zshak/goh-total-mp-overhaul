@@ -200,7 +200,6 @@ static void panel() {
             dl->AddLine(ImVec2(p0.x + w * t, p0.y), ImVec2(p0.x + w * t, p0.y + h), IM_COL32_WHITE, 2 * k);
         }
         if (ImGui::IsItemHovered()) {
-            ImGui::SetMouseCursor(ImGuiMouseCursor_Hand);
             // where a click lands: inside the prepared stretch, the snapshot at or before the spot
             float x = (io.MousePos.x - p0.x) / w;
             int at = (int)(x * c.duration_s * 1000.0), snap = c.snap_state == 2 ? snap_best(at) : -1;
@@ -1137,7 +1136,6 @@ static void chat_name(const char *id, const char *name, ImU32 col, bool verified
     ImGui::PushStyleColor(ImGuiCol_Text, verified ? col : VAN_TAB_OFF);
     ImGui::TextUnformatted(name);
     ImGui::PopStyleColor();
-    if (verified && ImGui::IsItemHovered()) ImGui::SetMouseCursor(ImGuiMouseCursor_Hand);
     if (verified && ImGui::IsItemClicked(ImGuiMouseButton_Left)) open_profile(id);
     if (mod && ImGui::IsItemClicked(ImGuiMouseButton_Right)) {
         snprintf(menu_id, 18, "%s", id);
@@ -1725,6 +1723,8 @@ static void init_imgui(IDXGISwapChain *sc) {
     ImGuiIO &io = ImGui::GetIO();
     io.IniFilename = nullptr;
     io.LogFilename = nullptr;
+    // the game draws its own cursor; ImGui setting Windows' (on WM_SETCURSOR and each frame) replaced it
+    io.ConfigFlags |= ImGuiConfigFlags_NoMouseCursorChange;
     RECT r;
     GetClientRect(g_hwnd, &r);
     float scale = (r.bottom - r.top) / 1080.f;

@@ -480,6 +480,25 @@ static int vt_slot(uint32_t vt, int slot, uint32_t want) {
     return peek(g_base + vt + 8 * slot, &v, 8) && v == (uintptr_t)(g_base + want);
 }
 
+// The game has a Ping column for its list of games, filled by its own eSteamLobbyPingService, behind a variable
+// g_enableLobbyPings (a byte at 1471500, set to 0 by its registration at 1c2e0 when the game's statics start).
+// The list page makes the ping service when it opens (2e01b6), its header gets "mp/lobby/header/ping" (2e438e)
+// and each line its session's ping (2e5b9a, the session item's +0x850; 999 while not measured). Turned on once
+// the game has started, after its statics, and before the player gets to the page.
+#define G_LOBBY_PINGS 0x1471500
+#define FN_LOBBY_PINGS_REG 0x1c32d             // mov byte ptr [1471500], 0
+
+void pvp_lobby_pings(void) {
+    static const uint8_t REG[7] = {0xc6, 0x05, 0xcc, 0x51, 0x45, 0x01, 0x00};   // the registration, as checked
+    uint8_t now[7], on = 0;
+    if (!g_base || !peek(g_base + FN_LOBBY_PINGS_REG, now, 7) || memcmp(now, REG, 7) || !peek(g_base + G_LOBBY_PINGS, &on, 1) || on > 1) {
+        rc_log("pvp: the game's lobby pings are not where expected, Ping column off");
+        return;
+    }
+    g_base[G_LOBBY_PINGS] = 1;
+    rc_log("pvp: the game's lobby pings on (Ping column in the list of games)");
+}
+
 int pvp_install(uint8_t *exe, const char *dir, uint8_t *(*alloc)(size_t), void (*patch)(void *, const void *, size_t)) {
     g_base = exe;
     snprintf(g_pak, sizeof g_pak, "%s..\\..\\resource\\interface\\interface.pak", dir);
