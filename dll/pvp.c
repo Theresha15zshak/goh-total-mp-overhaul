@@ -434,7 +434,34 @@ static void scan_names(void) {
 #define LB_LINE_SIZE 0x1c0
 #define FN_LB_LAYOUT 0xac67b0
 #define FN_DLG_NOTIFY 0xaa3f60
-#define LINE_H 66                       // three times the game's 22: the name and the MMR under it
+#define LINE_H 50                       // the game's 22 and more: the name and the MMR under it
+// The session view gives its list the game's 22 again whenever it updates (through ac7e97 / ac909b and the like,
+// each followed by the listbox's "lines' size changed", vtable +0x248, ac52e0): the lines flickered between that
+// and ours until the next tick. So that call is hooked for menu listboxes: in the session list, the height it is
+// about to give the lines is ours before it does.
+static void (*g_lb_apply)(void *self);
+
+static int under_session_view(uint64_t d) {
+    for (int up = 0; up < 12 && d; up++) {
+        d = pq(d + 0xf0);
+        if (d && pq(d) == (uintptr_t)(g_base + VT_SESSION_VIEW)) return 1;
+    }
+    return 0;
+}
+
+static void lb_apply(void *self) {
+    int32_t *size = (int32_t *)((uint8_t *)self + LB_LINE_SIZE);
+    if (size[1] > 0 && size[1] < LINE_H && under_session_view((uintptr_t)self)) size[1] = LINE_H;
+    g_lb_apply(self);
+}
+
+static void lb_apply_install(void (*patch)(void *, const void *, size_t)) {
+    void **slot = (void **)(g_base + VT_MENU_LISTBOX + 0x248);
+    if (*slot != (void *)(g_base + 0xac52e0)) { rc_log("pvp: the menu listbox is not as expected, its lines may flicker"); return; }
+    g_lb_apply = (void (*)(void *))*slot;
+    void *ours = (void *)lb_apply;
+    patch(slot, &ours, sizeof ours);
+}
 
 static uint64_t g_tall_listbox;          // the last one made taller (a new one is made each time a lobby opens)
 
@@ -589,6 +616,7 @@ int pvp_install(uint8_t *exe, const char *dir, uint8_t *(*alloc)(size_t), void (
         patch(exe + FN_PING_MISS, MISS_NEW, 5);
     else
         rc_log("pvp: the lobby ping average is not as expected, left as it is");
+    lb_apply_install(patch);
     // the pages: their vtable slots point at ours, which call the game's
     void *binds[2] = {(void *)bind_online, (void *)bind_lan}, *cmds[2] = {(void *)cmd_online, (void *)cmd_lan};
     void *dtors[2] = {(void *)dtor_online, (void *)dtor_lan};
