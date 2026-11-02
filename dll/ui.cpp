@@ -1245,15 +1245,18 @@ static void lobby_overlay() {
         const char *m = n == 2 ? (m1 ? m1 : mt) : (mt ? mt : m1);
         char text[32];
         snprintf(text, sizeof text, "MMR %s", m ? m : d.state == 1 ? "-" : "...");
-        // On the name's own line, right after the name. Making the lines taller moved the avatars but not the
-        // names (the game draws them where its own layout put them, 2026-11-02), so the lines stay as they are;
-        // the name's width is the player's Steam name in the game's font, as the list shows it.
-        const char *name = persona_name(r.id);
-        float name_w = name[0] && g_game_font ? g_game_font->CalcTextSizeA(g_game_font->FontSize * sy, FLT_MAX, 0, name).x : r.w * sx * 0.6f;
-        float tw = font->CalcTextSizeA(size, FLT_MAX, 0, text).x;
-        float x = r.x * sx + name_w + 8 * sx, right = (r.x + r.w) * sx;
-        if (x + tw > right) x = right - tw;                      // a long name: at the end of its place
-        ImVec2 at(floorf(x + 0.5f), floorf((r.y + r.h * 0.5f) * sy - size * 0.5f + 1 * sy));
+        // under the name, at the foot of its line (pvp_gui_tick has the game make the lines taller for it);
+        // while a line is still the game's 22, right after the name instead
+        ImVec2 at;
+        if (r.line_bottom - (r.y + r.h) >= 9)
+            at = ImVec2(floorf(r.x * sx + 0.5f), floorf(r.line_bottom * sy - size - 1 * sy + 0.5f));
+        else {
+            const char *name = persona_name(r.id);
+            float name_w = name[0] && g_game_font ? g_game_font->CalcTextSizeA(g_game_font->FontSize * sy, FLT_MAX, 0, name).x : r.w * sx * 0.6f;
+            float tw = font->CalcTextSizeA(size, FLT_MAX, 0, text).x, x = r.x * sx + name_w + 8 * sx, right = (r.x + r.w) * sx;
+            if (x + tw > right) x = right - tw;
+            at = ImVec2(floorf(x + 0.5f), floorf((r.y + r.h * 0.5f) * sy - size * 0.5f + 1 * sy));
+        }
         dl->AddText(font, size, ImVec2(at.x + 1, at.y + 1), IM_COL32(0, 0, 0, 200), text);
         dl->AddText(font, size, at, VAN_ITEM, text);
     }

@@ -205,11 +205,13 @@ typedef struct { float x, y, w, h, body_y, tabs_r, root_w, root_h; int ntabs; fl
 int chat_panel(ChatPanel *p);
 unsigned char *pvp_pak_file(const char *name, size_t *n);   // an unpacked file of interface.pak, malloc'd
 unsigned char *pvp_sound_file(const char *name, size_t *n); // ... of sound\sound.pak
-// the lobby's player list lines on screen (game units, as pvp_rect) and whose they are: the name's own place
-typedef struct { float x, y, w, h, root_w, root_h; char id[18]; } LobbyRow;
+// the lobby's player list lines on screen (game units, as pvp_rect) and whose they are: the name's own place,
+// and the bottom of its line (pvp_gui_tick makes the lines taller for the MMR under the name)
+typedef struct { float x, y, w, h, root_w, root_h, line_bottom; char id[18]; } LobbyRow;
 int lobby_rows(LobbyRow *out, int max);
 void pvp_page_shown(void *page);
-void pvp_lobby_pings(void);                  // the game's own Ping column in the list of games: on (after its statics)             // the game shows a page: the way to the screen's root
+void pvp_lobby_pings(void);
+void pvp_gui_tick(void);                     // the game's logic thread, before its GUI update: the lobby's taller lines                  // the game's own Ping column in the list of games: on (after its statics)             // the game shows a page: the way to the screen's root
 
 // ---- memory census (census.c): where the game keeps a match's players and result; Ctrl+F12 ----
 void census_init(uint8_t *exe, const char *dir, int after_s);
