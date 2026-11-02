@@ -422,14 +422,15 @@ static void scan_names(void) {
 
 // ---- the lobby's lines taller, by the game's own layout ------------------------------------------------------
 // Moving the lines ourselves moved the avatars but not the names, which the game draws where its layout put them
-// (2026-11-02). So the game lays them out itself: each line, an eListboxItem three parents up from the name, gets a
-// minimum height of LINE_H (a dialog's MinSize is a tPoint2<int> at +0x128: the setter of the layouts' "MinSize",
-// lambda aa07f0) and is told its layout changed (vtable +0x60, as list_shown does). This runs on the thread the
+// (2026-11-02). So the game lays them out itself: the content of each line (the eDockPanel under the eListboxItem,
+// two parents up from the name: the listbox sizes its lines by their content, a MinSize on the line itself it
+// ignored) gets a minimum height of LINE_H (a dialog's MinSize is a tPoint2<int> at +0x128: the setter of the
+// layouts' "MinSize", lambda aa07f0) and is told its layout changed (vtable +0x60, as list_shown does). This runs on the thread the
 // game lays its interface out on (main_tick, before its GUI update), walking the screen itself four times a
 // second: no pointer of another thread's, nothing changed while the game reads it.
 #define VT_LINE_ITEM 0x1019228          // eListboxItem
 #define DLG_MIN_SIZE 0x128
-#define LINE_H 34                       // the game's 22 and a line of anka 12 for the MMR
+#define LINE_H 36                       // the game's 22 and a line of anka 12 for the MMR
 
 static void tall_walk(uint64_t d, int depth, int in_session, int *budget, int *changed) {
     if (!d || depth > 72 || --*budget < 0) return;
@@ -438,14 +439,16 @@ static void tall_walk(uint64_t d, int depth, int in_session, int *budget, int *c
     uint64_t vt = pq(d);
     if (vt == (uintptr_t)(g_base + VT_SESSION_VIEW)) in_session = 1;
     if (in_session && vt == (uintptr_t)(g_base + VT_NAME_VIEW)) {
-        uint64_t item = d;
-        for (int up = 0; up < 3 && item; up++) item = pq(item + 0xf0);
+        uint64_t dock = pq(pq(d + 0xf0) + 0xf0), item = dock ? pq(dock + 0xf0) : 0;
         if (!item || pq(item) != (uintptr_t)(g_base + VT_LINE_ITEM)) return;
-        int32_t *min = (int32_t *)(uintptr_t)(item + DLG_MIN_SIZE);
+        int32_t *min = (int32_t *)(uintptr_t)(dock + DLG_MIN_SIZE);
         if (min[1] < LINE_H) {
             min[1] = LINE_H;
-            (*(void (***)(void *))(uintptr_t)item)[0x60 / 8]((void *)(uintptr_t)item);
+            (*(void (***)(void *))(uintptr_t)dock)[0x60 / 8]((void *)(uintptr_t)dock);
             (*changed)++;
+        } else {
+            static int shown;                   // how it came out, once
+            if (!shown++) log_chain("lobby line after", (void *)(uintptr_t)d);
         }
         return;
     }
