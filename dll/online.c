@@ -498,6 +498,7 @@ static void integrity_check(HINTERNET s, char *buf) {
 static DWORD WINAPI online_thread(LPVOID unused) {
     load_key();
     while (!steam_me()) Sleep(2000);
+    steam_lobby_watch();
     rc_log("online: steam user %s found", g_id);
     HINTERNET s = WinHttpOpen(L"goh-mod", WINHTTP_ACCESS_TYPE_AUTOMATIC_PROXY, WINHTTP_NO_PROXY_NAME, WINHTTP_NO_PROXY_BYPASS, 0);
     if (!s) s = WinHttpOpen(L"goh-mod", WINHTTP_ACCESS_TYPE_DEFAULT_PROXY, WINHTTP_NO_PROXY_NAME, WINHTTP_NO_PROXY_BYPASS, 0);

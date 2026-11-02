@@ -162,6 +162,10 @@ int chat_copy(int ch, ChatMsg *out, int max, ChatStatus *st);
 void chat_send(int ch, const char *text);    // queued, the online thread sends it
 void chat_mod(const char *action, const char *target, int days);   // mute (days) / ban / unban / del
 
+// ---- the Steam lobby the player is in (steamlobby.c), for /invite ----
+void steam_lobby_watch(void);                // once Steam is up
+uint64_t steam_lobby_now(void);             // 0 = not in one (that we saw)
+
 // ---- match reports out of the game's own replays (report.c), sent by online.c ----
 void report_init(const char *dir);
 int report_next(const char *me, const char *key, char *body, size_t n, long long *end_time);   // 1 = body to send

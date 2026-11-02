@@ -1147,21 +1147,10 @@ static void chat_name(const char *id, const char *name, ImU32 col, bool verified
 }
 
 // ---- /invite: a button in the chat that takes others to the sender's lobby ---------------------------------
-// The game's lobbies are Steam lobbies (SteamMatchMaking009, "+connect_lobby"): Steam knows which one the player
-// is in (their FriendGameInfo_t), and steam://joinlobby/<app>/<lobby>/<player> makes the running game join it,
-// as accepting a Steam invite does. The message is "/invite <lobby id>"; the sender is the one inviting.
-struct FriendGameInfo { uint64_t game; uint32_t ip; uint16_t port, query_port; uint64_t lobby; };
-
-static uint64_t my_lobby() {
-    HMODULE h = GetModuleHandleA("steam_api64.dll");
-    auto friends_if = h ? (void *(*)())GetProcAddress(h, "SteamAPI_SteamFriends_v017") : nullptr;
-    auto played = h ? (bool (*)(void *, uint64_t, FriendGameInfo *))GetProcAddress(h, "SteamAPI_ISteamFriends_GetFriendGamePlayed") : nullptr;
-    void *fr = friends_if ? friends_if() : nullptr;
-    FriendGameInfo gi = {};
-    uint64_t me = _strtoui64(online_my_id(), nullptr, 10);
-    if (!fr || !played || !me || !played(fr, me, &gi)) return 0;
-    return gi.lobby >> 52 == 0x17 ? gi.lobby : 0;      // a lobby's SteamID: universe 1 (bits 56..63), type 7 "chat" (52..55)
-}
+// The game's lobbies are Steam lobbies (SteamMatchMaking009, "+connect_lobby"): the one the player is in comes
+// from steamlobby.c, and steam://joinlobby/<app>/<lobby>/<player> makes the running game join it, as accepting
+// a Steam invite does. The message is "/invite <lobby id>"; the sender is the one inviting.
+static uint64_t my_lobby() { return steam_lobby_now(); }
 
 static uint32_t steam_app() {
     HMODULE h = GetModuleHandleA("steam_api64.dll");
@@ -1196,7 +1185,59 @@ static const char *CHAT_RULES[] = {
 };
 
 // The lobby's chat panel: a GLOBAL CHAT tab after the game's, ours over the channel while it is on; a click on
-// one of the game's tabs gives the panel back.
+// one of the game's tabs gives the panel back. Over the channel our chat lays itself out as the game's session
+// chat does (messages left, the people in a sunken box right, the line to write in at the bottom) on the
+// panel's own background: the texture of its frame (window1, MenuChat.xml), tiled at its size from the panel's
+// corner as the game does.
+static ID3D11ShaderResourceView *g_panel_tex;
+static int g_panel_tex_w, g_panel_tex_h;
+static ImVec4 g_panel_rect;             // the panel on the screen (pixels): where the tiles start
+
+static unsigned char *tga_bgra(const unsigned char *b, size_t n, int *w_out, int *h_out);   // below, with the fonts
+
+static ID3D11ShaderResourceView *panel_texture() {
+    static bool tried;
+    if (g_panel_tex || tried || !g_dev) return g_panel_tex;
+    tried = true;
+    size_t n = 0;
+    unsigned char *t = pvp_pak_file("skin/game/frame/window1/client.tga", &n);
+    int w = 0, h = 0;
+    unsigned char *px = t ? tga_bgra(t, n, &w, &h) : nullptr;
+    free(t);
+    if (!px) { rc_log("ui: panel texture not loaded"); return nullptr; }
+    D3D11_TEXTURE2D_DESC td = {};
+    td.Width = w; td.Height = h; td.MipLevels = 1; td.ArraySize = 1;
+    td.Format = DXGI_FORMAT_B8G8R8A8_UNORM; td.SampleDesc.Count = 1; td.Usage = D3D11_USAGE_IMMUTABLE;
+    td.BindFlags = D3D11_BIND_SHADER_RESOURCE;
+    D3D11_SUBRESOURCE_DATA sd = {px, (UINT)w * 4, 0};
+    ID3D11Texture2D *tex = nullptr;
+    if (SUCCEEDED(g_dev->CreateTexture2D(&td, &sd, &tex))) {
+        g_dev->CreateShaderResourceView(tex, nullptr, &g_panel_tex);
+        tex->Release();
+        g_panel_tex_w = w; g_panel_tex_h = h;
+    }
+    free(px);
+    return g_panel_tex;
+}
+
+// the panel's background over a part of it (pixels), the tiles lined up with the panel's corner
+static void panel_background(ImDrawList *dl, ImVec2 a, ImVec2 b, float scale) {
+    dl->AddRectFilled(a, b, IM_COL32(24, 27, 29, 255));
+    ID3D11ShaderResourceView *t = panel_texture();
+    if (!t) return;
+    float tw = g_panel_tex_w * scale, th = g_panel_tex_h * scale, ox = g_panel_rect.x, oy = g_panel_rect.y;
+    dl->PushClipRect(a, b, true);
+    for (float y = oy + floorf((a.y - oy) / th) * th; y < b.y; y += th)
+        for (float x = ox + floorf((a.x - ox) / tw) * tw; x < b.x; x += tw)
+            dl->AddImage((ImTextureID)(intptr_t)t, ImVec2(x, y), ImVec2(x + tw, y + th));
+    dl->PopClipRect();
+}
+
+// a box sunk into the panel, as the game's list of people in a session
+static void sunken_box(ImDrawList *dl, ImVec2 a, ImVec2 b) {
+    dl->AddRectFilled(a, b, IM_COL32(10, 11, 12, 140));
+    dl->AddRect(a, b, IM_COL32(58, 58, 56, 255));
+}
 
 static bool lobby_chat_tab(float *x, float *y, float *w, float *h, float *rw, float *rh) {
     ChatPanel cp;
@@ -1212,8 +1253,11 @@ static bool lobby_chat_tab(float *x, float *y, float *w, float *h, float *rw, fl
     const char *label = "GLOBAL CHAT";
     float size = (g_game_font ? g_game_font->FontSize : ImGui::GetFontSize()) * sy;
     ImFont *font = ImGui::GetFont();
+    float tab_y = cp.y, tab_h = cp.body_y - cp.y;           // the game's tabs' own strip, when they were found
+    for (int i = 0; i < cp.ntabs; i++) if (cp.tab[i][3] > 0) { tab_y = cp.tab[i][1]; tab_h = cp.tab[i][3]; break; }
     float tw = font->CalcTextSizeA(size, FLT_MAX, 0, label).x, gap = 12 * sx;
-    float lx = cp.tabs_r * sx + gap, ly = (cp.y + (cp.body_y - cp.y) * 0.5f) * sy - size * 0.5f;
+    float lx = cp.tabs_r * sx + gap, ly = floorf((tab_y + tab_h * 0.5f) * sy - size * 0.5f + 1 * sy);
+    g_panel_rect = ImVec4(cp.x * sx, cp.y * sy, (cp.x + cp.w) * sx, (cp.y + cp.h) * sy);
     ImGui::SetNextWindowPos(ImVec2(lx - gap, cp.y * sy), ImGuiCond_Always);
     ImGui::SetNextWindowSize(ImVec2(tw + 2 * gap, (cp.body_y - cp.y) * sy), ImGuiCond_Always);
     ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0, 0));
@@ -1225,8 +1269,9 @@ static bool lobby_chat_tab(float *x, float *y, float *w, float *h, float *rw, fl
     ImGui::SetCursorScreenPos(ImVec2(lx, ly));
     if (ImGui::InvisibleButton("##gtab", ImVec2(tw, size))) g_chat_tab = true;
     bool hot = ImGui::IsItemHovered();
-    dl->AddText(font, size, ImVec2(floorf(lx - gap + 1), floorf(ly)), VAN_TAB_OFF, "|");
-    dl->AddText(font, size, ImVec2(floorf(lx), floorf(ly)), g_chat_tab ? VAN_TAB : hot ? VAN_HOVER : VAN_TAB_OFF, label);
+    float mid = (tab_y + tab_h * 0.5f) * sy, sep = floorf(lx - gap * 0.5f);
+    dl->AddLine(ImVec2(sep, mid - 6 * sy), ImVec2(sep, mid + 6 * sy), IM_COL32(120, 120, 120, 255));
+    dl->AddText(font, size, ImVec2(floorf(lx), ly), g_chat_tab ? IM_COL32(255, 255, 255, 255) : hot ? VAN_HOVER : IM_COL32(200, 200, 200, 255), label);
     ImGui::End();
     ImGui::PopStyleVar(2);
     if (g_game_font) ImGui::PopFont();
@@ -1273,14 +1318,40 @@ static void chat_block() {
     if (g_game_font) ImGui::PushFont(g_game_font);
     ImGui::SetWindowFontScale(sy);
     ImDrawList *dl = ImGui::GetWindowDrawList();
-    if (!own_frame) dl->AddRectFilled(p0, ImVec2(p0.x + size.x, p0.y + size.y), IM_COL32(24, 24, 22, 255));
-    float lh = ImGui::GetTextLineHeight(), row = 32 * sy;
+    bool lobby = !own_frame;
+    float lh = ImGui::GetTextLineHeight(), row = 32 * sy, m = 10 * sy;
+    if (lobby) panel_background(dl, p0, ImVec2(p0.x + size.x, p0.y + size.y), sy);
     static char menu_id[18], menu_name[ONLINE_NAME];
     bool mod = st.moderator != 0;
+    float input_h = lh + 12 * sy;
+    // where everything goes: the Internet page's frame has its tabs on top and the people right of a line; over
+    // the lobby's panel (its own tabs above) a small row for the channel, the people in a sunken box
+    float box_x0 = lobby ? floorf(p0.x + size.x * 0.705f) : floorf(p0.x + size.x * 0.7f);
+    ImVec2 list0, list1, msg0, msg1, in0;
+    float bans_r, tabs_y;
+    if (lobby) {
+        ImVec2 b0(box_x0, p0.y + m), b1(p0.x + size.x - m, p0.y + size.y - m);
+        sunken_box(dl, b0, b1);
+        list0 = ImVec2(b0.x + 6 * sx, b0.y + 5 * sy); list1 = ImVec2(b1.x - 3 * sx, b1.y - 5 * sy);
+        tabs_y = p0.y + m;
+        bans_r = b0.x - m;
+        msg0 = ImVec2(p0.x + m + 4 * sx, tabs_y + lh + 8 * sy);
+        in0 = ImVec2(msg0.x, b1.y - input_h);
+        msg1 = ImVec2(b0.x - m, in0.y - lh - 8 * sy);       // a line for notes above the one to write in
+    } else {
+        tabs_y = p0.y + (row - lh) * 0.5f;
+        bans_r = p0.x + size.x - pad;
+        float top = p0.y + row + 6 * sy, bottom = p0.y + size.y - pad, foot = input_h + lh + 14 * sy;
+        list0 = ImVec2(box_x0 + 8 * sx, top); list1 = ImVec2(p0.x + size.x - pad * 0.5f, bottom);
+        msg0 = ImVec2(p0.x + pad, top); msg1 = ImVec2(box_x0 - 8 * sx, bottom - foot);
+        in0 = ImVec2(msg0.x, bottom - foot + 6 * sy);
+        dl->AddLine(ImVec2(p0.x + pad, p0.y + row), ImVec2(p0.x + size.x - pad, p0.y + row), IM_COL32(70, 66, 60, 255));
+        dl->AddLine(ImVec2(box_x0, top), ImVec2(box_x0, bottom), IM_COL32(70, 66, 60, 255));
+    }
 
-    // the tabs, as the page's own (ДРУЗЬЯ | ПОСЛЕДНЯЯ ИГРА)
+    // the channels, as the page's own tabs (ДРУЗЬЯ | ПОСЛЕДНЯЯ ИГРА)
     static const char *TABS[2] = {"ЧАТ RU", "CHAT ENG"};
-    float tx = p0.x + pad, ty = p0.y + (row - lh) * 0.5f;
+    float tx = lobby ? msg0.x : p0.x + pad, ty = tabs_y;
     for (int i = 0; i < 2; i++) {
         float tw = ImGui::CalcTextSize(TABS[i]).x;
         ImGui::SetCursorScreenPos(ImVec2(tx, ty));
@@ -1295,7 +1366,7 @@ static void chat_block() {
     if (mod) {          // the punishments in force, for the moderator
         char t[48];
         snprintf(t, sizeof t, "Наказания: %d", st.bans);
-        float tw = ImGui::CalcTextSize(t).x, bx = p0.x + size.x - pad - tw;
+        float tw = ImGui::CalcTextSize(t).x, bx = bans_r - tw;
         ImGui::SetCursorScreenPos(ImVec2(bx, ty));
         if (ImGui::InvisibleButton("##bans", ImVec2(tw, lh))) ImGui::OpenPopup("##chatbans");
         van_text(dl, bx, ty, ImGui::IsItemHovered() ? VAN_HOVER : VAN_TAB_OFF, t);
@@ -1319,14 +1390,10 @@ static void chat_block() {
             ImGui::EndPopup();
         }
     }
-    dl->AddLine(ImVec2(p0.x + pad, p0.y + row), ImVec2(p0.x + size.x - pad, p0.y + row), IM_COL32(70, 66, 60, 255));
 
     // who is online, right
-    float list_w = floorf(size.x * 0.3f), split = p0.x + size.x - list_w, top = p0.y + row + 6 * sy;
-    float input_h = lh + 12 * sy, foot = input_h + lh + 14 * sy, bottom = p0.y + size.y - pad;
-    dl->AddLine(ImVec2(split, top), ImVec2(split, bottom), IM_COL32(70, 66, 60, 255));
-    ImGui::SetCursorScreenPos(ImVec2(split + 8 * sx, top));
-    ImGui::BeginChild("##chat_online", ImVec2(list_w - 8 * sx - pad * 0.5f, bottom - top), ImGuiChildFlags_None, ImGuiWindowFlags_NoBackground);
+    ImGui::SetCursorScreenPos(list0);
+    ImGui::BeginChild("##chat_online", ImVec2(list1.x - list0.x, list1.y - list0.y), ImGuiChildFlags_None, ImGuiWindowFlags_NoBackground);
     ImGui::SetWindowFontScale(sy);
     {
         ImGui::PushStyleColor(ImGuiCol_Text, VAN_TITLE);
@@ -1369,9 +1436,9 @@ static void chat_block() {
     ImGui::EndChild();
 
     // the messages
-    float mx = p0.x + pad, mw = split - mx - 8 * sx;
-    ImGui::SetCursorScreenPos(ImVec2(mx, top));
-    ImGui::BeginChild("##chat_msgs", ImVec2(mw, bottom - foot - top), ImGuiChildFlags_None, ImGuiWindowFlags_NoBackground);
+    float mx = msg0.x, mw = msg1.x - msg0.x;
+    ImGui::SetCursorScreenPos(msg0);
+    ImGui::BeginChild("##chat_msgs", ImVec2(mw, msg1.y - msg0.y), ImGuiChildFlags_None, ImGuiWindowFlags_NoBackground);
     ImGui::SetWindowFontScale(sy);
     {
         static long long last_id[2];
@@ -1418,7 +1485,7 @@ static void chat_block() {
 
     // writing
     static char text[CHAT_TEXT];
-    float iy = bottom - foot + 6 * sy;
+    float iy = in0.y;
     ImGui::SetCursorScreenPos(ImVec2(mx, iy));
     ImGui::SetNextItemWidth(mw);
     ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(6 * sx, 6 * sy));
@@ -1429,13 +1496,13 @@ static void chat_block() {
                                           ImGuiInputTextFlags_EnterReturnsTrue);
     ImGui::EndDisabled();
     ImGui::PopStyleVar(2);
-    static char local_note[96];
+    static char local_note[160];
     if (enter) {
         if (!strcmp(text, "/invite") || !strcmp(text, "/инвайт")) {      // the player's own lobby, put in by us
             uint64_t lobby = my_lobby();
             rc_log("chat: /invite, lobby %llu", (unsigned long long)lobby);
             if (lobby) { snprintf(text, sizeof text, "/invite %llu", (unsigned long long)lobby); local_note[0] = 0; }
-            else { snprintf(local_note, sizeof local_note, "Вы не в лобби: создайте игру или зайдите в неё, потом /invite"); text[0] = 0; }
+            else { snprintf(local_note, sizeof local_note, "Не вижу вашего лобби: зайдите в лобби игры и повторите /invite"); text[0] = 0; }
         } else
             local_note[0] = 0;
         if (text[0]) chat_send(g_chat_ch, text);
@@ -1453,7 +1520,11 @@ static void chat_block() {
     } else if (local_note[0]) snprintf(note, sizeof note, "%s", local_note);
     else if (st.sent[0]) snprintf(note, sizeof note, "%s", st.sent);
     else if (g_steam_verified != 1) snprintf(note, sizeof note, "Вы пишете как Anonymous: войдите через Steam (вкладка PVP > Моя статистика)");
-    if (note[0]) van_text(dl, mx, iy + input_h + 4 * sy, VAN_WARN, note);
+    if (note[0]) {
+        ImVec4 clip(mx, 0, mx + mw, io.DisplaySize.y);
+        dl->AddText(ImGui::GetFont(), ImGui::GetFontSize(), ImVec2(floorf(mx), floorf(lobby ? iy - lh - 4 * sy : iy + input_h + 4 * sy)), VAN_WARN, note,
+                    nullptr, 0, &clip);
+    }
 
     ImGui::SetWindowFontScale(1);
     if (g_game_font) ImGui::PopFont();
