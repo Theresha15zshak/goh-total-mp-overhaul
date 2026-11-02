@@ -420,41 +420,41 @@ static void scan_names(void) {
     if (n != last_n) { rc_log("pvp: lobby names on screen: %d (%d dialogs looked at)", n, 20000 - budget); last_n = n; }
 }
 
-// ---- the lobby's lines taller, by the game's own layout ------------------------------------------------------
-// Moving the lines ourselves moved the avatars but not the names, which the game draws where its layout put them
-// (2026-11-02). So the game lays them out itself: the content of each line (the eDockPanel under the eListboxItem,
-// two parents up from the name: the listbox sizes its lines by their content, a MinSize on the line itself it
-// ignored) gets a minimum height of LINE_H (a dialog's MinSize is a tPoint2<int> at +0x128: the setter of the
-// layouts' "MinSize", lambda aa07f0) and is told its layout changed (vtable +0x60, as list_shown does). This runs on the thread the
-// game lays its interface out on (main_tick, before its GUI update), walking the screen itself four times a
-// second: no pointer of another thread's, nothing changed while the game reads it.
+// ---- the lobby's lines taller, the way the game resizes and moves its own dialogs -----------------------------
+// Writing a line's place and height ourselves moved the avatars but not the names (the name view keeps where it was
+// put), and a MinSize on the line or its content the listbox did not ask for (2026-11-02). So each line gets what
+// the game does to a dialog itself: its SetSize (vtable +0x80, aa2390: clamps, stores, lays its children out again,
+// so the avatar and the name sit in the taller line) and, for the lines below, the new y then the move notice
+// (vtable +0x70, aa2290: alignment, then the children told). This runs on the thread the game lays its interface
+// out on (main_tick, before its GUI update), walking the screen itself four times a second: no pointer of another
+// thread's, nothing changed while the game reads it. When the listbox lays its lines out again (someone joins),
+// they are made tall again on the next tick.
 #define VT_LINE_ITEM 0x1019228          // eListboxItem
-#define DLG_MIN_SIZE 0x128
 #define LINE_H 36                       // the game's 22 and a line of anka 12 for the MMR
+#define MAX_LINES 32
 
-static void tall_walk(uint64_t d, int depth, int in_session, int *budget, int *changed) {
+typedef struct { uint64_t item[MAX_LINES]; int32_t y[MAX_LINES]; int n; } Lines;
+
+static void tall_walk(uint64_t d, int depth, int in_session, int *budget, Lines *l) {
     if (!d || depth > 72 || --*budget < 0) return;
     uint32_t flags = 0;
     if (!peek((void *)(d + 0x48), &flags, 4) || !(flags & 2)) return;
     uint64_t vt = pq(d);
     if (vt == (uintptr_t)(g_base + VT_SESSION_VIEW)) in_session = 1;
     if (in_session && vt == (uintptr_t)(g_base + VT_NAME_VIEW)) {
-        uint64_t dock = pq(pq(d + 0xf0) + 0xf0), item = dock ? pq(dock + 0xf0) : 0;
-        if (!item || pq(item) != (uintptr_t)(g_base + VT_LINE_ITEM)) return;
-        int32_t *min = (int32_t *)(uintptr_t)(dock + DLG_MIN_SIZE);
-        if (min[1] < LINE_H) {
-            min[1] = LINE_H;
-            (*(void (***)(void *))(uintptr_t)dock)[0x60 / 8]((void *)(uintptr_t)dock);
-            (*changed)++;
-        } else {
-            static int shown;                   // how it came out, once
-            if (!shown++) log_chain("lobby line after", (void *)(uintptr_t)d);
-        }
+        uint64_t item = d;
+        for (int up = 0; up < 3 && item; up++) item = pq(item + 0xf0);
+        int32_t pos[2];
+        if (!item || pq(item) != (uintptr_t)(g_base + VT_LINE_ITEM) || l->n >= MAX_LINES || !peek((void *)(item + 0x98), pos, 8)) return;
+        int k = l->n++;
+        while (k > 0 && l->y[k - 1] > pos[1]) { l->item[k] = l->item[k - 1]; l->y[k] = l->y[k - 1]; k--; }
+        l->item[k] = item;
+        l->y[k] = pos[1];
         return;
     }
     uint64_t b = pq(d + 0xd8), e = pq(d + 0xe0);
     if (!b || e < b || e - b > 8 * 4096) return;
-    for (uint64_t p = b; p < e; p += 8) tall_walk(pq(p), depth + 1, in_session, budget, changed);
+    for (uint64_t p = b; p < e; p += 8) tall_walk(pq(p), depth + 1, in_session, budget, l);
 }
 
 void pvp_gui_tick(void) {
@@ -464,10 +464,31 @@ void pvp_gui_tick(void) {
     at = now;
     uint64_t root = pq((uintptr_t)(g_base + G_DESKTOP));
     if (!root || pq(root) != (uintptr_t)(g_base + VT_DESKTOP)) return;
-    int budget = 20000, changed = 0;
-    tall_walk(root, 0, 0, &budget, &changed);
+    static Lines l;
+    int budget = 20000, sized = 0, moved = 0;
+    l.n = 0;
+    tall_walk(root, 0, 0, &budget, &l);
+    for (int k = 0; k < l.n; k++) {
+        uint8_t *item = (uint8_t *)(uintptr_t)l.item[k];
+        void **vt = *(void ***)item;
+        int32_t *size = (int32_t *)(item + 0xa0), *pos = (int32_t *)(item + 0x98);
+        if (size[1] != LINE_H) {
+            uint64_t want = (uint32_t)size[0] | (uint64_t)(uint32_t)LINE_H << 32;
+            ((void (*)(void *, uint64_t))vt[0x80 / 8])(item, want);
+            sized++;
+        }
+        int32_t y = l.y[0] + k * LINE_H;
+        if (pos[1] != y) {
+            pos[1] = y;
+            ((void (*)(void *))vt[0x70 / 8])(item);
+            moved++;
+        }
+    }
     static int logged;
-    if (changed && logged++ < 3) rc_log("pvp: %d lobby lines made %d high", changed, LINE_H);
+    if ((sized || moved) && logged++ < 4) {
+        rc_log("pvp: lobby lines: %d made %d high, %d moved", sized, LINE_H, moved);
+        if (l.n && logged == 1) log_chain("lobby line", (void *)(uintptr_t)l.item[0]);
+    }
 }
 
 int lobby_rows(LobbyRow *out, int max) {
