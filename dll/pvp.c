@@ -420,43 +420,56 @@ static void scan_names(void) {
     if (n != last_n) { rc_log("pvp: lobby names on screen: %d (%d dialogs looked at)", n, 20000 - budget); last_n = n; }
 }
 
-// ---- the lobby's lines taller: the listbox's own resizing of them made taller ---------------------------------
-// Resizing and moving the lines ourselves lost against the listbox, which lays them out again and again: they jumped
-// between 22 and ours; and it never asks a line its size (vtable +0xc0 hooked, never called for them, 2026-11-02).
-// It gives each line its size through the line's SetSize (vtable +0x80, aa2390, packed w | h << 32). That is
-// hooked for listbox lines (eListboxItem, vtable 1019228): for the lines of the lobby's session list, the height
-// asked for becomes LINE_H, whoever asks; the listbox then has the lines at that height.
+// ---- the lobby's lines taller: the listbox's own line height -------------------------------------------------
+// What did not work (2026-11-02): resizing and moving the lines ourselves (the listbox put them back: they jumped),
+// a MinSize on a line or its content (not asked), a line's size answer (+0xc0, never asked), the lines' SetSize
+// (the session list makes its lines anew and sizes them all from one value). That value is the listbox's own:
+// an eMenuListbox (vtable 1053370) keeps its lines' size at +0x1c0 (w, h), gives it to every line (ac77dd, each
+// line's SetSize) and stacks them by its height (ac7919); when its width changes it keeps the height (ac5257,
+// ac732f). So the lobby's session list gets a line height of LINE_H once, the way the game itself changes it
+// (ac527a: the value, vtable +0x248, ac67b0, aa3f60 with 0xd), and it lays its lines out at that height from then
+// on: names, avatars and icons with them. On the game's logic thread (main_tick, before its GUI update).
 #define VT_LINE_ITEM 0x1019228          // eListboxItem
+#define VT_MENU_LISTBOX 0x1053370       // eMenuListbox
+#define LB_LINE_SIZE 0x1c0
+#define FN_LB_LAYOUT 0xac67b0
+#define FN_DLG_NOTIFY 0xaa3f60
 #define LINE_H 66                       // three times the game's 22: the name and the MMR under it
-static void (*g_line_set_size)(void *self, uint64_t size);
 
-static int in_session_list(void *line) {
-    uint64_t d = (uintptr_t)line;
-    for (int up = 0; up < 12 && d; up++) {
-        d = pq(d + 0xf0);
-        if (d && pq(d) == (uintptr_t)(g_base + VT_SESSION_VIEW)) return 1;
-    }
-    return 0;
+static uint64_t g_tall_listbox;          // the last one made taller (a new one is made each time a lobby opens)
+
+static void tall_walk(uint64_t d, int depth, int in_session, int *budget, uint64_t *listbox) {
+    if (!d || depth > 72 || --*budget < 0 || *listbox) return;
+    uint32_t flags = 0;
+    if (!peek((void *)(d + 0x48), &flags, 4) || !(flags & 2)) return;
+    uint64_t vt = pq(d);
+    if (vt == (uintptr_t)(g_base + VT_SESSION_VIEW)) in_session = 1;
+    if (in_session && vt == (uintptr_t)(g_base + VT_MENU_LISTBOX)) { *listbox = d; return; }
+    uint64_t b = pq(d + 0xd8), e = pq(d + 0xe0);
+    if (!b || e < b || e - b > 8 * 4096) return;
+    for (uint64_t p = b; p < e; p += 8) tall_walk(pq(p), depth + 1, in_session, budget, listbox);
 }
 
-static void line_set_size(void *self, uint64_t size) {
-    int32_t h = (int32_t)(size >> 32);
-    if (h > 0 && h < LINE_H && in_session_list(self)) {
-        static int logged;
-        if (logged++ < 2)
-            rc_log("pvp: a lobby line sized %dx%d by %llx, made %d high", (int32_t)(uint32_t)size, h,
-                   (unsigned long long)((uint8_t *)__builtin_return_address(0) - g_base), LINE_H);
-        size = (uint32_t)size | (uint64_t)(uint32_t)LINE_H << 32;
-    }
-    g_line_set_size(self, size);
-}
-
-static void line_size_install(void (*patch)(void *, const void *, size_t)) {
-    void **slot = (void **)(g_base + VT_LINE_ITEM + 0x80);
-    if (*slot != (void *)(g_base + 0xaa2390)) { rc_log("pvp: the listbox line is not as expected, lobby lines as they are"); return; }
-    g_line_set_size = (void (*)(void *, uint64_t))*slot;
-    void *ours = (void *)line_set_size;
-    patch(slot, &ours, sizeof ours);
+void pvp_gui_tick(void) {
+    static DWORD at;
+    DWORD now = GetTickCount();
+    if (!g_base || now - at < 250) return;
+    at = now;
+    uint64_t root = pq((uintptr_t)(g_base + G_DESKTOP)), lb = 0;
+    if (!root || pq(root) != (uintptr_t)(g_base + VT_DESKTOP)) return;
+    int budget = 20000;
+    tall_walk(root, 0, 0, &budget, &lb);
+    if (!lb) return;
+    int32_t *size = (int32_t *)(uintptr_t)(lb + LB_LINE_SIZE);
+    if (size[1] == LINE_H) return;
+    int32_t was = size[1];
+    size[1] = LINE_H;
+    void **vt = *(void ***)(uintptr_t)lb;
+    ((void (*)(void *))vt[0x248 / 8])((void *)(uintptr_t)lb);
+    ((void (*)(void *))(g_base + FN_LB_LAYOUT))((void *)(uintptr_t)lb);
+    ((void (*)(void *, int))(g_base + FN_DLG_NOTIFY))((void *)(uintptr_t)lb, 0xd);
+    if (lb != g_tall_listbox) rc_log("pvp: the lobby's session list: lines %d high instead of %d", LINE_H, was);
+    g_tall_listbox = lb;
 }
 
 int lobby_rows(LobbyRow *out, int max) {
@@ -576,7 +589,6 @@ int pvp_install(uint8_t *exe, const char *dir, uint8_t *(*alloc)(size_t), void (
         patch(exe + FN_PING_MISS, MISS_NEW, 5);
     else
         rc_log("pvp: the lobby ping average is not as expected, left as it is");
-    line_size_install(patch);
     // the pages: their vtable slots point at ours, which call the game's
     void *binds[2] = {(void *)bind_online, (void *)bind_lan}, *cmds[2] = {(void *)cmd_online, (void *)cmd_lan};
     void *dtors[2] = {(void *)dtor_online, (void *)dtor_lan};

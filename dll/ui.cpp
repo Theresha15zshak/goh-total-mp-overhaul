@@ -1245,7 +1245,7 @@ static void lobby_overlay() {
         const char *m = n == 2 ? (m1 ? m1 : mt) : (mt ? mt : m1);
         char text[32];
         snprintf(text, sizeof text, "MMR %s", m ? m : d.state == 1 ? "-" : "...");
-        // right under the name, in the taller line (pvp.c line_size); in a line of the game's 22, after the name
+        // right under the name, in the taller line (pvp.c pvp_gui_tick); in a line of the game's 22, after the name
         ImVec2 at;
         if (r.line_bottom - (r.y + r.h) >= 12)
             at = ImVec2(floorf(r.x * sx + 0.5f), floorf((r.y + r.h + 1) * sy + 0.5f));
