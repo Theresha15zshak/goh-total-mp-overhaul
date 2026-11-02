@@ -1533,7 +1533,7 @@ static void startup(HMODULE self) {
     *g_cell = 1.0f;
 
 #ifdef COMPETITIVE_ONLY
-    // the build for testing the competitive balance with other players: its switch and the F7 window, nothing else
+    // the build for testing the competitive balance with other players: its switch and the Shift+F7 window, nothing else
     widen_autoreplays();             // without it the game's 5 names come back and overwrite the oldest replays
     balance_install(g_base, g_dir, page_alloc, patch, 0);
     if (GetPrivateProfileIntA("debug", "balance_on_at_start", 0, ini)) g_balance_on = 1;   // test: on before anything is read

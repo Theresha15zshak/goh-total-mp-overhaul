@@ -1,6 +1,6 @@
 // Who plays with the mod right now: our server goh-online (server/ in this repo, Cloudflare Workers).
 // Only with the player's yes (asked once, kept in goh_online.ini): every 2 minutes the SteamID, the Steam
-// name and the balance version go to the server. The list is fetched while the F6 window is open.
+// name and the balance version go to the server. The list is fetched while the Shift+F6 window is open.
 // The SteamID and name come from the game's own steam_api64.dll; the server cannot verify them.
 // Steam sign-in: the server knows a SteamID is ours once the player signed in on steamcommunity.com (the
 // game's Steam overlay or a browser, server/src/verify.js); until then the player is Anonymous in the chat and
@@ -355,7 +355,7 @@ static void chat_tick(HINTERNET s, char *buf) {
     ReleaseSRWLockExclusive(&g_chat_lock);
     if ((out[0] || mod[0]) && (g_online_consent != 1 || !g_key[0])) {
         AcquireSRWLockExclusive(&g_chat_lock);
-        snprintf(g_chat_st.sent, sizeof g_chat_st.sent, "%s", TR("нужно согласие на онлайн (F6)", "online consent needed (F6)"));
+        snprintf(g_chat_st.sent, sizeof g_chat_st.sent, "%s", TR("нужно согласие на онлайн (Shift+F6)", "online consent needed (Shift+F6)"));
         ReleaseSRWLockExclusive(&g_chat_lock);
         out[0] = mod[0] = 0;
     }

@@ -25,10 +25,10 @@ copy /y "%~dp0files\goh_snapshots.ini" "%BIN%\goh_snapshots.ini" >nul || goto :f
 powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0old_mod.ps1" "%BIN%"
 echo.
 echo Готово. Запусти игру: при первом запуске мод спросит про онлайн и предложит войти через Steam.
-echo Клавиши: F6 — онлайн, F7 — компетитив, F8 — панель реплея, F9 — графики. Удалить всё: uninstall.bat
+echo Клавиши: Shift+F6 — онлайн, Shift+F7 — компетитив, Shift+F8 — панель реплея, Shift+F9 — графики. Удалить всё: uninstall.bat
 echo.
 echo Done. Start the game: at the first start the mod asks about the online list and offers to sign in through Steam.
-echo Keys: F6 — online, F7 — competitive, F8 — replay panel, F9 — charts. To remove everything: uninstall.bat
+echo Keys: Shift+F6 — online, Shift+F7 — competitive, Shift+F8 — replay panel, Shift+F9 — charts. To remove everything: uninstall.bat
 pause
 exit /b 0
 

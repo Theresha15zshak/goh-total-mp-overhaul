@@ -516,7 +516,7 @@ extern "C" void music_start(const char *dir) {
     lstrcpynA(g_dir, dir, MAX_PATH);
     char ini[MAX_PATH];
     snprintf(ini, sizeof ini, "%sgoh_music.ini", g_dir);
-    g_music.enabled = GetPrivateProfileIntA("music", "enabled", 0, ini);     // off until the player turns it on (F10)
+    g_music.enabled = GetPrivateProfileIntA("music", "enabled", 0, ini);     // off until the player turns it on (Shift+F10)
     g_music.volume = GetPrivateProfileIntA("music", "volume", 70, ini) / 100.f;
     status("%s", TR("Ждёт боя", "Waiting for a battle"));
     CloseHandle(CreateThread(nullptr, 0, audio_thread, nullptr, 0, nullptr));

@@ -28,10 +28,10 @@ What it adds
     /invite in the chat - a "Join lobby" button for everyone else. Right click on a name: mention, Steam
     profile. Messages are wiped every two hours.
   Replays: Extras -> Replays, files named by mode, map, nation and date, old ones are kept.
-    F8 - replay panel (speed, seeking), F9 - match charts (in a replay and after a battle).
-  F7 - competitive balance (WIP: both players tick it before the start, "Balance version" must match;
+    Shift+F8 - replay panel (speed, seeking), Shift+F9 - match charts (in a replay and after a battle).
+  Shift+F7 - competitive balance (WIP: both players tick it before the start, "Balance version" must match;
     don't use it in regular multiplayer).
-  F6 - the online window.
+  Shift+F6 - the online window.
 
 Sign in through Steam and your data
 -----------------------------------

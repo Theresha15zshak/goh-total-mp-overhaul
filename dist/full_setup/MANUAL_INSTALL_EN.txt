@@ -28,7 +28,7 @@ If you don't know where it is: Steam -> right click the game -> Manage -> Browse
   Start the game. The mod asks about the online list and offers to sign in through Steam.
   Multiplayer -> Internet: the PVP button and the global chat above the friends.
   Bottom left in the menus: "Official build, latest version".
-  Keys: F6 - online, F7 - competitive, F8 - replay panel, F9 - charts.
+  Keys: Shift+F6 - online, Shift+F7 - competitive, Shift+F8 - replay panel, Shift+F9 - charts.
   If the game does not start: delete iphlpapi.dll from GAME\binaries\x64 and send
   GAME\binaries\x64\goh_replay.log.
 

@@ -25,15 +25,15 @@ static ID3D11RenderTargetView *g_rtv;
 static HWND g_hwnd;
 static WNDPROC g_wndproc;
 static volatile bool g_ready;
-static volatile bool g_visible = true;  // F8
-static volatile bool g_charts;          // match charts window: F9, the panel button, or the results page
-static volatile bool g_music_win;       // music window: F10
+static volatile bool g_visible = true;  // Shift+F8
+static volatile bool g_charts;          // match charts window: Shift+F9, the panel button, or the results page
+static volatile bool g_music_win;       // music window: Shift+F10
 #ifdef COMPETITIVE_ONLY
 static volatile bool g_balance_win = true;   // the test build opens with its switch on screen
 #else
-static volatile bool g_balance_win;     // balance switch: F7
+static volatile bool g_balance_win;     // balance switch: Shift+F7
 #endif
-static volatile bool g_online_win;      // who is online with the mod: F6
+static volatile bool g_online_win;      // who is online with the mod: Shift+F6
 static bool g_chat_tab;                 // the lobby's chat panel shows our GLOBAL CHAT tab (lobby_chat_tab)
 static float g_integrity_top;           // where the version box starts on the screen (pixels): the "about" window sits above
 static bool about_shown();
@@ -90,14 +90,14 @@ static bool raw_keyboard(LPARAM l) {
     return GetRawInputData((HRAWINPUT)l, RID_HEADER, &hd, &size, sizeof hd) != (UINT)-1 && hd.dwType == RIM_TYPEKEYBOARD;
 }
 
-// F6 / F7 / F8 / F9 / F10, read once per frame: F10 is a system key (WM_SYSKEYDOWN) and the game may take
+// Shift+F6 / F7 / F8 / F9 / F10, read once per frame: F10 is a system key (WM_SYSKEYDOWN) and the game may take
 // the keyboard through raw input, so window messages cannot be relied on
 static void hotkeys() {
     static const int KEYS[5] = {VK_F8, VK_F9, VK_F10, VK_F7, VK_F6};
     static bool was[5];
-    bool fg = GetForegroundWindow() == g_hwnd;
-    for (int i = 0; i < 5; i++) {
-        bool down = fg && (GetAsyncKeyState(KEYS[i]) & 0x8000);
+    bool fg = GetForegroundWindow() == g_hwnd, shift = (GetAsyncKeyState(VK_SHIFT) & 0x8000) != 0;
+    for (int i = 0; i < 5; i++) {            // with Shift: the F keys alone stay the game's (and other mods')
+        bool down = fg && shift && (GetAsyncKeyState(KEYS[i]) & 0x8000);
         if (down && !was[i]) {
             if (i == 0) g_visible = !g_visible;
             else if (i == 1) g_charts = !g_charts;
@@ -272,13 +272,13 @@ static void panel() {
         }
     }
     ImGui::SameLine(ImGui::GetWindowWidth() - 345 * k);
-    if (ImGui::SmallButton(TR("Музыка (F10)", "Music (F10)"))) g_music_win = !g_music_win;
+    if (ImGui::SmallButton(TR("Музыка (Shift+F10)", "Music (Shift+F10)"))) g_music_win = !g_music_win;
     if (g_ms.n > 1) {
         ImGui::SameLine(ImGui::GetWindowWidth() - 230 * k);
-        if (ImGui::SmallButton(TR("Графики (F9)", "Charts (F9)"))) g_charts = !g_charts;
+        if (ImGui::SmallButton(TR("Графики (Shift+F9)", "Charts (Shift+F9)"))) g_charts = !g_charts;
     }
     ImGui::SameLine(ImGui::GetWindowWidth() - 120 * k);
-    ImGui::TextDisabled("%s", TR("F8 — скрыть", "F8 — hide"));
+    ImGui::TextDisabled("%s", TR("Shift+F8 — скрыть", "Shift+F8 — hide"));
     ImGui::End();
 }
 
@@ -506,7 +506,7 @@ static void music_window() {
     if (ImGui::Button(TR("Открыть папку music", "Open the music folder"))) music_open_folder();
     ImGui::SameLine();
     ImGui::TextDisabled("main theme / calm / tension / battle \xC2\xB7 mp3, flac, wav");
-    ImGui::TextDisabled("%s", TR("Новые файлы подхватываются со следующего боя. F10 — скрыть", "New files are picked up from the next battle. F10 — hide"));
+    ImGui::TextDisabled("%s", TR("Новые файлы подхватываются со следующего боя. Shift+F10 — скрыть", "New files are picked up from the next battle. Shift+F10 — hide"));
     ImGui::End();
     g_music_win = open;
 }
@@ -546,7 +546,7 @@ static void balance_window() {
             ImGui::TextDisabled(TR("Игра читала файл баланса: %ld раз, последний — %s", "The game read the balance file: %ld times, last — %s"), g_balance_reads,
                                 g_balance_last ? TR("компетитив", "competitive") : TR("ваниль", "vanilla"));
     }
-    ImGui::TextDisabled("%s", TR("F7 — скрыть", "F7 — hide"));
+    ImGui::TextDisabled("%s", TR("Shift+F7 — скрыть", "Shift+F7 — hide"));
     ImGui::End();
     g_balance_win = open;
 }
@@ -579,7 +579,7 @@ static void consent_window() {
     if (ImGui::Button(TR("Да, показывать", "Yes, show me"))) online_set_consent(1);
     ImGui::SameLine();
     if (ImGui::Button(TR("Нет", "No"))) online_set_consent(0);
-    ImGui::TextDisabled("%s", TR("Поменять можно в окне F6.", "You can change it in the F6 window."));
+    ImGui::TextDisabled("%s", TR("Поменять можно в окне Shift+F6.", "You can change it in the Shift+F6 window."));
     ImGui::End();
 }
 
@@ -734,7 +734,7 @@ static const char *ABOUT_RU[] = {
     "Кнопка PVP на странице «Интернет»: кто онлайн с модом, ваша статистика, лидеры",
     "MMR под никами в лобби",
     "Глобальный чат RU / ENG: на странице «Интернет» и вкладка GLOBAL CHAT в лобби; /invite, упоминания",
-    "Реплеи: вкладка в «Дополнительно», перемотка (F8), графики матча (F9)",
+    "Реплеи: вкладка в «Дополнительно», перемотка (Shift+F8), графики матча (Shift+F9)",
     "Вход через Steam: мод получает только SteamID, без пароля",
 };
 static const char *ABOUT_EN[] = {
@@ -742,10 +742,11 @@ static const char *ABOUT_EN[] = {
     "PVP button on the Internet page: who is online with the mod, your stats, leaders",
     "MMR under names in the lobby",
     "Global chat RU / ENG: on the Internet page and the GLOBAL CHAT tab in the lobby; /invite, mentions",
-    "Replays: a tab in Extras, seeking (F8), match charts (F9)",
+    "Replays: a tab in Extras, seeking (Shift+F8), match charts (Shift+F9)",
     "Sign in through Steam: the mod gets only your SteamID, no password",
 };
 static const char *NEWS_RU[] = {
+    "Горячие клавиши мода теперь с Shift: Shift+F6 … Shift+F10 (F-клавиши без Shift свободны)",
     "Автообновление: кнопка «Обновить» у версии слева внизу (файл проверяется по подписи автора)",
     "Английский язык (по языку игры в Steam)",
     "Чат: правый клик по нику (упомянуть, профиль Steam), звук при упоминании",
@@ -754,6 +755,7 @@ static const char *NEWS_RU[] = {
     "Исправлено: курсор игры, вкладка PVP больше не закрывается сама",
 };
 static const char *NEWS_EN[] = {
+    "The mod's keys now go with Shift: Shift+F6 ... Shift+F10 (the F keys alone are free)",
     "Auto-update: an \"Update\" button by the version, bottom left (the file is checked against the author's signature)",
     "English (follows the game's language in Steam)",
     "Chat: right click on a name (mention, Steam profile), a sound when you are mentioned",
@@ -850,7 +852,7 @@ static void online_window() {
         return;
     }
     online_list(ImGui::GetFrameHeightWithSpacing());
-    ImGui::TextDisabled("%s", TR("F6 — скрыть", "F6 — hide"));
+    ImGui::TextDisabled("%s", TR("Shift+F6 — скрыть", "Shift+F6 — hide"));
     ImGui::End();
     g_online_win = open;
 }
