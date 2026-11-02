@@ -3,6 +3,7 @@
 //                 200 "ok\nverified" or "ok\nanon" (not signed in with Steam), 403 the SteamID is held by another key
 //   GET  /online  plain text for the DLL: "count\n" then "steam_id\tname\tversion\tseconds_ago\n" per player;
 //                 ?v=2 adds "\tverified" (0/1). Players not signed in are listed as Anonymous####
+//   official builds: GET /versions, /versions.html (src/versions.js)
 //   Steam sign-in: POST /verify/start, /verify/status, GET /verify, /verify/back (src/verify.js)
 //   GET  /        the same list as a page
 //   rated matches: POST /report, GET /ratings, /player, /leaderboard (src/matches.js)
@@ -16,6 +17,7 @@ import { report, ratings, player, leaderboard } from './matches.js';
 import * as chat from './chat.js';
 import * as verify from './verify.js';
 import { anonName } from './verify.js';
+import * as versions from './versions.js';
 
 const ONLINE_S = 300;          // seen within the last 5 minutes = online
 const MAX_LIST = 200;
@@ -102,6 +104,8 @@ export default {
       return out === null ? text('bad', 400) : text(out);
     }
     if (url.pathname === '/leaderboard' && req.method === 'GET') return text(await leaderboard(url, env));
+    if (url.pathname === '/versions' && req.method === 'GET') return text(await versions.text(env));
+    if (url.pathname === '/versions.html' && req.method === 'GET') return versions.page(env);
     if (url.pathname === '/verify' && req.method === 'GET') return verify.toSteam(url);
     if (url.pathname === '/verify/back' && req.method === 'GET') return verify.back(url, env);
     if ((url.pathname === '/verify/start' || url.pathname === '/verify/status') && req.method === 'POST') {

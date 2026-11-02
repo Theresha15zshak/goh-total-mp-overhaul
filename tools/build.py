@@ -220,16 +220,30 @@ def balance_tag(data_text):
     return '%04X' % (zlib.crc32(src + data_text.encode()) & 0xffff)
 
 
+def mod_version():
+    """what the player sees as the mod's version: when it was built and from which commit"""
+    import subprocess
+    import time
+    try:
+        rev = subprocess.run(['git', 'rev-parse', '--short', 'HEAD'], cwd=ROOT, capture_output=True, text=True).stdout.strip()
+    except OSError:
+        rev = ''
+    return time.strftime('%Y.%m.%d-%H%M') + ('-' + rev if rev else '')
+
+
 def main():
     os.makedirs(OBJ, exist_ok=True)
     os.makedirs(os.path.dirname(OUT), exist_ok=True)
     tag = balance_tag(balance_header())
     ui_header()
     CFLAGS.append('-DBALANCE_TAG="%s"' % tag)
+    version = mod_version()
+    CFLAGS.append('-DMOD_VERSION="%s"' % version)
     objs = [obj(s) for s in C_SRC + CPP_SRC]
     # no -static: with -shared zig would emit an ar archive; its libc++ is linked in statically anyway
     zig('c++', *TARGET, '-shared', '-O2', '-o', OUT, *objs, *LIBS)
-    print('built', OUT, os.path.getsize(OUT) // 1024, 'KB, balance version', tag)
+    open(OUT + '.version', 'w').write(version)
+    print('built', OUT, os.path.getsize(OUT) // 1024, 'KB, balance version', tag, 'mod version', version)
 
 
 if __name__ == '__main__':

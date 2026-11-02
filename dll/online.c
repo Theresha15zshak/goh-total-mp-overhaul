@@ -30,7 +30,7 @@ volatile long g_online_want;
 volatile long g_online_held;
 volatile long g_steam_verified = -1;
 static volatile long g_login_want;          // the player asked to sign in
-static char g_login_url[160];               // where to sign in, once the server gave it
+static char g_login_url[1024];              // where to sign in, once the server gave a code for it
 static DWORD g_login_at;                    // when; the status is asked every few seconds for 15 minutes
 static char g_ini[MAX_PATH];
 static char g_key[65];          // 64 hex characters, "" if it could be neither read nor made
@@ -42,6 +42,9 @@ static int g_count, g_state;
 static volatile long g_beat_now;   // consent just given: send at once
 
 const char *online_my_id(void) { return g_id; }
+
+// a SteamID as the server sends it: 17 digits, nothing else (it ends up in steam:// addresses)
+int steam_id_ok(const char *s) { return s && strlen(s) == 17 && strspn(s, "0123456789") == 17 && !strncmp(s, "7656119", 7); }
 
 int online_copy(OnlinePlayer *out, int max, int *state) {
     AcquireSRWLockShared(&g_lock);
@@ -158,7 +161,7 @@ static void parse_list(char *t) {
             *t = 0;
             f[k++] = t + 1;
         }
-        if (k < 4 || strlen(f[0]) != 17 || strspn(f[0], "0123456789") != 17) continue;
+        if (k < 4 || !steam_id_ok(f[0])) continue;
         if (strlen(f[1]) >= ONLINE_NAME || strlen(f[2]) >= sizeof tmp->version) continue;
         OnlinePlayer *o = &tmp[n++];
         strcpy(o->id, f[0]);
@@ -282,13 +285,13 @@ static void chat_parse(int ch, char *t) {
         if (!strcmp(f[0], "E") && k >= 2) epoch = _atoi64(f[1]);
         else if (!strcmp(f[0], "S") && k >= 2) { if (!strcmp(f[1], "ban")) st.banned = 1; else if (k >= 3) st.muted_until = _atoi64(f[2]); }
         else if (!strcmp(f[0], "A")) st.moderator = 1;
-        else if (!strcmp(f[0], "B") && k >= 5 && st.bans < 50 && strlen(f[1]) == 17) {
+        else if (!strcmp(f[0], "B") && k >= 5 && st.bans < 50 && steam_id_ok(f[1])) {
             ChatBan *b = &st.ban[st.bans++];
             strcpy(b->sid, f[1]);
             snprintf(b->name, sizeof b->name, "%s", f[2]);
             b->ban = !strcmp(f[3], "ban");
             b->until = _atoi64(f[4]);
-        } else if (!strcmp(f[0], "M") && k >= 6 && n < CHAT_MAX && strlen(f[3]) == 17) {
+        } else if (!strcmp(f[0], "M") && k >= 6 && n < CHAT_MAX && steam_id_ok(f[3])) {
             ChatMsg *m = &add[n++];
             m->id = _atoi64(f[1]);
             m->at_ms = _atoi64(f[2]);
@@ -363,7 +366,13 @@ static void chat_tick(HINTERNET s, char *buf) {
     }
 }
 
-// ---- Steam sign-in: the address from the server, then its answer awaited ----------------------------------
+// ---- Steam sign-in: a one-time code from the server, Steam's page with it, then the answer awaited ---------
+// Steam OpenID 2.0: Steam sends the player back to /verify/back on our server with the code, signed by Steam
+#define OPENID_SELECT "http%3A%2F%2Fspecs.openid.net%2Fauth%2F2.0%2Fidentifier_select"
+#define STEAM_LOGIN_A "https://steamcommunity.com/openid/login?openid.ns=http%3A%2F%2Fspecs.openid.net%2Fauth%2F2.0" \
+                      "&openid.mode=checkid_setup&openid.return_to=https%3A%2F%2Fgoh-online.goh-mod.workers.dev%2Fverify%2Fback%3Ft%3D"
+#define STEAM_LOGIN_B "&openid.realm=https%3A%2F%2Fgoh-online.goh-mod.workers.dev%2F&openid.identity=" OPENID_SELECT \
+                      "&openid.claimed_id=" OPENID_SELECT
 void online_steam_login(void) {
     if (g_online_consent != 1) online_set_consent(1);   // signing in is asking to take part
     g_login_want = 1;
@@ -389,8 +398,15 @@ static void login_tick(HINTERNET s, char *buf) {
     if (InterlockedExchange(&g_login_want, 0)) {
         int st = http(s, L"POST", L"/verify/start", body, buf);
         rc_log("online: steam sign-in asked: %d", st);
+        // Only the server's one-time code is taken (48 hex digits after "?t="): the address opened is Steam's
+        // own sign-in page, put together here. A server that is not ours, or ours broken into, cannot send the
+        // player to a page of its own asking for their Steam password.
+        const char *t = st == 200 ? strstr(buf, "?t=") : NULL;
+        char token[49] = "";
+        if (t && strspn(t + 3, "0123456789abcdef") == 48 && !t[51]) memcpy(token, t + 3, 48);
         AcquireSRWLockExclusive(&g_lock);
-        if (st == 200 && !strncmp(buf, "https://", 8) && strlen(buf) < sizeof g_login_url) strcpy(g_login_url, buf);
+        if (token[0])
+            snprintf(g_login_url, sizeof g_login_url, "%s%s%s", STEAM_LOGIN_A, token, STEAM_LOGIN_B);
         ReleaseSRWLockExclusive(&g_lock);
         g_login_at = now | 1;
         asked = 0;
@@ -412,6 +428,71 @@ static void login_tick(HINTERNET s, char *buf) {
     g_steam_verified = v;
 }
 
+// ---- is this DLL an official build: the SHA-256 of the file loaded against the server's list ---------------
+// A changed DLL can of course claim anything about itself: this catches an old build or a copy someone changed
+// without bothering, not a determined forger (that check is the server's page /versions.html, by hand).
+volatile long g_integrity;
+char g_integrity_newest[32];
+const char g_mod_version[] = MOD_VERSION;
+
+static int own_sha256(char out[65]) {
+    HMODULE me = NULL;
+    char path[MAX_PATH];
+    if (!GetModuleHandleExA(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+                            (LPCSTR)(void *)own_sha256, &me) ||
+        !GetModuleFileNameA(me, path, sizeof path))
+        return 0;
+    FILE *f = fopen(path, "rb");
+    if (!f) return 0;
+    fseek(f, 0, SEEK_END);
+    long n = ftell(f);
+    fseek(f, 0, SEEK_SET);
+    unsigned char *b = n > 0 && n < (64 << 20) ? malloc(n) : NULL;
+    int ok = b && fread(b, 1, n, f) == (size_t)n;
+    fclose(f);
+    unsigned char h[32];
+    ok = ok && !BCryptHash(BCRYPT_SHA256_ALG_HANDLE, NULL, 0, b, (ULONG)n, h, 32);
+    free(b);
+    for (int i = 0; ok && i < 32; i++) snprintf(out + 2 * i, 3, "%02x", h[i]);
+    return ok;
+}
+
+// "sha256\tversion\tkind\treleased_at\tcurrent" per official build, newest first
+static void integrity_check(HINTERNET s, char *buf) {
+    char mine[65];
+    if (!own_sha256(mine)) { g_integrity = INTEGRITY_UNKNOWN; rc_log("integrity: own file not readable"); return; }
+    if (http(s, L"GET", L"/versions", NULL, buf) != 200) { g_integrity = INTEGRITY_UNREACHABLE; return; }
+    char kind[16] = "", newest[32] = "";
+    int found = 0, current = 0;
+    for (char *line = buf, *next; line && *line; line = next) {       // first: which build this is
+        next = strchr(line, '\n');
+        char *f[5];
+        int k = 0;
+        f[k++] = line;
+        for (char *q = line; *q && *q != '\n' && k < 5; q++) if (*q == '\t') f[k++] = q + 1;
+        if (k == 5 && !strncmp(f[0], mine, 64)) {
+            found = 1;
+            current = f[4][0] == '1';
+            snprintf(kind, sizeof kind, "%.*s", (int)(f[3] - f[2] - 1), f[2]);
+        }
+        if (next) next++;
+    }
+    for (char *line = buf, *next; found && !current && line && *line; line = next) {   // then: the build to have
+        next = strchr(line, '\n');
+        char *f[5];
+        int k = 0;
+        f[k++] = line;
+        for (char *q = line; *q && *q != '\n' && k < 5; q++) if (*q == '\t') f[k++] = q + 1;
+        if (k == 5 && f[4][0] == '1' && (size_t)(f[3] - f[2] - 1) == strlen(kind) && !strncmp(f[2], kind, strlen(kind)) && !newest[0])
+            snprintf(newest, sizeof newest, "%.*s", (int)(f[2] - f[1] - 1), f[1]);
+        if (next) next++;
+    }
+    memcpy(g_integrity_newest, newest, sizeof newest);
+    g_integrity = !found ? INTEGRITY_UNKNOWN : current ? INTEGRITY_CURRENT : INTEGRITY_OLD;
+    rc_log("integrity: %s, version %s, sha256 %.16s...", !found ? "not an official build" : current ? "official, current" : "official, old",
+           g_mod_version, mine);
+}
+
 static DWORD WINAPI online_thread(LPVOID unused) {
     load_key();
     while (!steam_me()) Sleep(2000);
@@ -421,6 +502,8 @@ static DWORD WINAPI online_thread(LPVOID unused) {
     if (!s) { rc_log("online: WinHttpOpen failed %lu, off", GetLastError()); return 0; }
     WinHttpSetTimeouts(s, 5000, 5000, 5000, 5000);
     static char buf[MAX_BODY], body_r[4096];
+    integrity_check(s, buf);
+    DWORD integrity_at = GetTickCount();
     DWORD last_beat = 0, last_list = 0, last_report = 0;
     int beat_fails = 0;
     long wanted = 0;
@@ -461,6 +544,7 @@ static DWORD WINAPI online_thread(LPVOID unused) {
                 }
             }
         }
+        if (g_integrity == INTEGRITY_UNREACHABLE && now - integrity_at > 60000) { integrity_at = now; integrity_check(s, buf); }
         fetch_docs(s, buf);
         chat_tick(s, buf);
         login_tick(s, buf);

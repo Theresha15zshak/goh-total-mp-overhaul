@@ -127,10 +127,16 @@ void online_steam_login(void);              // the player asked: the sign-in add
 int online_login_url(char *out, size_t n);  // 1 = the address to open (once fetched), the login is awaited
 int online_remind(void);                    // the start-up window about the sign-in is wanted
 void online_set_remind(int on);
+// Is this DLL an official build? Its SHA-256 against the server's list (tools/release.py, server/src/versions.js)
+enum { INTEGRITY_CHECKING, INTEGRITY_CURRENT, INTEGRITY_OLD, INTEGRITY_UNKNOWN, INTEGRITY_UNREACHABLE };
+extern volatile long g_integrity;
+extern char g_integrity_newest[32];         // INTEGRITY_OLD: the version to update to
+extern const char g_mod_version[];
 void online_start(const char *dir);
 void online_set_consent(int yes);
 int online_copy(OnlinePlayer *out, int max, int *state);   // state 0 nothing yet, 1 list, 2 server unreachable
-const char *online_my_id(void);             // "" until Steam is up
+const char *online_my_id(void);
+int steam_id_ok(const char *s);             // 17 digits of a SteamID             // "" until Steam is up
 // texts of the rating server (server/src/matches.js), fetched while the panel asks for them each frame
 enum { DOC_PLAYER, DOC_BOARD_1V1, DOC_BOARD_TEAM, DOC_RATINGS, DOC_LOBBY, DOC_N };   // DOC_RATINGS: the online tab
 void online_want(int doc);                  // on screen this frame

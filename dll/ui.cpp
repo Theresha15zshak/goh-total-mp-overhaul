@@ -596,7 +596,7 @@ static void login_window() {
     ImGui::SetNextWindowBgAlpha(0.96f);
     ImGui::Begin("Мод: вход через Steam###goh_login", nullptr, ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoCollapse |
                                                            ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoMove);
-    static char url[160];
+    static char url[1024];
     bool have = online_login_url(url, sizeof url);
     if (g_steam_verified == 1) {
         ImGui::TextColored(ImColor(120, 200, 100), "Готово: аккаунт Steam подтверждён.");
@@ -623,7 +623,8 @@ static void login_window() {
         static bool auto_opened;
         if (!auto_opened) { auto_opened = true; open_login(url, false); }
         ImGui::TextColored(ImColor(ACCENT), "Ждём подтверждения от Steam...");
-        ImGui::TextWrapped("Если страница не открылась, откройте её в браузере. Ссылка одноразовая, действует 15 минут:");
+        ImGui::TextWrapped("Если страница не открылась, откройте её в браузере. Это страница входа самого Steam "
+                           "(steamcommunity.com), ссылка одноразовая и действует 15 минут:");
         ImGui::SetNextItemWidth(-1);
         ImGui::InputText("##login_url", url, sizeof url, ImGuiInputTextFlags_ReadOnly);
         if (ImGui::Button("Открыть в браузере")) open_login(url, true);
@@ -633,6 +634,36 @@ static void login_window() {
         if (ImGui::Button("Позже")) g_login_win = false;
     }
     ImGui::End();
+}
+
+// ---- bottom left, in the menus: is this DLL an official build (online.c integrity_check) ------------------
+static void integrity_window() {
+    if (g_live_match || g_ctl.state != ST_IDLE) return;
+    long st = g_integrity;
+    if (st == INTEGRITY_CHECKING) return;
+    ImGuiIO &io = ImGui::GetIO();
+    float k = ImGui::GetFontSize() / 18.f;
+    ImU32 col = IM_COL32(150, 150, 150, 255), bg = IM_COL32(16, 16, 15, 200);
+    char line1[96], line2[160] = "";
+    snprintf(line1, sizeof line1, "Мод %s", g_mod_version);
+    if (st == INTEGRITY_CURRENT) snprintf(line2, sizeof line2, "Официальная сборка, последняя версия");
+    else if (st == INTEGRITY_UNREACHABLE) snprintf(line2, sizeof line2, "Не удалось проверить сборку: сервер мода не отвечает");
+    else if (st == INTEGRITY_OLD) {
+        col = IM_COL32(230, 160, 70, 255);
+        snprintf(line2, sizeof line2, "Устаревшая версия: обновите мод%s%s", g_integrity_newest[0] ? " до " : "", g_integrity_newest);
+    } else {            // not on the list: blinks red
+        float a = 0.55f + 0.45f * sinf((float)ImGui::GetTime() * 6.f);
+        col = IM_COL32(255, 70, 60, 255);
+        bg = IM_COL32(110, 10, 8, (int)(90 + 140 * a));
+        snprintf(line2, sizeof line2, "На вашем компьютере НЕ официальная DLL мода. Используйте на свой страх и риск.");
+    }
+    ImDrawList *dl = ImGui::GetForegroundDrawList();
+    ImVec2 t1 = ImGui::CalcTextSize(line1), t2 = ImGui::CalcTextSize(line2);
+    float pad = 8 * k, w = (t1.x > t2.x ? t1.x : t2.x) + 2 * pad, h = t1.y + t2.y + 2 * pad + 2 * k;
+    ImVec2 p0(12 * k, io.DisplaySize.y - 12 * k - h);
+    dl->AddRectFilled(p0, ImVec2(p0.x + w, p0.y + h), bg, 4 * k);
+    dl->AddText(ImVec2(p0.x + pad, p0.y + pad), IM_COL32(120, 120, 120, 255), line1);
+    dl->AddText(ImVec2(p0.x + pad, p0.y + pad + t1.y + 2 * k), col, line2);
 }
 
 // the players online with the mod; the table fills the height left but `bottom`
@@ -728,6 +759,7 @@ static void van_cell(ImDrawList *dl, float x, float y, float w, ImU32 col, const
 }
 
 static void open_profile(const char *id) {
+    if (!steam_id_ok(id)) return;
     char url[64];
     snprintf(url, sizeof url, "steam://url/SteamIDPage/%s", id);
     ShellExecuteA(nullptr, "open", url, nullptr, nullptr, SW_SHOWNORMAL);
@@ -1567,6 +1599,7 @@ static void draw(IDXGISwapChain *sc) {
     lobby_overlay();
     g_online_want = online_shown() || g_pvp_drawn || g_chat_drawn;
     if (online_shown()) online_window();
+    integrity_window();
     if (consent_shown()) consent_window();
     else if (login_shown()) login_window();
     if (prep_shown()) {
