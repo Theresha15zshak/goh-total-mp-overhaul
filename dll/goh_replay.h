@@ -116,6 +116,7 @@ void balance_dump(const char *why);
 typedef struct { char id[18]; char name[ONLINE_NAME]; char version[17]; int ago; } OnlinePlayer;
 extern volatile long g_online_consent;      // -1 not asked yet, 0 no, 1 we report this player as online
 extern volatile long g_online_want;         // the window is open: the list is fetched every 20 s
+extern volatile long g_online_held;         // the server refused us: this SteamID is held by another key
 void online_start(const char *dir);
 void online_set_consent(int yes);
 int online_copy(OnlinePlayer *out, int max, int *state);   // state 0 nothing yet, 1 list, 2 server unreachable

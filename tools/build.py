@@ -25,7 +25,7 @@ CPP_SRC = ['dll/ui.cpp', 'dll/music.cpp'] + [os.path.join(IMGUI, f) for f in
                             ('imgui.cpp', 'imgui_draw.cpp', 'imgui_tables.cpp', 'imgui_widgets.cpp',
                              'backends/imgui_impl_dx11.cpp', 'backends/imgui_impl_win32.cpp')]
 LIBS = ['-ld3d11', '-ldxgi', '-ld3dcompiler_47', '-ldwmapi', '-limm32', '-lgdi32', '-luser32', '-lshell32',
-        '-lmfplat', '-lmfreadwrite', '-lole32', '-lwinhttp']
+        '-lmfplat', '-lmfreadwrite', '-lole32', '-lwinhttp', '-lbcrypt']
 
 
 def zig(*args):

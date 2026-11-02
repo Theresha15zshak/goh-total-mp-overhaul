@@ -532,6 +532,11 @@ static void online_list(float bottom) {
     bool me = g_online_consent == 1;
     if (ImGui::Checkbox("Показывать меня в списке", &me)) online_set_consent(me);
     if (ImGui::IsItemHovered()) ImGui::SetTooltip("%s", CONSENT_TEXT);
+    if (g_online_held) {
+        ImGui::PushStyleColor(ImGuiCol_Text, ACCENT);
+        ImGui::TextWrapped("Ваш SteamID закреплён за другим ключом (goh_mod_key.txt в Документы\\My Games\\gates of hell): напишите автору мода.");
+        ImGui::PopStyleColor();
+    }
     if (state == 0) ImGui::TextDisabled("Загрузка...");
     else {
         if (state == 2) {
@@ -675,9 +680,10 @@ static void pvp_block() {
 
     // bottom line: how many, the server, our consent
     float fy = p0.y + size.y - foot + (foot - lh) * 0.5f;
-    char line[96];
-    snprintf(line, sizeof line, state == 2 && n ? "С модом онлайн: %d  \xC2\xB7  сервер не отвечает" : "С модом онлайн: %d", n);
-    van_text(dl, col[0], fy, state == 2 ? VAN_WARN : VAN_TITLE, line);
+    char line[160];
+    if (g_online_held) snprintf(line, sizeof line, "Ваш SteamID закреплён за другим ключом: напишите автору мода");
+    else snprintf(line, sizeof line, state == 2 && n ? "С модом онлайн: %d  \xC2\xB7  сервер не отвечает" : "С модом онлайн: %d", n);
+    van_text(dl, col[0], fy, state == 2 || g_online_held ? VAN_WARN : VAN_TITLE, line);
     const char *me_txt = "Показывать меня в списке";
     float box = lh * 0.7f, mw = ImGui::CalcTextSize(me_txt).x;
     ImVec2 b0(col[2], fy + (lh - box) * 0.5f);

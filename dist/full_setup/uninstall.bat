@@ -8,7 +8,7 @@ if not defined BIN (echo Не нашёл папку игры. Запусти uni
 echo Папка игры: %BIN%
 
 powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0replay_mod.ps1" "%BIN%" uninstall
-for %%F in (iphlpapi.dll iphlpapi.old.dll iphlpapi.old2.dll goh_snapshots.ini) do if exist "%BIN%\%%F" del /f "%BIN%\%%F" || goto :fail
+for %%F in (iphlpapi.dll iphlpapi.old.dll iphlpapi.old2.dll goh_snapshots.ini goh_online.ini) do if exist "%BIN%\%%F" del /f "%BIN%\%%F" || goto :fail
 if exist "%BIN%\xvidcore_orig.dll" (
     rem after a game update its own (newer, about 1 MB) DLL is already in place: only the old copy goes
     set "NEWER="
@@ -17,6 +17,7 @@ if exist "%BIN%\xvidcore_orig.dll" (
 )
 echo.
 echo Мод удалён, игра снова ванильная. Логи goh_replay*.log можно удалить вручную.
+echo Ключ Документы\My Games\gates of hell\goh_mod_key.txt оставлен: он закрепляет твой SteamID на сервере мода.
 pause
 exit /b 0
 

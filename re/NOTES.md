@@ -346,3 +346,32 @@ ui_present draws our frame into the backbuffer, then the game presents through S
 The backbuffer view is made and released every frame (no ResizeBuffers hook needed). ImGui's shaders and
 font atlas are made on a thread of ours with an 8 MB stack. Verified 2026-10-31: menu reached and the panel
 drawn without ReShade, with snapshots off and on; the user confirmed F7.
+
+## Online list and PVP button (2026-11-01/02) — dll/online.c, dll/pvp.c, server/
+Online: the player's SteamID and Steam name come from the game's steam_api64.dll flat API
+(`SteamAPI_SteamUser_v021` + `SteamAPI_ISteamUser_GetSteamID`, `SteamAPI_SteamFriends_v017` +
+`SteamAPI_ISteamFriends_GetPersonaName`; null until the game has started Steam). Heartbeat every 2 min to
+goh-online.goh-mod.workers.dev with a key from Documents\My Games\gates of hell\goh_mod_key.txt: the server
+keeps only its SHA-256, the first key claims the SteamID (server/reset_key.ps1 frees it again).
+
+The Internet / LAN game list is `eGUI_PageSessionList` (eGUI_PageSessionList.cpp), layout
+/interface/layout/PageMultiplayerCustom.xml (interface.pak, ctor 2dfb10). Subclasses `_Online` (vtables
+1049f30 main, 104a010 +0x10, 104a020 +0x28, 104a038 +0x30) and `_Lan` (104a050, 104a130, 104a140, 104a158);
+destructors 2e72d0 / 2e7350 at slot 0.
+- bind (main vtable slot 20, 2e0260, shared by every subclass, also Skirmish/Training): the layout is at
+  page+0x58; `layout->vt[0x1e0](layout, const std::string &id)` finds a dialog by id (eDialog vt 1e0 =
+  a9f760 -> 33ba80, whole tree); 171800(page, &field, id) is that plus a ref kept in the page (+0x150 header,
+  +0x160 buttons, +0x170 container). A button: `__RTDynamicCast` (f1c498) eDialog (TD 14b1c58) -> eButton
+  (TD 14d4fc0), then `aa4240(button, *(page+0x60), 7 /*click*/, command)` (idempotent: same entry skipped).
+- commands arrive at the +0x28 sub-object's slot 1, 2e0eb0(self = page+0x28, msg), id at msg+8:
+  0x15 host, 0x16 refresh, 0x18 join ... up to 0x21 (jump table); anything else goes to 340720. Ours 0x4f50.
+- eDialog: +0x48 flags (bit 1 shown, bit 0 laid out), +0x98 x,y in the parent, +0xa0 w,h, +0xf0 parent,
+  +0xd8/+0xe0 children; vt +0x108 (aa4ba0) = shown and the parent shown, false at a root unless the root
+  overrides it (the screen's does); vt +0x60 (aaa8f0) marks the layout dirty up the chain; mouse hit test
+  aa3b00 with a9ec90 (parent-relative position through each parent's vt +0xe0). Game units = screen
+  pixels at 1920x1080 (root 1920x1080); the list container is at 36,266, 1097x774 there.
+- our layout (tools/build.py ui_header): the game's file with a btn_pvp after JOIN, the commented-out debug
+  block taken out to keep the length, swapped in the opened stream like the balance files.
+- the game's fonts are AngelCode BMFont binaries (font/*.fnt) with 32-bit RLE TGA pages, stored unpacked in
+  interface.pak; glyphs packed per channel (chnl 1 blue, 2 green). The list uses skin main_menu_dark_skin
+  (set/registry/main_menu_dark_skin.inc in gamelogic.pak): anka ("Anka/Coder Condensed") size 15.

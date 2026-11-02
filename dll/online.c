@@ -3,8 +3,13 @@
 // name and the balance version go to the server. The list is fetched while the F6 window is open.
 // The SteamID and name come from the game's own steam_api64.dll; the server cannot verify them.
 // Everything here runs on a thread of ours with short timeouts: no server, no effect on the game.
+// The player's key (Documents\My Games\gates of hell\goh_mod_key.txt, made at the first start): the server
+// gives the SteamID to the first key it sees and takes nothing for it without that key afterwards. It is
+// kept outside the game folder so a reinstall keeps it; it opens nothing but our server.
 #include <windows.h>
 #include <winhttp.h>
+#include <bcrypt.h>
+#include <shlobj.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -17,7 +22,9 @@
 
 volatile long g_online_consent = -1;
 volatile long g_online_want;
+volatile long g_online_held;
 static char g_ini[MAX_PATH];
+static char g_key[65];          // 64 hex characters, "" if it could be neither read nor made
 static char g_id[18];           // our SteamID, "" until Steam is up
 static char g_name[ONLINE_NAME];
 static SRWLOCK g_lock = SRWLOCK_INIT;
@@ -61,6 +68,43 @@ static int steam_me(void) {
     for (char *p = g_name; *p; p++) if ((unsigned char)*p < 32) *p = ' ';   // the body is newline separated
     snprintf(g_id, sizeof g_id, "%llu", (unsigned long long)id);
     return 1;
+}
+
+static int read_key(const char *path) {
+    char k[65] = "";
+    FILE *f = fopen(path, "rb");
+    if (!f) return 0;
+    size_t n = fread(k, 1, 64, f);
+    fclose(f);
+    k[n] = 0;
+    if (n != 64 || strspn(k, "0123456789abcdef") != 64) return 0;
+    memcpy(g_key, k, 65);
+    return 1;
+}
+
+static void load_key(void) {
+    char path[MAX_PATH];
+    if (SHGetFolderPathA(NULL, CSIDL_PERSONAL, NULL, SHGFP_TYPE_CURRENT, path) != S_OK) { rc_log("online: no Documents folder, no key"); return; }
+    strncat(path, "\\My Games", sizeof path - strlen(path) - 1);
+    CreateDirectoryA(path, NULL);
+    strncat(path, "\\gates of hell", sizeof path - strlen(path) - 1);
+    CreateDirectoryA(path, NULL);
+    strncat(path, "\\goh_mod_key.txt", sizeof path - strlen(path) - 1);
+    if (read_key(path)) { rc_log("online: key found"); return; }
+    unsigned char r[32];
+    if (BCryptGenRandom(NULL, r, sizeof r, BCRYPT_USE_SYSTEM_PREFERRED_RNG)) { rc_log("online: no random numbers, no key"); return; }
+    char k[65];
+    for (int i = 0; i < 32; i++) snprintf(k + 2 * i, 3, "%02x", r[i]);
+    HANDLE h = CreateFileA(path, GENERIC_WRITE, 0, NULL, CREATE_NEW, FILE_ATTRIBUTE_NORMAL, NULL);
+    if (h == INVALID_HANDLE_VALUE) {        // there already, unreadable as a key: leave it to the player
+        if (!read_key(path)) rc_log("online: %s is not a key (error %lu), none sent", path, GetLastError());
+        return;
+    }
+    DWORD put = 0;
+    int ok = WriteFile(h, k, 64, &put, NULL) && put == 64;
+    CloseHandle(h);
+    if (ok) { memcpy(g_key, k, 65); rc_log("online: new key made in Documents\\My Games\\gates of hell"); }
+    else { DeleteFileA(path); rc_log("online: the key could not be written"); }
 }
 
 // one request; returns the HTTP status (0 = no answer), body in out (NUL-terminated, at most MAX_BODY-1 bytes)
@@ -115,6 +159,7 @@ static void parse_list(char *t) {
 }
 
 static DWORD WINAPI online_thread(LPVOID unused) {
+    load_key();
     while (!steam_me()) Sleep(2000);
     rc_log("online: steam user %s found", g_id);
     HINTERNET s = WinHttpOpen(L"goh-mod", WINHTTP_ACCESS_TYPE_AUTOMATIC_PROXY, WINHTTP_NO_PROXY_NAME, WINHTTP_NO_PROXY_BYPASS, 0);
@@ -129,11 +174,12 @@ static DWORD WINAPI online_thread(LPVOID unused) {
         DWORD now = GetTickCount();
         if (g_online_consent == 1 && (InterlockedExchange(&g_beat_now, 0) || !last_beat || now - last_beat >= BEAT_MS)) {
             char body[256];
-            snprintf(body, sizeof body, "%s\n%s\n%s", g_id, g_name, g_balance_tag);
+            snprintf(body, sizeof body, "%s\n%s\n%s\n%s", g_id, g_name, g_balance_tag, g_key);
             int st = http(s, L"POST", L"/hb", body, buf);
             last_beat = now;
-            if (st != 200 && beat_fails++ < 3) rc_log("online: heartbeat got %d", st);
+            if (st != 200 && beat_fails++ < 3) rc_log("online: heartbeat got %d%s", st, st == 403 ? " (the SteamID is held by another key)" : "");
             if (st == 200) beat_fails = 0;
+            if (st == 200 || st == 403) g_online_held = st == 403;
         }
         long want = g_online_want;
         if (want && (!wanted || now - last_list >= LIST_MS)) {
