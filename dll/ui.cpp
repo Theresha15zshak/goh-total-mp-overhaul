@@ -1246,7 +1246,15 @@ static void chat_block() {
         ImGui::PushStyleColor(ImGuiCol_Text, VAN_TITLE);
         ImGui::Text("Онлайн: %d", on);
         ImGui::PopStyleColor();
-        float av = lh + 2 * sy;
+        // MMR under each name (1x1 and teams), for players signed in with Steam: the first 16 of the list
+        static Doc rd;
+        char ids[16 * 18 + 1] = "";
+        for (int i = 0, k = 0; i < on && k < 16; i++)
+            if (online[i].verified) { if (k++) strcat(ids, ","); strcat(ids, online[i].id); }
+        online_doc_ids(DOC_CHAT, ids);
+        doc_get(rd, DOC_CHAT);
+        ImFont *small = g_game_font_small ? g_game_font_small : ImGui::GetFont();
+        float small_size = small->FontSize * sy, av = lh + small_size + 2 * sy;
         for (int i = 0; i < on; i++) {
             ImGui::PushID(i);
             ImVec2 c = ImGui::GetCursorScreenPos();
@@ -1255,6 +1263,14 @@ static void chat_block() {
             else ImGui::GetWindowDrawList()->AddRect(c, ImVec2(c.x + av, c.y + av), IM_COL32(70, 66, 60, 255));
             ImGui::SetCursorScreenPos(ImVec2(c.x + av + 6 * sx, c.y + 1 * sy));
             chat_name(online[i].id, online[i].name, !strcmp(online[i].id, my) ? ACCENT : VAN_TEXT, online[i].verified, mod, menu_id, menu_name);
+            if (online[i].verified) {
+                const char *m1 = "-", *mt = "-";
+                for (int k = 0; k < rd.n; k++)
+                    if (rd.nf[k] >= 3 && !strcmp(rd.f[k][0], online[i].id)) (strcmp(rd.f[k][1], "1v1") ? mt : m1) = rd.f[k][2];
+                char mm[64];
+                snprintf(mm, sizeof mm, "MMR 1\xC3\x97" "1: %s  \xC2\xB7  ком.: %s", m1, mt);
+                ImGui::GetWindowDrawList()->AddText(small, small_size, ImVec2(floorf(c.x + av + 6 * sx), floorf(c.y + lh + 1 * sy)), VAN_ITEM, mm);
+            }
             ImGui::SetCursorScreenPos(ImVec2(c.x, c.y + av + 4 * sy));
             ImGui::Dummy(ImVec2(1, 0));
             ImGui::PopID();

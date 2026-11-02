@@ -138,9 +138,10 @@ int online_copy(OnlinePlayer *out, int max, int *state);   // state 0 nothing ye
 const char *online_my_id(void);
 int steam_id_ok(const char *s);             // 17 digits of a SteamID             // "" until Steam is up
 // texts of the rating server (server/src/matches.js), fetched while the panel asks for them each frame
-enum { DOC_PLAYER, DOC_BOARD_1V1, DOC_BOARD_TEAM, DOC_RATINGS, DOC_LOBBY, DOC_N };   // DOC_RATINGS: the online tab
+enum { DOC_PLAYER, DOC_BOARD_1V1, DOC_BOARD_TEAM, DOC_RATINGS, DOC_LOBBY, DOC_CHAT, DOC_N };   // DOC_RATINGS: the online tab,
+                                                                                            // DOC_CHAT: the chat's online list
 void online_want(int doc);                  // on screen this frame
-void online_doc_ids(int doc, const char *ids);   // DOC_RATINGS / DOC_LOBBY: whose (comma separated SteamIDs, at most 16)
+void online_doc_ids(int doc, const char *ids);   // DOC_RATINGS / DOC_LOBBY / DOC_CHAT: whose (comma separated SteamIDs, at most 16)
 int online_doc(int doc, char *out, size_t n, int *state);   // the last text; state 0 none yet, 1 ok, 2 unreachable
 
 // ---- global chat (online.c, server/src/chat.js): channels RU and EN, wiped by the server every two hours ----

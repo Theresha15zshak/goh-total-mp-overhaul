@@ -68,6 +68,9 @@ static int peek(const void *p, void *out, size_t n) {
     return p && ReadProcessMemory(GetCurrentProcess(), p, out, n, &got) && got == n;
 }
 
+#define G_DESKTOP 0x159ca68     // the screen's root, eDesktop (see the lobby below)
+static uint64_t pq(uint64_t a) { uint64_t v = 0; peek((void *)a, &v, 8); return v; }
+
 // ---- our layout in the stream the game opened (as balance.c does with the balance files) ----------------
 static int ends_with(const void *str, const char *ours) {
     const uint8_t *p = str;
@@ -252,11 +255,43 @@ static int covered(void *d) {
     return 0;
 }
 
+// The chat's frame is drawn over only while its page is the one on the screen. Seen 2026-11-02: with the
+// "host game" page up, the list page's frame still had all its parents shown up to a root of its own, and the
+// chat filled the screen. So: its root must be the screen's (eDesktop), and the frame where the layout puts it,
+// a column at the right.
+static uint64_t root_of(uint64_t d) {
+    for (int i = 0; d && i < 64; i++) {
+        uint64_t up = pq(d + 0xf0);
+        if (!up) return d;
+        d = up;
+    }
+    return 0;
+}
+
+int chat_rect(float *x, float *y, float *w, float *h, float *root_w, float *root_h) {
+    void *f = g_chat_frame;
+    int32_t fx, fy, fw, fh, rw, rh;
+    static int why_logged = -1;
+    int why = !f ? 1 : covered(f) ? 2 : !place(f, 1, &fx, &fy, &fw, &fh, &rw, &rh) ? 3 :
+              root_of((uintptr_t)f) != pq((uintptr_t)(g_base + G_DESKTOP)) ? 4 :
+              fw <= 0 || fh <= 0 || rw <= 0 || rh <= 0 || fx < rw / 2 || fw > rw / 2 || fy + fh > rh ? 5 : 0;
+    if (why != why_logged && why != 1) {
+        rc_log("pvp: chat frame %s", why == 0 ? "on screen" : why == 2 ? "covered" : why == 3 ? "not shown" :
+                                                 why == 4 ? "under another root (page put away)" : "not where the layout puts it");
+        if (why == 5) rc_log("pvp: chat frame at %d,%d size %dx%d of %dx%d", fx, fy, fw, fh, rw, rh);
+    }
+    why_logged = why;
+    if (why) return 0;
+    *x = (float)fx; *y = (float)fy; *w = (float)fw; *h = (float)fh; *root_w = (float)rw; *root_h = (float)rh;
+    return 1;
+}
+
 int pvp_rect(float *x, float *y, float *w, float *h, float *head_h, float *root_w, float *root_h) {
     void *btn = g_btn, *list = g_list, *head = g_head;
     if (btn && covered(btn)) return 0;
     int32_t bx, by, bw, bh, lx, ly, lw, lh, rw, rh;
     if (!btn || !list || !place(btn, 1, &bx, &by, &bw, &bh, &rw, &rh) || !place(list, 0, &lx, &ly, &lw, &lh, &rw, &rh)) return 0;
+    if (root_of((uintptr_t)btn) != pq((uintptr_t)(g_base + G_DESKTOP))) return 0;     // its page put away (chat_rect)
     int32_t hx, hy, hw, hh, top = 0;
     if (head && place(head, 0, &hx, &hy, &hw, &hh, &rw, &rh) && hy < ly) { top = ly - hy; lh += top; ly = hy; }   // the column titles too
     if (lw <= 0 || lh <= 0 || rw <= 0 || rh <= 0) return 0;
@@ -265,13 +300,6 @@ int pvp_rect(float *x, float *y, float *w, float *h, float *head_h, float *root_
     return 1;
 }
 
-int chat_rect(float *x, float *y, float *w, float *h, float *root_w, float *root_h) {
-    void *f = g_chat_frame;
-    int32_t fx, fy, fw, fh, rw, rh;
-    if (!f || covered(f) || !place(f, 1, &fx, &fy, &fw, &fh, &rw, &rh) || fw <= 0 || fh <= 0 || rw <= 0 || rh <= 0) return 0;
-    *x = (float)fx; *y = (float)fy; *w = (float)fw; *h = (float)fh; *root_w = (float)rw; *root_h = (float)rh;
-    return 1;
-}
 
 // a file kept unpacked in the game's interface.pak (its fonts are), read from the zip's central directory;
 // malloc'd, NULL if it is not there or packed
@@ -328,7 +356,6 @@ unsigned char *pvp_pak_file(const char *name, size_t *n) {
 // eUserNameView (vtable 105b538) whose +0x178 is the player's SteamID. They are found twice a second by
 // walking the interface down from the screen's root, eDesktop (the game keeps it at 159ca68), through each
 // dialog's children (+0xd8..+0xe0); their places are taken every frame.
-#define G_DESKTOP 0x159ca68
 #define VT_DESKTOP 0x1101800
 #define VT_SESSION_VIEW 0x1042fc0
 #define VT_NAME_VIEW 0x105b538
@@ -341,7 +368,6 @@ static DWORD g_scan_at;
 
 void pvp_page_shown(void *page) { (void)page; }
 
-static uint64_t pq(uint64_t a) { uint64_t v = 0; peek((void *)a, &v, 8); return v; }
 
 static void walk(uint64_t d, int depth, int in_session, void **found, int *n, int *budget) {
     if (!d || depth > 72 || --*budget < 0 || *n >= MAX_NAMES) return;
