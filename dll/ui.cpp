@@ -843,7 +843,7 @@ static void tab_leaders(const Pane &p, float top, float bottom) {
         x += tw + 14 * p.sx;
         if (!i) { van_text(dl, x - 9 * p.sx, y, VAN_TAB_OFF, "|"); }
     }
-    static const float LC[5] = {0.03f, 0.10f, 0.50f, 0.66f, 0.80f};
+    static const float LC[5] = {0.03f, 0.10f, 0.44f, 0.70f, 0.82f};     // MMR wide: "1674 (калибровка 5/10)"
     static const char *LT[5] = {"#", "Игрок", "MMR", "Игр", "Побед"};
     float lc[5];
     for (int i = 0; i < 5; i++) lc[i] = p.p0.x + LC[i] * p.size.x;

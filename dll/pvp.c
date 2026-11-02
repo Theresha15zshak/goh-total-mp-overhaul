@@ -225,8 +225,35 @@ static int place(void *d, int shown_too, int32_t *x, int32_t *y, int32_t *w, int
     return 0;
 }
 
+// A page put over ours (the ESC menu, a confirmation): the screen's root keeps each page's top panel as a
+// child, the later ones drawn over the earlier. Covered = a later child of the same kind is shown.
+static int covered(void *d) {
+    uint64_t top = (uint64_t)(uintptr_t)d, up, root = 0;
+    for (int i = 0; i < 64; i++) {
+        if (!peek((void *)(top + 0xf0), &up, 8) || !up) return 0;
+        uint64_t upup = 0;
+        if (!peek((void *)(up + 0xf0), &upup, 8)) return 0;
+        if (!upup) { root = up; break; }
+        top = up;
+    }
+    if (!root) return 0;
+    uint64_t b = 0, e = 0, kind = 0;
+    peek((void *)(root + 0xd8), &b, 8); peek((void *)(root + 0xe0), &e, 8); peek((void *)top, &kind, 8);
+    if (!b || e < b || e - b > 8 * 256) return 0;
+    int after = 0;
+    for (uint64_t p = b; p < e; p += 8) {
+        uint64_t c = 0, vt = 0;
+        uint32_t flags = 0;
+        peek((void *)p, &c, 8);
+        if (c == top) { after = 1; continue; }
+        if (after && peek((void *)c, &vt, 8) && vt == kind && peek((void *)(c + 0x48), &flags, 4) && (flags & 2)) return 1;
+    }
+    return 0;
+}
+
 int pvp_rect(float *x, float *y, float *w, float *h, float *head_h, float *root_w, float *root_h) {
     void *btn = g_btn, *list = g_list, *head = g_head;
+    if (btn && covered(btn)) return 0;
     int32_t bx, by, bw, bh, lx, ly, lw, lh, rw, rh;
     if (!btn || !list || !place(btn, 1, &bx, &by, &bw, &bh, &rw, &rh) || !place(list, 0, &lx, &ly, &lw, &lh, &rw, &rh)) return 0;
     int32_t hx, hy, hw, hh, top = 0;
@@ -346,7 +373,7 @@ int lobby_rows(LobbyRow *out, int max) {
     for (int i = 0; i < count && n < max; i++) {
         int32_t x, y, w, h, rw, rh;
         uint64_t id = 0;
-        if (!place(names[i], 1, &x, &y, &w, &h, &rw, &rh) || w <= 0 || h <= 0) continue;
+        if (!place(names[i], 1, &x, &y, &w, &h, &rw, &rh) || w <= 0 || h <= 0 || covered(names[i])) continue;
         if (!peek((uint8_t *)names[i] + 0x178, &id, 8) || id < 76561190000000000ull || id > 76561199999999999ull) continue;
         LobbyRow *r = &out[n++];
         r->x = (float)x; r->y = (float)y; r->w = (float)w; r->h = (float)h; r->root_w = (float)rw; r->root_h = (float)rh;
