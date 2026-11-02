@@ -1,0 +1,139 @@
+// Shared between the replay logic (goh_replay.c) and the in-game panel (ui.cpp).
+#pragma once
+#include <stdint.h>
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+enum { CMD_NONE, CMD_SPEED, CMD_PAUSE, CMD_SEEK, CMD_POV, CMD_PREPARE };   // CMD_PREPARE: 1 start, 0 stop
+enum { ST_OFF, ST_IDLE, ST_REPLAY, ST_SEEKING, ST_ERROR, ST_REWIND };
+
+typedef struct {
+    // panel -> logic
+    volatile long cmd_seq;      // bumped after filling cmd/arg
+    int32_t cmd;
+    double arg;
+    // logic -> panel
+    volatile long ack_seq;      // = cmd_seq once handled
+    int32_t state, game_ms, paused, seek_target_ms, duration_s;
+    int32_t has_pov, pov;       // a camera recording exists for this replay / it drives the camera
+    float speed;                // what the user picked
+    int32_t seek_from_ms;       // where the running seek started
+    float rate;                 // game seconds per real second while seeking
+    int32_t snap_from_ms, snap_to_ms, snap_mb, snap_state;   // instant jumps possible in [from, to]
+    int32_t preparing;          // the whole replay is being run through for snapshots
+    char path[260];
+    char msg[160];              // UTF-8
+} Ctl;
+
+extern Ctl g_ctl;
+
+// ---- match charts: per-player history, one sample per game second ----
+enum { MS_SPENT, MS_INCOME, MS_BUDGET, MS_ARMY, MS_LOST, MS_KILLS, MS_DEATHS, MS_SERIES };
+#define MS_PLAYERS 8
+#define MS_SAMPLES 7200         // two hours
+
+typedef struct {
+    volatile long n;            // samples filled (written last)
+    volatile long epoch;        // bumped when a new match starts
+    int32_t players;
+    int32_t id[MS_PLAYERS];     // player number as the game's log writes it (player#N)
+    int32_t t_ms[MS_SAMPLES];
+    float v[MS_SERIES][MS_PLAYERS][MS_SAMPLES];
+} MatchStats;
+
+extern MatchStats g_ms;
+extern volatile long g_ms_results;  // the post-match results page is on screen
+extern volatile long g_live_match;  // a battle is being played (not a replay): no charts, they show the enemy's numbers
+
+// ---- music director (music.cpp): our own battle music in place of the maps' music triggers ----
+enum { MUS_MENU, MUS_CALM, MUS_TENSION, MUS_BATTLE };
+
+typedef struct {
+    volatile long enabled;      // play our music during battles (game music muted meanwhile)
+    volatile float volume;      // 0..1
+    // status for the panel, written by the audio thread
+    volatile long active;       // a battle is on and we play it
+    int level, target;          // level of the track playing (0 = none) / what the battle calls for
+    int tracks[4];              // files found per level (MUS_MENU = main menu)
+    float heat;                 // recent fighting
+    char now[200];              // UTF-8: what plays right now
+} MusicCtl;
+
+extern MusicCtl g_music;
+extern volatile long g_music_stop_vanilla;   // set by the director, done on the logic thread
+
+void music_start(const char *dir);           // dir: the DLL folder, ends with a backslash
+void music_tick(int in_match, int game_ms, int players);   // worker thread, every 50 ms; in_match -1 = quiet
+void music_kill(void);                       // a unit died, any side
+int music_block_game_music(void);           // the game wants a /music/ track: 1 = mute it, ours plays
+void music_save(void);                       // the panel changed enabled/volume
+void music_open_folder(void);
+
+// ---- snapshots (snap.c): the game's heap in a range of ours, so it can be put back ----
+int snap_install(uint8_t *exe);              // DllMain, before the game's CRT starts
+int snap_owns(const void *p);
+void snap_stats(uint64_t *committed, uint64_t *used, int64_t *live_bytes, int64_t *live_blocks);
+int snap_session_start(int game_ms);         // logic thread, a replay is on: base snapshot starts (1 = started)
+void snap_session_end(void);                 // logic thread, the replay is over
+void snap_tick(int game_ms);                 // logic thread, every frame: base done, a snapshot every 15 s
+int snap_restore_to(int target_ms, int *pages);  // logic thread: back at the latest snapshot <= target; its time,
+                                             // -1 = not now (next frame), -2 = no snapshot there
+int snap_best(int target_ms);                // time of the snapshot a jump to target_ms would land on, -1 = none
+#define SNAP_EVERY_MS 15000                  // game time between snapshots: a jump lands at most this far before the click
+void snap_info(int *from_ms, int *to_ms, int *mb, int *state);   // state 0 off, 1 base being made, 2 usable
+const char *snap_busy(void);                 // why the world would not stop
+// keep.c: Direct3D and sound objects the game destroys are held while snapshots may still point at them
+int keep_install(uint8_t *exe);
+void keep_begin(void);
+void keep_end(void);                         // game's logic thread, replay over
+int keep_active(void);
+void keep_stats(long *d3d, long *streams, long *mem, long *let_go);
+void game_sound_mute(int on);                // the game's own sound off while a replay is prepared
+// prof.c: where the game's logic and quant threads spend their time (logged every 10 s while running)
+void prof_start(DWORD logic_tid, DWORD quant_tid);
+void prof_stop(void);
+void prof_lock(void);                        // held by a stopped world (snap.c)
+void prof_unlock(void);
+
+// ---- competitive balance (balance.c): our copies of a few balance files while the switch is on ----
+extern volatile long g_balance_on;          // the panel's switch (off at every start)
+extern volatile long g_balance_ready;       // our copies are in place and the game's code and files matched
+extern volatile long g_balance_locked;      // a match or replay is on: the switch waits for the next one
+extern volatile long g_balance_reads;       // times the game opened one of the files
+extern volatile long g_balance_last;        // ... and whether it got our copy the last time
+extern const char g_balance_tag[];          // version of the switch: every player of a match needs the same one
+// server: in the match server the game starts (call_to_arms_server.exe), which follows the game's switch
+int balance_install(uint8_t *exe, const char *dir, uint8_t *(*alloc)(size_t), void (*patch)(void *, const void *, size_t),
+                    int server);
+void balance_tick(void);                    // worker: logs what each roster copy holds after a change
+void balance_dump(const char *why);
+
+// ---- who is online with the mod (online.c, our server goh-online) ----
+#define ONLINE_MAX 200
+#define ONLINE_NAME 132             // Steam names are up to 32 characters of UTF-8
+typedef struct { char id[18]; char name[ONLINE_NAME]; char version[17]; int ago; } OnlinePlayer;
+extern volatile long g_online_consent;      // -1 not asked yet, 0 no, 1 we report this player as online
+extern volatile long g_online_want;         // the window is open: the list is fetched every 20 s
+void online_start(const char *dir);
+void online_set_consent(int yes);
+int online_copy(OnlinePlayer *out, int max, int *state);   // state 0 nothing yet, 1 list, 2 server unreachable
+const char *online_my_id(void);             // "" until Steam is up
+
+// ---- PVP button in the game's Internet / LAN game list (pvp.c): our block over its list of games ----
+extern volatile long g_pvp_on;              // the button was clicked: the block is wanted while the page is up
+int pvp_install(uint8_t *exe, const char *dir, uint8_t *(*alloc)(size_t), void (*patch)(void *, const void *, size_t));
+// the list's place on the game's screen with its column titles head_h high on top (game units, the screen
+// being root_w x root_h); 0 = the page is not up
+int pvp_rect(float *x, float *y, float *w, float *h, float *head_h, float *root_w, float *root_h);
+unsigned char *pvp_pak_file(const char *name, size_t *n);   // an unpacked file of interface.pak, malloc'd
+
+void rc_send(int cmd, double arg);
+void rc_log(const char *fmt, ...);
+extern int g_ui_draw;                // ui.cpp, [debug] ui_draw=0: the panel draws nothing
+void ui_present(void *device);   // ui.cpp: the game is about to present its frame (eRenderDevice*)
+
+#ifdef __cplusplus
+}
+#endif

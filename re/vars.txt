@@ -1,0 +1,1162 @@
+.bmp                                     rec=146e618 type=142f70 def=rax
+.cpb                                     rec=146e5e8 type=140e40 def=rax
+.dds                                     rec=146e5f8 type=1428b0 def=rax
+.hdr                                     rec=146e638 type=143040 def=rax
+.jpg                                     rec=146e608 type=142f00 def=rax
+.png                                     rec=146e628 type=142fd0 def=rax
+.tga                                     rec=146e648 type=143f50 def=rax
+AniPlay                                  rec=147f940 type=72cb30 def=rax
+AniStop                                  rec=147f958 type=72cbc0 def=rax
+Clone                                    rec=147f970 type=72cc30 def=rax
+GetAdapters                              rec=1476948 type=398b40 def=rax
+GetAmmoParams                            rec=1476f88 type=3fa930 def=rax
+GetLanguages                             rec=14768e8 type=38c2e0 def=rax
+GetManualControlPreference               rec=1476900 type=38c420 def=rax
+able                                     rec=147fba0 type=747990 def=rax
+ables                                    rec=1485120 type=99e040 def=rax
+accelerate                               rec=148bdc0 type=b6c390 def=rax
+achievement                              rec=1485570 type=9c8530 def=rax
+action                                   rec=1485160 type=99e3b0 def=rax
+actor                                    rec=1480d08 type=7f3ab0 def=rax
+actor_client                             rec=146e040 type=a7a50 def=rax
+actor_component                          rec=1485150 type=99e170 def=rax
+actor_fire                               rec=146fa08 type=19dc10 def=rax
+actor_recon                              rec=146fa18 type=19dcf0 def=rax
+actor_state                              rec=1485110 type=99e010 def=rax
+actor_to_cover                           rec=146f9e8 type=19db10 def=rax
+actor_to_waypoint                        rec=146fb30 type=1a9740 def=rax
+add_view                                 rec=14805f0 type=760670 def=rax
+advance                                  rec=148bfd0 type=b749e0 def=rax
+aimed_shot                               rec=148bf90 type=b74770 def=rax
+air_attack                               rec=146fa28 type=19dd60 def=rax
+air_state                                rec=1485130 type=99e0a0 def=rax
+airborne                                 rec=1481090 type=846a30 def=rax
+airborne                                 rec=14810a0 type=846c90 def=rax
+airborne                                 rec=1484af0 type=988a00 def=rax
+airborne                                 rec=1484b10 type=988dc0 def=rax
+airborne_client                          rec=146e070 type=a7ba0 def=rax
+airstrike                                rec=148bed0 type=b6cd90 def=rax
+altitude                                 rec=1485858 type=9f2270 def=rax
+ani_play                                 rec=1480620 type=7607b0 def=rax
+ani_stop                                 rec=1480600 type=760700 def=rax
+ani_wind                                 rec=1480630 type=760830 def=rax
+animal                                   rec=1484a58 type=9814f0 def=rax
+animal                                   rec=1484a70 type=981b50 def=rax
+animate                                  rec=1485228 type=9b16c0 def=rax
+animate_place                            rec=147fc40 type=747d00 def=rax
+animation                                rec=146fa48 type=19e000 def=rax
+animation                                rec=148bc30 type=b64150 def=rax
+animations                               rec=148bc40 type=b641b0 def=rax
+area                                     rec=147fd90 type=74fc50 def=rax
+armor                                    rec=1480b48 type=7d1f70 def=rax
+arrival                                  rec=14858b8 type=9f2620 def=rax
+attach                                   rec=148bea0 type=b6cc10 def=rax
+attack                                   rec=148bfc0 type=b74960 def=rax
+attack_ground                            rec=148bfe0 type=b74a60 def=rax
+attack_load                              rec=147fb90 type=747940 def=rax
+attack_melee                             rec=148bff0 type=b74ae0 def=rax
+attack_save                              rec=147fb80 type=7478f0 def=rax
+auto_operatable                          rec=147fc50 type=747d70 def=rax
+autoassign                               rec=14852f8 type=9ba660 def=rax
+autosave                                 rec=1485560 type=9c84f0 def=rax
+bazooka_shot                             rec=148bfa0 type=b74800 def=rax
+benchmark                                rec=1485590 type=9c8ac0 def=rax
+bind                                     rec=148bc00 type=b64040 def=rax
+blastwave                                rec=147fd50 type=74fa70 def=rax
+board                                    rec=1485258 type=9b1860 def=rax
+board                                    rec=148be20 type=b6c800 def=rax
+bone                                     rec=14805e0 type=760610 def=rax
+bone_rotator                             rec=1480810 type=79b020 def=rax
+bone_rotator/Watch                       rec=1480820 type=79b1f0 def=rax
+break_window_in_hole                     rec=147fee0 type=7505b0 def=rax
+bullet_detonate                          rec=147fd70 type=74fbb0 def=rax
+burn                                     rec=147fe00 type=74fea0 def=rax
+call                                     rec=1485540 type=9c8440 def=rax
+call_ally                                rec=148c020 type=b74c90 def=rax
+cam_clip                                 rec=148c7e0 type=14b1bd0 def=1 (f=1.4013e-45)
+cam_follow                               rec=148c888 type=14b1bd0 def=1 (f=1.4013e-45)
+cam_followPosition                       rec=148c8a0 type=14b1be8 def=0x3f19999a (f=0.6)
+cam_liftAuto                             rec=148c828 type=14b1bd0 def=1 (f=1.4013e-45)
+cam_liftRadius                           rec=148c870 type=14b1be8 def=0x3fc00000 (f=1.5)
+cam_liftSteadyDown                       rec=148c858 type=14b1be8 def=0x40000000 (f=2)
+cam_liftSteadyUp                         rec=148c840 type=14b1be8 def=0xc0000000 (f=-2)
+cam_noUpdate                             rec=148c7f8 type=14b1bd0 def=0 (f=0)
+camera                                   rec=14857c0 type=9eec30 def=rax
+camera_follow_bone                       rec=14853c8 type=9c01f0 def=rax
+cancel                                   rec=148bdd0 type=b6c410 def=rax
+care                                     rec=148be80 type=b6cb10 def=rax
+change_obstacle                          rec=147fe30 type=750000 def=rax
+chassis/Gear                             rec=1481230 type=8585f0 def=rax
+chassis/LinkState                        rec=1481248 type=858650 def=rax
+chassis_work                             rec=147fb00 type=747610 def=rax
+check_jump_location                      rec=148bc90 type=b64350 def=rax
+civilian                                 rec=1482ea0 type=9576b0 def=rax
+civilian.outdoors_idle                   rec=1482df8 type=9501d0 def=rax
+clear_inventory                          rec=147fb50 type=7477e0 def=rax
+cmp_fadetime                             rec=146e340 type=14b1be8 def=0x3df5c28f (f=0.12)
+cmp_i                                    rec=1485988 type=9f9a60 def=rax
+collect                                  rec=148be60 type=b6ca10 def=rax
+component                                rec=147fa40 type=747110 def=rax
+components                               rec=147fa50 type=747160 def=rax
+con                                      rec=1485530 type=9c8220 def=rax
+con_debugs                               rec=147e260 type=14b1bd0 def=0 (f=0)
+con_errors                               rec=147e248 type=14b1bd0 def=0 (f=0)
+con_file                                 rec=147e218 type=14b1bd0 def=1 (f=1.4013e-45)
+con_messages                             rec=147e278 type=14b1bd0 def=1 (f=1.4013e-45)
+con_warnings                             rec=147e230 type=14b1bd0 def=0 (f=0)
+constrain_velocity                       rec=147fe20 type=74ffb0 def=rax
+cover                                    rec=148bdb0 type=b6c2c0 def=rax
+coverLeaveEnemyDistance                  rec=1482e20 type=14b1be8 def=0x41a00000 (f=20)
+crew                                     rec=1485878 type=9f23b0 def=rax
+crew_emit                                rec=147fc90 type=747ec0 def=rax
+crew_enable                              rec=147fb30 type=747720 def=rax
+crew_throw_off                           rec=147fbc0 type=747a60 def=rax
+damage_report                            rec=147fa60 type=7471d0 def=rax
+dbg_FXAA_DrawMode                        rec=147e480 type=14b1bd0 def=0 (f=0)
+dbg_FXAA_QualityPreset                   rec=147e468 type=14b1bd0 def=0xc (f=1.68156e-44)
+dbg_HBAOBias                             rec=1476870 type=14b1be8 def=0x3e99999a (f=0.3)
+dbg_HBAOPower                            rec=1476858 type=14b1be8 def=0x40000000 (f=2)
+dbg_HBAORadius                           rec=1476840 type=14b1be8 def=0x3f666666 (f=0.9)
+dbg_HBAORenderModes                      rec=1477190 type=14b1bd0 def=0 (f=0)
+dbg_LowStaminaTest                       rec=146ff60 type=14b1bd0 def=1 (f=1.4013e-45)
+dbg_VignetteDebugMuzzleFlas              rec=14886a8 type=14b0bb0 def=0 (f=0)
+dbg_VignetteMFXOF                        rec=1488678 type=14b1be8 def=0 (f=0)
+dbg_VignetteMFYOF                        rec=1488690 type=14b1be8 def=0 (f=0)
+dbg_additiveAnmK                         rec=147c508 type=14b1be8 def=0x3f800000 (f=1)
+dbg_ai                                   rec=1482a30 type=14b1bd0 def=0 (f=0)
+dbg_aimAlwaysUseAimerBone                rec=1480ec0 type=14b0bb0 def=0 (f=0)
+dbg_aimVersionPrev                       rec=1480f80 type=14b0bb0 def=0 (f=0)
+dbg_alternateWind                        rec=147e8c0 type=14b1be8 def=0 (f=0)
+dbg_blast                                rec=14881f0 type=14b0bb0 def=0 (f=0)
+dbg_boarding                             rec=1480748 type=14b0bb0 def=0 (f=0)
+dbg_boneHideViews                        rec=147c470 type=14b0bb0 def=0 (f=0)
+dbg_cameraTerm                           rec=14857a0 type=14b1bd0 def=0 (f=0)
+dbg_checkWindow                          rec=147f798 type=14b0bb0 def=0 (f=0)
+dbg_componentView                        rec=1481670 type=14b0bb0 def=0 (f=0)
+dbg_createDumpOnCrash                    rec=146e3a0 type=14b1bd0 def=1 (f=1.4013e-45)
+dbg_damage                               rec=147fa28 type=14b0bb0 def=0 (f=0)
+dbg_dialogBuffered                       rec=1489a98 type=14b1bd0 def=0 (f=0)
+dbg_disable_old_textures                 rec=147d128 type=14b0bb0 def=1 (f=1.4013e-45)
+dbg_enableShoreEffects                   rec=1476540 type=14b1bd0 def=1 (f=1.4013e-45)
+dbg_exceptions                           rec=147cbe8 type=14b1bd0 def=0 (f=0)
+dbg_fog                                  rec=14815c8 type=14b0bb0 def=0 (f=0)
+dbg_grainParticleSizeFactor              rec=147b990 type=14b1be8 def=0x3f800000 (f=1)
+dbg_grainStrengthFactor                  rec=147b978 type=14b1be8 def=0x3f800000 (f=1)
+dbg_handsReserved                        rec=1482c00 type=14b1be8 def=0x43020000 (f=130)
+dbg_health                               rec=147fa10 type=14b1bd0 def=0 (f=0)
+dbg_highlightDialog                      rec=1489ac8 type=14b24b0 def=rax
+dbg_interactionBreakOnFlag               rec=147ff30 type=14b1bd0 def=0xffffffff (f=nan)
+dbg_interactionEvent                     rec=14806f0 type=14b1bd0 def=0 (f=0)
+dbg_interactionEventInfo                 rec=1480708 type=14b1bd0 def=0 (f=0)
+dbg_interfaceLag                         rec=148c160 type=14b1bd0 def=0 (f=0)
+dbg_inventory                            rec=1485ec0 type=14b1bd0 def=0 (f=0)
+dbg_keyboardFocus                        rec=1488330 type=14b1bd0 def=0 (f=0)
+dbg_matrixLoad                           rec=147de78 type=14b0bb0 def=0 (f=0)
+dbg_minidumpFileLimit                    rec=146e3b8 type=14b1bd0 def=5 (f=7.00649e-45)
+dbg_mouseFocus                           rec=1488348 type=14b1bd0 def=0 (f=0)
+dbg_no_idle_animations                   rec=1482ff8 type=14b0bb0 def=0 (f=0)
+dbg_occlusionStopIssuing                 rec=147e798 type=14b0bb0 def=0 (f=0)
+dbg_occlusionWaitResult                  rec=147e7b0 type=14b0bb0 def=1 (f=1.4013e-45)
+dbg_oceanAmplitude                       rec=14765a0 type=14b1be8 def=0x41200000 (f=10)
+dbg_oceanAmplitudeDimFactor              rec=1476600 type=14b1be8 def=0x3f800000 (f=1)
+dbg_oceanAmplitudeFadeDistance           rec=1476630 type=14b1be8 def=0x3f800000 (f=1)
+dbg_oceanDirX                            rec=1476570 type=14b1be8 def=0x3f800000 (f=1)
+dbg_oceanDirY                            rec=1476588 type=14b1be8 def=0 (f=0)
+dbg_oceanFadingMode                      rec=1476648 type=14b1be8 def=0x3f800000 (f=1)
+dbg_oceanLightFadeDistance               rec=1476618 type=14b1be8 def=0x3f800000 (f=1)
+dbg_oceanUVScale                         rec=1476660 type=14b1be8 def=0x40000000 (f=2)
+dbg_oceanWaveLength                      rec=14765b8 type=14b1be8 def=0x428c0000 (f=70)
+dbg_oceanWindSpeed                       rec=14765d0 type=14b1be8 def=0x3f800000 (f=1)
+dbg_oceanlightDimFactor                  rec=14765e8 type=14b1be8 def=0x3f800000 (f=1)
+dbg_pathOptimize                         rec=1482268 type=14b1bd0 def=1 (f=1.4013e-45)
+dbg_pathOptimizeFrontToBack              rec=1482510 type=14b1bd0 def=0 (f=0)
+dbg_pathOptimizeOld                      rec=1482528 type=14b1bd0 def=0 (f=0)
+dbg_pathSearchLimit                      rec=1482540 type=14b1be8 def=0x42700000 (f=60)
+dbg_pathSmooth                           rec=1482280 type=14b1bd0 def=0 (f=0)
+dbg_pathStat                             rec=1482250 type=14b1bd0 def=0 (f=0)
+dbg_piercing                             rec=1480ce0 type=14b0bb0 def=0 (f=0)
+dbg_saveFogmap                           rec=147e630 type=14b0bb0 def=0 (f=0)
+dbg_shoreGestenerWaves                   rec=1476558 type=14b1be8 def=0x3f800000 (f=1)
+dbg_signal                               rec=147f8c8 type=14b1bd0 def=0 (f=0)
+dbg_sprite                               rec=147d300 type=14b0bb0 def=0 (f=0)
+dbg_stats                                rec=1487dc8 type=14b1bd0 def=0 (f=0)
+dbg_stopFrustumSelection                 rec=1487180 type=14b0bb0 def=0 (f=0)
+dbg_stop_update_instance_data            rec=1478900 type=14b0bb0 def=0 (f=0)
+dbg_syncLinkedEntities                   rec=147f7e0 type=14b0bb0 def=1 (f=1.4013e-45)
+dbg_volumeMatrixLoad                     rec=147f928 type=14b1bd0 def=0 (f=0)
+dbg_volumes                              rec=1484aa0 type=14b1bd0 def=0 (f=0)
+dbg_waveWorksUseFoam                     rec=1476678 type=14b0bb0 def=1 (f=1.4013e-45)
+dbg_weaponSelection                      rec=1484b28 type=14b0bb0 def=0 (f=0)
+dbg_windScale                            rec=147b7e0 type=14b1bd0 def=1 (f=1.4013e-45)
+dbg_woundedIntensity                     rec=146ff78 type=14b1be8 def=0 (f=0)
+dda_value_editor_check                   rec=148b390 type=adc5c0 def=rax
+dda_value_editor_combo                   rec=148b3a0 type=addf40 def=rax
+dda_value_editor_input                   rec=148b400 type=ae2700 def=rax
+dda_value_editor_multi_select            rec=148b3c0 type=ae0b70 def=rax
+dda_value_editor_multi_select2           rec=148b3d0 type=ae0d70 def=rax
+dda_value_editor_set                     rec=148b3b0 type=adf3e0 def=rax
+dda_value_editor_slider                  rec=148b410 type=ae3020 def=rax
+delay                                    rec=1485d20 type=a07250 def=rax
+delete                                   rec=14851e8 type=9b1540 def=rax
+depend_on_wind                           rec=1480660 type=760970 def=rax
+detach                                   rec=148beb0 type=b6cc90 def=rax
+dev_disableModVersionControl             rec=147e340 type=14b0bb0 def=0 (f=0)
+dev_enableBotAi                          rec=1478930 type=14b0bb0 def=1 (f=1.4013e-45)
+dev_local_fx                             rec=1484ab8 type=14b0bb0 def=1 (f=1.4013e-45)
+dev_local_particle                       rec=147b758 type=14b0bb0 def=1 (f=1.4013e-45)
+dev_luaPrintTarget                       rec=14776a8 type=14b1bd0 def=3 (f=4.2039e-45)
+dev_maxClientQuantThreads                rec=1485f20 type=14b1bd0 def=0 (f=0)
+dev_netSendMethod                        rec=1477140 type=14b1bd0 def=2 (f=2.8026e-45)
+dev_replayIgnoreVersion                  rec=1470b08 type=14b0bb0 def=0 (f=0)
+dev_shuffleQuantTasks                    rec=1485f38 type=14b1bd0 def=0 (f=0)
+die                                      rec=147faa0 type=747390 def=rax
+difficulty                               rec=1485978 type=9f9a10 def=rax
+disable                                  rec=148bd80 type=b6b940 def=rax
+dof                                      rec=1476d30 type=3dc8b0 def=rax
+drop                                     rec=148bde0 type=b6c490 def=rax
+drop_orders                              rec=147fc10 type=747c10 def=rax
+dx11                                     rec=14788c0 type=4fd680 def=rax
+eActorId                                 rec=1488230 type=14c2b90 def=rax
+eAdvance                                 rec=146e2a0 type=e8130 def=rax
+eAdvance                                 rec=146e9f0 type=15e770 def=rax
+eAdvance                                 rec=146ea80 type=15fa90 def=rax
+eAdvance                                 rec=146ead0 type=1625a0 def=rax
+eAdvance                                 rec=1482630 type=8d2af0 def=rax
+eAdvance                                 rec=1482a20 type=904070 def=rax
+eAdvance                                 rec=148b4e0 type=af61a0 def=rax
+eAimedShot                               rec=1482888 type=8eb700 def=rax
+eAirAttack                               rec=1482710 type=8ddfd0 def=rax
+eAirstrike                               rec=1477380 type=44d9a0 def=rax
+eAnimationCompleted                      rec=1482bd0 type=92d290 def=rax
+eAttach                                  rec=1482600 type=8cf2f0 def=rax
+eAttack                                  rec=14828c8 type=8ee370 def=rax
+eAttackBasic                             rec=14828a8 type=8ec930 def=rax
+eAttackBySelector                        rec=14826e0 type=8d8b30 def=rax
+eAttackProximityCharge                   rec=1482898 type=8ebaa0 def=rax
+eAvoidGrenade                            rec=1482a00 type=8ff1b0 def=rax
+eBindBone                                rec=1482730 type=8e02d0 def=rax
+eBindBone                                rec=14827b0 type=8e3d10 def=rax
+eBindForBoard                            rec=1482720 type=8df9f0 def=rax
+eBindForBoard                            rec=14827a0 type=8e3c70 def=rax
+eBindHand                                rec=1482790 type=8e28a0 def=rax
+eBindPosition                            rec=1482780 type=8e1fe0 def=rax
+eBindTight                               rec=1482760 type=8e1340 def=rax
+eBindVolume                              rec=1482770 type=8e1cd0 def=rax
+eBoard                                   rec=14827c0 type=8e45c0 def=rax
+eBombDropOrder                           rec=1477360 type=44d6b0 def=rax
+eBrainUpdate                             rec=14825f0 type=8cee00 def=rax
+eCannonState                             rec=1482be0 type=92d430 def=rax
+eChargeMiner                             rec=1482928 type=8f0f30 def=rax
+eCollect                                 rec=14825c0 type=8ce610 def=rax
+eComplexOrder                            rec=1482a10 type=900fa0 def=rax
+eCustomActionOrder                       rec=148bb70 type=b5f550 def=rax
+eDefuseSequence                          rec=1482918 type=8f0c20 def=rax
+eDestroyOrder                            rec=1477370 type=44d900 def=rax
+eDetach                                  rec=1482610 type=8cf430 def=rax
+eEmit                                    rec=14827f0 type=8e5ce0 def=rax
+eEmitAndBurn                             rec=1484b80 type=98df10 def=rax
+eEmitAndRepair                           rec=1484b90 type=98df60 def=rax
+eEmitOnAttack                            rec=1484b70 type=98de10 def=rax
+eEmitOnSink                              rec=1484b60 type=98ddb0 def=rax
+eEmitToWaypoint                          rec=146f9c8 type=19da00 def=rax
+eEventId                                 rec=1488250 type=14c2bc0 def=rax
+eExamine                                 rec=14825b0 type=8ce1d0 def=rax
+eFight                                   rec=1482810 type=8e74e0 def=rax
+eFollowAnimation                         rec=1482620 type=8cf600 def=rax
+eFortification                           rec=146e190 type=b1df0 def=rax
+eFortification                           rec=1475ac0 type=372b30 def=rax
+eFortification                           rec=148bd50 type=b6b6e0 def=rax
+eFortifySequence                         rec=1482830 type=8e9a50 def=rax
+eFsmRequest                              rec=1482670 type=8d4080 def=rax
+eHeal                                    rec=146e1b0 type=b1e50 def=rax
+eHeal                                    rec=1480d98 type=808760 def=rax
+eHeal                                    rec=14829b8 type=8fad00 def=rax
+eHeal                                    rec=1484bb0 type=98ed80 def=rax
+eHideout                                 rec=14825e0 type=8ced60 def=rax
+eKitExchange                             rec=146e1c0 type=b1eb0 def=rax
+eKitExchange                             rec=1480da8 type=8087c0 def=rax
+eKitExchange                             rec=14829c8 type=8fb1b0 def=rax
+eKitExchange                             rec=1484bc0 type=98ede0 def=rax
+eLeave                                   rec=1482800 type=8e5fc0 def=rax
+eLookAt                                  rec=1482700 type=8d9e90 def=rax
+eMedic                                   rec=146e1e0 type=b1f90 def=rax
+eMedic                                   rec=146fe00 type=1c05a0 def=rax
+eMedic                                   rec=1475ab0 type=371c40 def=rax
+eMedic                                   rec=1482e10 type=9527e0 def=rax
+eMedic                                   rec=148bf20 type=b743f0 def=rax
+eMids                                    rec=1488260 type=14c25f8 def=rax
+eMine                                    rec=14828e8 type=8efde0 def=rax
+eMineSequence                            rec=1482908 type=8f07d0 def=rax
+eMineSingle                              rec=14828f8 type=8f0280 def=rax
+eMineZone                                rec=1482938 type=8f1ab0 def=rax
+eMoveTask                                rec=146e220 type=bb3b0 def=rax
+eMoveTask                                rec=146fed8 type=1d2390 def=rax
+eMoveTask                                rec=1481080 type=842930 def=rax
+eMoveTask                                rec=14810b0 type=84e960 def=rax
+eMoveTask                                rec=1481200 type=858530 def=rax
+eMoveTask                                rec=1481280 type=85c630 def=rax
+eMoveTask                                rec=14812a0 type=863e80 def=rax
+eMoveTask                                rec=14813c0 type=86a460 def=rax
+eMoveTask                                rec=1482640 type=8d2be0 def=rax
+eMoveTask                                rec=1482680 type=8d6c80 def=rax
+eMoveTask                                rec=1482740 type=8e0880 def=rax
+eMoveTask                                rec=1482948 type=8f6d50 def=rax
+eMoveTask                                rec=1482a70 type=907f50 def=rax
+eMoveTask                                rec=1484ae0 type=9889b0 def=rax
+eMoveToCover                             rec=14825d0 type=8ce830 def=rax
+eMoveToPlace                             rec=14827d0 type=8e4940 def=rax
+eMovementChange                          rec=1482998 type=8f7410 def=rax
+eOrderDrop                               rec=1485298 type=9b5b20 def=rax
+eOrderTake                               rec=1485288 type=9b5920 def=rax
+ePlayAnimation                           rec=1482650 type=8d33f0 def=rax
+ePlayAnimations                          rec=1482660 type=8d3e80 def=rax
+ePlayerId                                rec=1488240 type=14c1098 def=rax
+ePutOn                                   rec=14828d8 type=8ee830 def=rax
+eReconnaisance                           rec=1477390 type=44d9e0 def=rax
+eRepair                                  rec=146e1a0 type=b1e20 def=rax
+eRepair                                  rec=1480d88 type=808730 def=rax
+eRepair                                  rec=14829a8 type=8fa1f0 def=rax
+eRepair                                  rec=1484ba0 type=98ed50 def=rax
+eResetWaypointOnly                       rec=1484b50 type=98dd70 def=rax
+eRotate                                  rec=1482958 type=8f6da0 def=rax
+eSmartRepair                             rec=146e1d0 type=b1f10 def=rax
+eSmartRepair                             rec=1480db8 type=808820 def=rax
+eSmartRepair                             rec=14829d8 type=8fc740 def=rax
+eSmartRepair                             rec=1484bd0 type=98ee40 def=rax
+eStrings                                 rec=1488280 type=14b25a0 def=rax
+eSuppressionFire                         rec=14826f0 type=8d9850 def=rax
+eTags                                    rec=1488270 type=14b40a0 def=rax
+eTakeItem                                rec=1482868 type=8eaaf0 def=rax
+eWait                                    rec=14825a0 type=8cd870 def=rax
+eWeaponAimTarget                         rec=14826a0 type=8d7c10 def=rax
+eWeaponAimTrajectory                     rec=14826c0 type=8d82d0 def=rax
+eWeaponFire                              rec=1482690 type=8d7a50 def=rax
+eWeaponPreload                           rec=1482878 type=8ead70 def=rax
+eWeaponPrepare                           rec=14826d0 type=8d8400 def=rax
+eWeaponShot                              rec=14828b8 type=8ecf90 def=rax
+eWeaponWaitReady                         rec=14826b0 type=8d7e70 def=rax
+ed_alwaysEnableLandEditor                rec=1487990 type=14b1bd0 def=0 (f=0)
+ed_missionDesign                         rec=1485ed8 type=14b1bd0 def=0 (f=0)
+edifice                                  rec=1472690 type=324240 def=rax
+effect                                   rec=1485218 type=9b1660 def=rax
+effect                                   rec=148bc60 type=b64270 def=rax
+effect_object                            rec=148bc70 type=b642c0 def=rax
+emit                                     rec=146f9d8 type=19da70 def=rax
+emit                                     rec=148be30 type=b6c880 def=rax
+enableMpButtons                          rec=1473f00 type=14b0bb0 def=1 (f=1.4013e-45)
+enter                                    rec=148be40 type=b6c900 def=rax
+entities                                 rec=1485848 type=9f21c0 def=rax
+entity                                   rec=147f3b8 type=6ff2a0 def=rax
+entity_manager                           rec=1485580 type=9c8590 def=rax
+entity_state                             rec=1485238 type=9b1740 def=rax
+enumerator                               rec=1480ae0 type=7c72a0 def=rax
+environment                              rec=1485500 type=9c7f50 def=rax
+envmap                                   rec=147d550 type=64dd30 def=rax
+event                                    rec=14854c0 type=9c7dd0 def=rax
+event                                    rec=1485928 type=9f9870 def=rax
+examine                                  rec=148be70 type=b6ca90 def=rax
+explode_inventory                        rec=147fea0 type=750440 def=rax
+explosive                                rec=147fd80 type=74fc00 def=rax
+extraspawn                               rec=1485308 type=9ba6c0 def=rax
+fade                                     rec=1485510 type=9c7fb0 def=rax
+fall_down                                rec=147fde0 type=74fe00 def=rax
+fire                                     rec=147fd60 type=74fb20 def=rax
+flare                                    rec=146e4f0 type=1233a0 def=rax
+fog_in_zone                              rec=1485458 type=9c0710 def=rax
+fog_mode                                 rec=1485448 type=9c06d0 def=rax
+follow_animation                         rec=146fa58 type=19e0a0 def=rax
+foot                                     rec=1481160 type=84e9b0 def=rax
+for_each_link                            rec=147fe50 type=7500b0 def=rax
+for_each_volume                          rec=147fe60 type=750110 def=rax
+fortification                            rec=1472388 type=314640 def=rax
+fortification                            rec=148be10 type=b6c770 def=rax
+fsm_request                              rec=148bc20 type=b64100 def=rax
+fx                                       rec=1484ad0 type=9880f0 def=rax
+g_aimerBlockedCheckPeriod                rec=1480ea8 type=14b1be8 def=0x3e99999a (f=0.3)
+g_airAltitude                            rec=1480078 type=14b1be8 def=0x41a00000 (f=20)
+g_alertDisplayTime                       rec=148c910 type=14b1be8 def=0x40a00000 (f=5)
+g_autoLockTarget                         rec=1480dc8 type=14b1bd0 def=0 (f=0)
+g_blockedSpeedRatio                      rec=14812d8 type=14b1be8 def=0x3e4ccccd (f=0.2)
+g_bulletMissDistance                     rec=1480ff0 type=14b1be8 def=0x437a0000 (f=250)
+g_bulletOvermatchMax                     rec=1480c98 type=14b1be8 def=0x3f800000 (f=1)
+g_bulletOvermatchMin                     rec=1480cb0 type=14b1be8 def=0x3e4ccccd (f=0.2)
+g_bulletSlopeMax                         rec=1480cc8 type=14b1be8 def=0x41200000 (f=10)
+g_burnCount                              rec=1480a40 type=14b1bd0 def=0xf (f=2.10195e-44)
+g_carFollowTurnKoef                      rec=14813e0 type=14b1be8 def=0x3f000000 (f=0.5)
+g_coverGridSize                          rec=1481fd0 type=14b1be8 def=0x42f00000 (f=120)
+g_coverTerrainEnemy                      rec=14820e0 type=14b1bd0 def=0 (f=0)
+g_coverTerrainReject                     rec=14820f8 type=14b1bd0 def=3 (f=4.2039e-45)
+g_coverTerrainUplift                     rec=14820c8 type=14b1bd0 def=0xa (f=1.4013e-44)
+g_crushSlowTime                          rec=1481308 type=14b1be8 def=0x3fa66666 (f=1.3)
+g_crushSpeedRatio                        rec=14812f0 type=14b1be8 def=0x3dcccccd (f=0.1)
+g_damageReportTime                       rec=148c8e0 type=14b1be8 def=0x40a00000 (f=5)
+g_damageSpeed                            rec=14881d8 type=14b1be8 def=0x41700000 (f=15)
+g_dyingAnimation                         rec=1483038 type=14b24b0 def=rax
+g_enableLobbyPings                       rec=14714f0 type=14b0bb0 def=0 (f=0)
+g_enablePlaceEnteringInMP                rec=1485f08 type=14b1bd0 def=1 (f=1.4013e-45)
+g_enablePlaceEnteringInSP                rec=1485ef0 type=14b1bd0 def=0 (f=0)
+g_energyperblastwave                     rec=14881b0 type=14b1be8 def=0x40a00000 (f=5)
+g_energyperhealth                        rec=1488198 type=14b1be8 def=0x3ccccccd (f=0.025)
+g_energyperprojective                    rec=1488180 type=14b1be8 def=0x3f800000 (f=1)
+g_entityAreaUpdatePeriod                 rec=147f7c8 type=14b1be8 def=0x3dcccccd (f=0.1)
+g_entityManagerMaxWaitTime               rec=147f568 type=14b1be8 def=0x41a00000 (f=20)
+g_entityManagerMinWaitTime               rec=147f550 type=14b1be8 def=0x40a00000 (f=5)
+g_entityManagerRemoveTime                rec=147f580 type=14b1be8 def=0x40a00000 (f=5)
+g_fogHumanUnfogRadius                    rec=14815e0 type=14b1be8 def=0x40400000 (f=3)
+g_fps_lock                               rec=147b800 type=14b1bd0 def=0xf0 (f=3.36312e-43)
+g_humanAnimationDelta                    rec=1482c30 type=14b1be8 def=0x42aa0000 (f=85)
+g_humanAnimationDeltaManual              rec=1482c48 type=14b1be8 def=0x42aa0000 (f=85)
+g_humanCollisionOffsetCrouching          rec=1481118 type=14b1be8 def=0x41c80000 (f=25)
+g_humanCollisionOffsetProne              rec=1481130 type=14b1be8 def=0x420c0000 (f=35)
+g_humanCollisionOffsetRadius             rec=14810e8 type=14b1be8 def=0x40800000 (f=4)
+g_humanCollisionOffsetStanding           rec=1481100 type=14b1be8 def=0x41700000 (f=15)
+g_inventory_spread                       rec=1480ba0 type=14b1bd0 def=0 (f=0)
+g_lineFormationDragSensitivity           rec=146e260 type=14b1be8 def=0x3f000000 (f=0.5)
+g_lineFormationMaxDragDistance           rec=146e248 type=14b1bd0 def=0x2bc (f=9.80909e-43)
+g_lineFormationMaxSeparation             rec=146e230 type=14b1be8 def=0x41000000 (f=8)
+g_linearPathThresholdHuman               rec=1482570 type=14b1be8 def=0x3f866666 (f=1.05)
+g_linearPathThresholdVehicle             rec=1482588 type=14b1be8 def=0x3fa66666 (f=1.3)
+g_maxEntityScale                         rec=147f3a0 type=14b1be8 def=0x41200000 (f=10)
+g_maxRecruitCount                        rec=148bf30 type=14b1bd0 def=0xa (f=1.4013e-44)
+g_max_spread_items                       rec=1480bb8 type=14b1bd0 def=7 (f=9.80909e-45)
+g_maximumRicochets                       rec=1481008 type=14b1bd0 def=2 (f=2.8026e-45)
+g_mediumWaterDepth                       rec=1487a58 type=14b1bd0 def=0x64 (f=1.4013e-43)
+g_mineApStep                             rec=1485d40 type=14b1bd0 def=0x28 (f=5.60519e-44)
+g_mineAtStep                             rec=1485d58 type=14b1bd0 def=0x32 (f=7.00649e-44)
+g_newTargetPrediction                    rec=1482850 type=14b0bb0 def=1 (f=1.4013e-45)
+g_obstacleHitRecoverTime                 rec=1481320 type=14b1be8 def=0x3f800000 (f=1)
+g_pathAlignPortals                       rec=14824f8 type=14b1bd0 def=1 (f=1.4013e-45)
+g_pathHeuristic                          rec=1482298 type=14b1bd0 def=0 (f=0)
+g_pnetDirectionHeuristicsScale           rec=1482300 type=14b1be8 def=0 (f=0)
+g_pnetGridSize                           rec=14822b8 type=14b1be8 def=0x42c80000 (f=100)
+g_pnetPreallocateNodes                   rec=14822d0 type=14b1bd0 def=0x4e20 (f=2.8026e-41)
+g_pnetPreallocatePortals                 rec=14822e8 type=14b1bd0 def=0xc350 (f=7.00649e-41)
+g_progressBarSpeed                       rec=1475df0 type=14b1bd0 def=0x64 (f=1.4013e-43)
+g_pushedMassScale                        rec=14812c0 type=14b1be8 def=0x40400000 (f=3)
+g_revealTimeHuman                        rec=1481408 type=14b1be8 def=0x40000000 (f=2)
+g_revealTimeVehicle                      rec=1481420 type=14b1be8 def=0x40a00000 (f=5)
+g_scoreReportTime                        rec=148c8f8 type=14b1be8 def=0x40400000 (f=3)
+g_sessionDownloadCompression             rec=1477098 type=14b1bd0 def=6 (f=8.40779e-45)
+g_sessionDownloadPacketSize              rec=14770b0 type=14b1bd0 def=0xea60 (f=8.40779e-41)
+g_shallowWaterDepth                      rec=1487a40 type=14b1bd0 def=0xe (f=1.96182e-44)
+g_shot_movie                             rec=147b818 type=14b0bb0 def=0 (f=0)
+g_shot_movie_fps                         rec=147b830 type=14b1bd0 def=0 (f=0)
+g_slowDownAcc                            rec=148c9a0 type=14b1be8 def=0x41a00000 (f=20)
+g_slowDownK                              rec=148c988 type=14b1be8 def=0x40400000 (f=3)
+g_strafeDirection                        rec=14810d0 type=14b1bd0 def=0 (f=0)
+g_suspensionAngleSpeed                   rec=1481338 type=14b1be8 def=0x41f00000 (f=30)
+g_suspensionPositionSpeed                rec=1481350 type=14b1be8 def=0x3f800000 (f=1)
+g_targetingRange                         rec=148b520 type=14b1be8 def=0x41a00000 (f=20)
+g_targetingRangeAttack                   rec=148b538 type=14b1be8 def=0x41f00000 (f=30)
+g_testFight                              rec=1482fe0 type=14b0bb0 def=0 (f=0)
+g_underWaterAltitude                     rec=1487a70 type=14b1bd0 def=0xa (f=1.4013e-44)
+g_useTargetEntityBinding                 rec=148b628 type=14b0bb0 def=0 (f=0)
+g_weaponLookAtCameraMaxDistance          rec=148b5e0 type=14b1be8 def=0x43fa0000 (f=500)
+g_weaponLookAtCameraMinDistance          rec=148b5c8 type=14b1be8 def=0x42480000 (f=50)
+g_weaponLookAtEnable                     rec=148b610 type=14b0bb0 def=1 (f=1.4013e-45)
+g_weaponLookAtPlaneEnable                rec=148b5f8 type=14b0bb0 def=1 (f=1.4013e-45)
+g_weaponLookAtPlaneMaxDistance           rec=148b5b0 type=14b1be8 def=0x43960000 (f=300)
+g_weaponLookAtPlaneMinDistance           rec=148b598 type=14b1be8 def=0x42c80000 (f=100)
+g_zeroingDstRadius                       rec=1480e40 type=14b1be8 def=0x41200000 (f=10)
+g_zeroingSrcRadius                       rec=1480e28 type=14b1be8 def=0x40a00000 (f=5)
+game:frontlinesphase                     rec=1485ca8 type=1485ca0 def=rax
+game_entity                              rec=147f8b8 type=71e290 def=rax
+game_progress                            rec=1476960 type=3a43d0 def=rax
+game_speed                               rec=1485468 type=9c0760 def=rax
+gameover                                 rec=14853f8 type=9c0360 def=rax
+gamestatus                               rec=1485408 type=9c03c0 def=rax
+gc_cp_browse_attack                      rec=148baf0 type=b43d10 def=rax
+gc_cp_browse_back                        rec=148bb30 type=b43e50 def=rax
+gc_cp_browse_emplacement                 rec=148bb20 type=b43e00 def=rax
+gc_cp_browse_special                     rec=148bb10 type=b43db0 def=rax
+gc_cp_browse_useitem                     rec=148bb00 type=b43d60 def=rax
+gc_cp_command_cancel                     rec=148b778 type=b40fb0 def=rax
+gc_cp_command_use                        rec=148b768 type=b40e80 def=rax
+gc_cp_dummy                              rec=148bb40 type=b43ea0 def=rax
+gc_cp_game_menu                          rec=148bab0 type=b43bd0 def=rax
+gc_cp_leave_unit                         rec=148baa0 type=b43b80 def=rax
+gc_cp_lock_ammo                          rec=148b990 type=b435c0 def=rax
+gc_cp_squad_control                      rec=148b9b0 type=b43680 def=rax
+gc_cp_state_altitude                     rec=148ba00 type=b43850 def=rax
+gc_cp_state_attach                       rec=148b9e0 type=b43790 def=rax
+gc_cp_state_auto_medic                   rec=148b9a0 type=b43620 def=rax
+gc_cp_state_cannon                       rec=148b960 type=b434a0 def=rax
+gc_cp_state_fire                         rec=148b930 type=b43380 def=rax
+gc_cp_state_hatch                        rec=148b970 type=b43500 def=rax
+gc_cp_state_highlight_corpses            rec=148bad0 type=b43c70 def=rax
+gc_cp_state_highlight_silhouettes        rec=148bae0 type=b43cc0 def=rax
+gc_cp_state_highlight_stuff              rec=148bac0 type=b43c20 def=rax
+gc_cp_state_inventory                    rec=148ba30 type=b43950 def=rax
+gc_cp_state_manual_control               rec=148ba10 type=b438b0 def=rax
+gc_cp_state_manual_control_mode          rec=148ba20 type=b43900 def=rax
+gc_cp_state_map                          rec=148ba60 type=b43a40 def=rax
+gc_cp_state_map_control                  rec=148ba70 type=b43a90 def=rax
+gc_cp_state_map_zoom_in                  rec=148ba80 type=b43ae0 def=rax
+gc_cp_state_map_zoom_out                 rec=148ba90 type=b43b30 def=rax
+gc_cp_state_message_history              rec=148ba50 type=b439f0 def=rax
+gc_cp_state_move                         rec=148b940 type=b433e0 def=rax
+gc_cp_state_objectives                   rec=148ba40 type=b439a0 def=rax
+gc_cp_state_pose                         rec=148b920 type=b43320 def=rax
+gc_cp_state_reload                       rec=148b9d0 type=b43730 def=rax
+gc_cp_state_reverse                      rec=148b980 type=b43560 def=rax
+gc_cp_state_smoke_decoy                  rec=148b788 type=b416b0 def=rax
+gc_cp_state_speed                        rec=148b950 type=b43440 def=rax
+gc_cp_state_supply                       rec=148b9f0 type=b437f0 def=rax
+gc_cp_state_weapon                       rec=148b9c0 type=b436d0 def=rax
+generic                                  rec=147f998 type=730d20 def=rax
+gih_alliances                            rec=148d8e0 type=c4c350 def=rax
+gih_armies                               rec=148d8c8 type=c4be30 def=rax
+gih_armyMode                             rec=148d8b0 type=c4b980 def=rax
+gih_botDifficulty                        rec=147c188 type=589720 def=rax
+gih_chargeFactors                        rec=148d910 type=c4cc40 def=rax
+gih_doctrines                            rec=148d8f8 type=c4c860 def=rax
+gih_gameModes                            rec=148d868 type=c4adb0 def=rax
+gih_gameTypes                            rec=147c128 type=588340 def=rax
+gih_maxPlayers                           rec=147c170 type=589380 def=rax
+gih_minPlayers                           rec=147c158 type=589100 def=rax
+gih_mmarmies                             rec=147c140 type=588a90 def=rax
+gih_resourceSpeed                        rec=148d850 type=c4ab00 def=rax
+gih_specModes                            rec=148d898 type=c4b3d0 def=rax
+gih_unitModes                            rec=148d880 type=c4b0b0 def=rax
+glow                                     rec=1476a38 type=3b5500 def=rax
+grain                                    rec=1477588 type=4875c0 def=rax
+grass                                    rec=1480a80 type=7bb1f0 def=rax
+gravity                                  rec=147fd30 type=74f9d0 def=rax
+grenade                                  rec=147f9a8 type=731490 def=rax
+gui.base                                 rec=14886c0 type=a97ca0 def=rax
+gui.blur                                 rec=1488768 type=a9acd0 def=rax
+gui.grayscale                            rec=1488708 type=a98390 def=rax
+gui.minimap                              rec=148b708 type=b227c0 def=rax
+gui.minimapfog                           rec=148b720 type=b229b0 def=rax
+gui.progress                             rec=14886d8 type=a97f20 def=rax
+gui.sepia                                rec=14886f0 type=a98130 def=rax
+gui.text                                 rec=1488720 type=a98650 def=rax
+gui.videoblend                           rec=148ce40 type=c09980 def=rax
+gui.vignette                             rec=1488738 type=a988e0 def=rax
+gui.vignette_lit                         rec=1488750 type=a99800 def=rax
+hand_left                                rec=1480b58 type=7d2440 def=rax
+hand_right                               rec=1480b68 type=7d28d0 def=rax
+haze                                     rec=1487c30 type=a49d10 def=rax
+heal                                     rec=148c000 type=b74b70 def=rax
+health_damage_blast                      rec=147fac0 type=747450 def=rax
+health_damage_blow                       rec=147fae0 type=747530 def=rax
+health_damage_count                      rec=147fad0 type=7474c0 def=rax
+health_damage_crush                      rec=147faf0 type=7475a0 def=rax
+health_damage_pierce                     rec=147fab0 type=7473e0 def=rax
+helicopter                               rec=146fee8 type=1d64d0 def=rax
+helicopter                               rec=1484b00 type=988a50 def=rax
+helicopter_client                        rec=146e080 type=a7bd0 def=rax
+hide                                     rec=147fda0 type=74fcc0 def=rax
+holder_drop                              rec=147fb60 type=747830 def=rax
+human                                    rec=1482c60 type=93af30 def=rax
+human                                    rec=1482cf0 type=93e1f0 def=rax
+human                                    rec=1482d88 type=945d30 def=rax
+human                                    rec=1483010 type=962480 def=rax
+human_carrier                            rec=14811f0 type=8504f0 def=rax
+human_client                             rec=146e050 type=a7ac0 def=rax
+if                                       rec=1480090 type=75a670 def=rax
+if                                       rec=1485ce0 type=a07090 def=rax
+if                                       rec=148bd30 type=b64a30 def=rax
+ik_enable                                rec=1480640 type=7608a0 def=rax
+impulse                                  rec=147fd20 type=74f950 def=rax
+inactive                                 rec=147fd00 type=74f890 def=rax
+injection                                rec=148bcd0 type=b64510 def=rax
+injection                                rec=148be90 type=b6cb90 def=rax
+install                                  rec=148bd00 type=b64940 def=rax
+install_begin                            rec=148bd10 type=b64990 def=rax
+install_end                              rec=148bd20 type=b649f0 def=rax
+interface                                rec=14853a8 type=9c0040 def=rax
+inventory                                rec=1480b38 type=7cb800 def=rax
+inventory                                rec=14852a8 type=9b5b90 def=rax
+inventory                                rec=14858c8 type=9f26d0 def=rax
+keys                                     rec=14769c0 type=3a5cf0 def=rax
+kick_entity_manager                      rec=147fe80 type=7501e0 def=rax
+kill_crew                                rec=147fb40 type=747780 def=rax
+kill_flags                               rec=147fc00 type=747bc0 def=rax
+knockdown                                rec=147fbe0 type=747b20 def=rax
+land                                     rec=147fe70 type=750190 def=rax
+layered                                  rec=1477690 type=4be440 def=rax
+light                                    rec=1480868 type=7a0400 def=rax
+light                                    rec=1487c40 type=a4c670 def=rax
+linear_damping                           rec=147fd40 type=74fa20 def=rax
+link_grenade_to_nearest_human            rec=147fed0 type=750560 def=rax
+linked                                   rec=1485888 type=9f2450 def=rax
+linker                                   rec=1485248 type=9b17c0 def=rax
+load_units                               rec=1485428 type=9c0460 def=rax
+log_ai                                   rec=147c7b0 type=14b1bd0 def=0 (f=0)
+log_aiming                               rec=147c990 type=14b1bd0 def=0 (f=0)
+log_ani                                  rec=147c960 type=14b1bd0 def=0 (f=0)
+log_bulletCommands                       rec=146e208 type=14b0bb0 def=0 (f=0)
+log_chassis                              rec=147c7e0 type=14b1bd0 def=0 (f=0)
+log_contacts                             rec=147c810 type=14b1bd0 def=0 (f=0)
+log_damage                               rec=147c828 type=14b1bd0 def=0 (f=0)
+log_deleteEntity                         rec=147f310 type=14b0bb0 def=0 (f=0)
+log_dialog                               rec=147c858 type=14b1bd0 def=0 (f=0)
+log_entity                               rec=147c6c0 type=14b1bd0 def=0 (f=0)
+log_entityReassignments                  rec=146e1f0 type=14b0bb0 def=0 (f=0)
+log_fileusage                            rec=147ca68 type=14b1bd0 def=0 (f=0)
+log_fsm                                  rec=147c798 type=14b1bd0 def=0 (f=0)
+log_humanMovementChange                  rec=1481148 type=14b0bb0 def=0 (f=0)
+log_ic                                   rec=147c738 type=14b1bd0 def=0 (f=0)
+log_input                                rec=147c840 type=14b1bd0 def=0 (f=0)
+log_interaction                          rec=147c6d8 type=14b1bd0 def=0 (f=0)
+log_inventoryOps                         rec=1480b88 type=14b0bb0 def=0 (f=0)
+log_maxLogFileSize                       rec=147cae0 type=14b1bd0 def=0xfa00000 (f=1.57772e-29)
+log_mp                                   rec=147c870 type=14b1bd0 def=1 (f=1.4013e-45)
+log_mp_creport                           rec=147c8a0 type=14b1bd0 def=1 (f=1.4013e-45)
+log_mp_gs_gui                            rec=147c900 type=14b1bd0 def=0 (f=0)
+log_mp_irc                               rec=147ca80 type=14b1bd0 def=0 (f=0)
+log_mp_mm                                rec=147c918 type=14b1bd0 def=0 (f=0)
+log_mp_performance                       rec=147c8d0 type=14b1bd0 def=0 (f=0)
+log_mp_qreport                           rec=147c888 type=14b1bd0 def=1 (f=1.4013e-45)
+log_mp_quant                             rec=147c8b8 type=14b1bd0 def=0 (f=0)
+log_mp_replay                            rec=147c930 type=14b1bd0 def=0 (f=0)
+log_mp_tcp                               rec=147c8e8 type=14b1bd0 def=0 (f=0)
+log_order                                rec=147c978 type=14b1bd0 def=0 (f=0)
+log_particle                             rec=147ca08 type=14b1bd0 def=0 (f=0)
+log_placement                            rec=147c6f0 type=14b1bd0 def=0 (f=0)
+log_preload                              rec=147ca50 type=14b1bd0 def=0 (f=0)
+log_probe1                               rec=147c9c0 type=14b1bd0 def=0 (f=0)
+log_quant                                rec=147c690 type=14b1bd0 def=0 (f=0)
+log_repository                           rec=147ca20 type=14b1bd0 def=0 (f=0)
+log_rnd                                  rec=147c768 type=14b1bd0 def=0 (f=0)
+log_rndcount                             rec=147c720 type=14b1bd0 def=0 (f=0)
+log_select                               rec=147c6a8 type=14b1bd0 def=0 (f=0)
+log_signal                               rec=147c708 type=14b1bd0 def=0 (f=0)
+log_sim                                  rec=147c7f8 type=14b1bd0 def=0 (f=0)
+log_squadFollow                          rec=1482a48 type=14b0bb0 def=0 (f=0)
+log_sync                                 rec=147c780 type=14b1bd0 def=0 (f=0)
+log_textureload                          rec=147c9d8 type=14b1bd0 def=0 (f=0)
+log_thread                               rec=147c678 type=14b1bd0 def=0 (f=0)
+log_triggers                             rec=147c9a8 type=14b1bd0 def=0 (f=0)
+log_vehicleMovementChange                rec=1481368 type=14b0bb0 def=0 (f=0)
+log_view                                 rec=147c750 type=14b1bd0 def=0 (f=0)
+log_visibility                           rec=147c9f0 type=14b1bd0 def=0 (f=0)
+log_vismap                               rec=147c7c8 type=14b1bd0 def=0 (f=0)
+log_vmem                                 rec=147ca38 type=14b1bd0 def=0 (f=0)
+log_wf                                   rec=147c948 type=14b1bd0 def=0 (f=0)
+logs_on                                  rec=147ca98 type=14b1bd0 def=0 (f=0)
+logs_stop                                rec=147c660 type=14b1bd0 def=0 (f=0)
+logs_thread                              rec=147cac8 type=14b1bd0 def=0 (f=0)
+logs_time                                rec=147cab0 type=14b1bd0 def=0 (f=0)
+loop                                     rec=1485d10 type=a071e0 def=rax
+m_MMSessionConnectionTimeout             rec=148dc40 type=14b1bd0 def=0x2bf20 (f=2.52234e-40)
+manual_lock                              rec=146fa88 type=1a4780 def=rax
+map_point                                rec=1480890 type=7a3c70 def=rax
+mark_for_persistence                     rec=147ff00 type=750650 def=rax
+matchbox_fire                            rec=148bcc0 type=b644d0 def=rax
+medic                                    rec=148c010 type=b74c00 def=rax
+mine                                     rec=146fa38 type=19de20 def=rax
+mine                                     rec=14808c0 type=7a79c0 def=rax
+mine                                     rec=148c030 type=b74d20 def=rax
+mine_ap                                  rec=148c040 type=b74d80 def=rax
+mine_at                                  rec=148c050 type=b74e20 def=rax
+mine_state                               rec=1485278 type=9b1990 def=rax
+mined                                    rec=1485998 type=9f9ad0 def=rax
+mission_option                           rec=14859d8 type=9f9e20 def=rax
+mmRebuildQueueTimeout                    rec=1477678 type=14b1bd0 def=0xa (f=1.4013e-44)
+mod                                      rec=14859c8 type=9f9c00 def=rax
+morph                                    rec=147d568 type=64e5e0 def=rax
+move                                     rec=148bd90 type=b6c1c0 def=rax
+movement_limit                           rec=147fc20 type=747c60 def=rax
+movement_type                            rec=147fc30 type=747cb0 def=rax
+mpServerMaxDQspeed                       rec=148da48 type=14b1be8 def=0x3f800000 (f=1)
+mp_DeferredCommandLimit                  rec=146e8d0 type=14b1bd0 def=0x400 (f=1.43493e-42)
+mp_DeferredCommandQuants                 rec=146e8b8 type=14b1bd0 def=0x1e (f=4.2039e-44)
+mp_MaxQuantBatchMs                       rec=148da60 type=14b1be8 def=0 (f=0)
+mp_PausedEndOfReplay                     rec=148dae8 type=14b0bb0 def=0 (f=0)
+mp_PausedOutOfSync                       rec=148cf20 type=14b0bb0 def=0 (f=0)
+mp_QuantCheckTickModifier                rec=148da78 type=14b1be8 def=0 (f=0)
+mp_ReduceVideoQualityDelayOnStartSec     rec=148d9a0 type=14b1be8 def=0x41200000 (f=10)
+mp_ReduceVideoQualityDelayOnWindowActiveSec rec=148d9b8 type=14b1be8 def=0x41200000 (f=10)
+mp_ReduceVideoQualityDelaySec            rec=148d9d0 type=14b1be8 def=0x41700000 (f=15)
+mp_ReduceVideoQualityFpsCheckRangeSec    rec=148d9e8 type=14b1be8 def=0x41200000 (f=10)
+mp_ServerForwardExec                     rec=148db00 type=14b0bb0 def=1 (f=1.4013e-45)
+mp_VoiceLoopback                         rec=1479c80 type=14b0bb0 def=0 (f=0)
+mp_allowDesync                           rec=148cf08 type=14b0bb0 def=0 (f=0)
+mp_dbgQuantFrames                        rec=148dac0 type=14b0bb0 def=0 (f=0)
+mp_disablePlacementSync                  rec=147f8a0 type=14b0bb0 def=0 (f=0)
+mp_dumping                               rec=148cf50 type=14b0bb0 def=0 (f=0)
+mp_event                                 rec=1485318 type=9ba720 def=rax
+mp_fogReplay                             rec=148cf68 type=14b0bb0 def=1 (f=1.4013e-45)
+mp_irc_p                                 rec=148d930 type=14b1bd0 def=0 (f=0)
+mp_lagToWait                             rec=148cea8 type=14b1bd0 def=0xbb8 (f=4.2039e-42)
+mp_mapPointCaptureLimit                  rec=148dcc8 type=14b1be8 def=0x3fc00000 (f=1.5)
+mp_mapPointZoneColor                     rec=148dce0 type=14b1be8 def=0x42700000 (f=60)
+mp_mapPointZones                         rec=1480878 type=14b0bb0 def=1 (f=1.4013e-45)
+mp_maxClientAngularCorrectionSpeed       rec=147f870 type=14b1be8 def=0x42f00000 (f=120)
+mp_maxClientLinearCorrectionSpeed        rec=147f840 type=14b1be8 def=0x40a00000 (f=5)
+mp_maxClientSmoothUpdateAngle            rec=147f828 type=14b1be8 def=0x42b40000 (f=90)
+mp_maxClientSmoothUpdateDistance         rec=147f810 type=14b1be8 def=0x40a00000 (f=5)
+mp_maxClientSpeedupFactor                rec=1478c20 type=14b1be8 def=0x3e4ccccd (f=0.2)
+mp_maxClientSpeedupLag                   rec=1478c50 type=14b1be8 def=0x43960000 (f=300)
+mp_maxClientlag                          rec=148cec0 type=14b1bd0 def=0x3e8 (f=1.4013e-42)
+mp_maxPlayers                            rec=148cf80 type=14b1bd0 def=0x10 (f=2.24208e-44)
+mp_maxServerSpeedupLag                   rec=148daa8 type=14b1be8 def=0x447a0000 (f=1000)
+mp_maxSpectators                         rec=148cf98 type=14b1bd0 def=2 (f=2.8026e-45)
+mp_minClientAngularCorrectionSpeed       rec=147f888 type=14b1be8 def=0x42340000 (f=45)
+mp_minClientLinearCorrectionSpeed        rec=147f858 type=14b1be8 def=0x3f000000 (f=0.5)
+mp_minClientSpeedupFactor                rec=1478c08 type=14b1be8 def=0x3f4ccccd (f=0.8)
+mp_minClientSpeedupLag                   rec=1478c38 type=14b1be8 def=0x42a00000 (f=80)
+mp_performanceReportDelayMs              rec=148da00 type=14b1bd0 def=0 (f=0)
+mp_placementDelta                        rec=146e8e8 type=14b0bb0 def=1 (f=1.4013e-45)
+mp_placementDeltaKeyframe                rec=146e900 type=14b1bd0 def=8 (f=1.12104e-44)
+mp_placementSyncDelay                    rec=147f7f8 type=14b1bd0 def=0x96 (f=2.10195e-43)
+mp_reduceVideoQuality                    rec=148d988 type=14b0bb0 def=1 (f=1.4013e-45)
+mp_rndSeed                               rec=148db18 type=14b1bd0 def=0 (f=0)
+mp_rttExecPenalty                        rec=148da90 type=14b1be8 def=0x3e800000 (f=0.25)
+mp_serverDQ                              rec=148da18 type=14b1bd0 def=0 (f=0)
+mp_serverDQfactor                        rec=148da30 type=14b1be8 def=0x3fb33333 (f=1.4)
+mp_session_autoready                     rec=148db30 type=14b0bb0 def=0 (f=0)
+mp_syncLevel                             rec=148ce78 type=14b1bd0 def=0 (f=0)
+mp_syncPeriod                            rec=148ce90 type=14b1bd0 def=0 (f=0)
+mp_testPlayers                           rec=148dd18 type=14b1bd0 def=3 (f=4.2039e-45)
+mp_testing                               rec=148cf38 type=14b1bd0 def=0 (f=0)
+mp_waitTime                              rec=148ced8 type=14b1bd0 def=0x3c (f=8.40779e-44)
+mp_waitsThreshold                        rec=148cef0 type=14b1bd0 def=0 (f=0)
+mtl_enable_skin                          rec=14806c0 type=760b80 def=rax
+multiply                                 rec=147d598 type=64ec00 def=rax
+music                                    rec=14852d8 type=9b9260 def=rax
+near                                     rec=1485868 type=9f2310 def=rax
+none                                     rec=148bd60 type=b6b840 def=rax
+objective_progress                       rec=14853e8 type=9c0300 def=rax
+ocean                                    rec=1475a60 type=36b2e0 def=rax
+ocean                                    rec=14764f0 type=37c7c0 def=rax
+ocean_wave_works                         rec=1476a80 type=3b6e60 def=rax
+options_game                             rec=14768d8 type=38c070 def=rax
+options_sound                            rec=1476920 type=391990 def=rax
+options_video                            rec=1476938 type=398b10 def=rax
+phys_forced_rest_time                    rec=147f900 type=14b1be8 def=0x3f000000 (f=0.5)
+phys_rest_speed                          rec=147f9c8 type=14b1be8 def=rax
+physics_work                             rec=147feb0 type=7504a0 def=rax
+pillar                                   rec=147f9b8 type=731da0 def=rax
+pillar_fall                              rec=147fdc0 type=74fd60 def=rax
+pillar_up                                rec=147fdd0 type=74fdb0 def=rax
+place_on_bone                            rec=148bc10 type=b640b0 def=rax
+placement                                rec=1485268 type=9b18f0 def=rax
+plant                                    rec=148bcf0 type=b64590 def=rax
+player                                   rec=147fca0 type=747f10 def=rax
+player                                   rec=1485140 type=99e110 def=rax
+players:composition                      rec=1485c90 type=1485c88 def=rax
+players:count                            rec=1485c78 type=1485c70 def=rax
+pour_animation                           rec=148bc50 type=b64220 def=rax
+pour_in                                  rec=148bdf0 type=b6c510 def=rax
+pour_out                                 rec=148be00 type=b6c590 def=rax
+pour_over                                rec=148bcb0 type=b643f0 def=rax
+preview                                  rec=14808f0 type=7a93d0 def=rax
+pro_pnetBuild                            rec=1482318 type=14b0bb0 def=0 (f=0)
+pro_sleepQuant                           rec=1485ea8 type=14b1bd0 def=0 (f=0)
+pro_sleepRender                          rec=147e2a8 type=14b1bd0 def=0 (f=0)
+r_LODEnable                              rec=147f5a0 type=14b0bb0 def=1 (f=1.4013e-45)
+r_aimingSectorCentralDistance            rec=148b488 type=14b1be8 def=0x420c0000 (f=35)
+r_aimingSectorFarDistance                rec=148b458 type=14b1be8 def=0x42000000 (f=32)
+r_aimingSectorNearDistance               rec=148b470 type=14b1be8 def=0x40400000 (f=3)
+r_allowMultipleLights                    rec=147f388 type=14b0bb0 def=1 (f=1.4013e-45)
+r_bigMeshCellSize                        rec=147c300 type=14b1bd0 def=0x800 (f=2.86986e-42)
+r_bigmeshMinCellSize                     rec=147c318 type=14b1bd0 def=0x100 (f=3.58732e-43)
+r_cacheGeneratedShaders                  rec=147e718 type=14b0bb0 def=1 (f=1.4013e-45)
+r_enableFogOfWarOverlay                  rec=14880f8 type=14b0bb0 def=1 (f=1.4013e-45)
+r_enableShadowOnly                       rec=1477598 type=14b0bb0 def=0 (f=0)
+r_fadeawayDepth                          rec=147d3b8 type=14b1be8 def=0x447a0000 (f=1000)
+r_fadeawayStart                          rec=147d3a0 type=14b1be8 def=0x44fa0000 (f=2000)
+r_fogAmount                              rec=147e5e8 type=14b1be8 def=0x3f000000 (f=0.5)
+r_fogBrightness                          rec=147e600 type=14b1be8 def=0x3f19999a (f=0.6)
+r_fogFullRangeOpacity                    rec=147e618 type=14b1bd0 def=0x60 (f=1.34525e-43)
+r_fogmapSize                             rec=147e648 type=14b1bd0 def=0x800 (f=2.86986e-42)
+r_glowBlurPasses                         rec=1476fc8 type=14b1bd0 def=1 (f=1.4013e-45)
+r_glowScale                              rec=1476fb0 type=14b1bd0 def=2 (f=2.8026e-45)
+r_grassAlphaToCoverage                   rec=14786a0 type=14b0bb0 def=1 (f=1.4013e-45)
+r_grassBlend                             rec=1478688 type=14b1bd0 def=2 (f=2.8026e-45)
+r_grassCull                              rec=14786b8 type=14b1bd0 def=0 (f=0)
+r_grassFade                              rec=1478700 type=14b0bb0 def=1 (f=1.4013e-45)
+r_grassShowClusters                      rec=14786d0 type=14b1bd0 def=0 (f=0)
+r_grassThinnerFade                       rec=14786e8 type=14b0bb0 def=1 (f=1.4013e-45)
+r_grassUseGlobalTexture                  rec=1478718 type=14b0bb0 def=1 (f=1.4013e-45)
+r_groundMIPBias                          rec=147e8a8 type=14b1be8 def=0 (f=0)
+r_haloScaleSpeed                         rec=147b780 type=14b1be8 def=0x3e99999a (f=0.3)
+r_hazeBoundaryDistance                   rec=1487918 type=14b1bd0 def=0x1f4 (f=7.00649e-43)
+r_hazeForScreenshots                     rec=147e700 type=14b0bb0 def=0 (f=0)
+r_hideZNearClip                          rec=147f328 type=14b0bb0 def=1 (f=1.4013e-45)
+r_hideZNearClipUseDither                 rec=147f340 type=14b0bb0 def=1 (f=1.4013e-45)
+r_highlightAmount                        rec=147f1c0 type=14b1be8 def=0x40000000 (f=2)
+r_highlightHumans                        rec=1482c18 type=14b0bb0 def=1 (f=1.4013e-45)
+r_ignoreNoGroupMesh                      rec=147f488 type=14b0bb0 def=0 (f=0)
+r_lightBlendStripe                       rec=147b740 type=14b1bd0 def=0x64 (f=1.4013e-43)
+r_lightEnableFake                        rec=147f190 type=14b0bb0 def=0 (f=0)
+r_lightOff                               rec=147f1a8 type=14b0bb0 def=0 (f=0)
+r_linkedEntityLODHide                    rec=147f7b0 type=14b1bd0 def=2 (f=2.8026e-45)
+r_maxRenderThreads                       rec=147b908 type=14b1bd0 def=4 (f=5.60519e-45)
+r_meshDecalDepthThreshold                rec=147c2d8 type=14b1be8 def=0x41200000 (f=10)
+r_meshDecalFadeThreshold                 rec=147c2c0 type=14b1be8 def=0x3c23d70a (f=0.01)
+r_meshDecalNormalThreshold               rec=147c2a8 type=14b1be8 def=0x38d1b717 (f=0.0001)
+r_meshGroupAlwaysUpdate                  rec=147c240 type=14b0bb0 def=0 (f=0)
+r_meshGroupBatch                         rec=147c228 type=14b1bd0 def=0x5555 (f=3.06114e-41)
+r_meshGroupCellSize                      rec=147c258 type=14b1bd0 def=0x3e8 (f=1.4013e-42)
+r_meshGroupEnable                        rec=147c210 type=14b0bb0 def=1 (f=1.4013e-45)
+r_meshGroupRebuildFrames                 rec=147c270 type=14b1bd0 def=0x64 (f=1.4013e-43)
+r_meshGroupStableFrames                  rec=147b7c8 type=14b1bd0 def=0x64 (f=1.4013e-43)
+r_minInstanceRenderCount                 rec=1478918 type=14b1bd0 def=2 (f=2.8026e-45)
+r_modelq_low_distance                    rec=147f5d0 type=14b1be8 def=0x447a0000 (f=1000)
+r_modelq_low_pct                         rec=147f600 type=14b1be8 def=0x40400000 (f=3)
+r_modelq_medium_distance                 rec=147f5e8 type=14b1be8 def=0x43fa0000 (f=500)
+r_modelq_medium_pct                      rec=147f618 type=14b1be8 def=0x40000000 (f=2)
+r_modelq_type                            rec=147f5b8 type=14b1bd0 def=3 (f=4.2039e-45)
+r_noLightmapMtl                          rec=147d580 type=14b0bb0 def=0 (f=0)
+r_occlusionCulling                       rec=147e738 type=14b0bb0 def=0 (f=0)
+r_occlusionDrawBoxes                     rec=147e780 type=14b0bb0 def=0 (f=0)
+r_occlusionHierarchy                     rec=147f770 type=14b0bb0 def=1 (f=1.4013e-45)
+r_occlusionThreshold                     rec=147e750 type=14b1bd0 def=0 (f=0)
+r_occlusionVisibleFrames                 rec=147e768 type=14b1bd0 def=0xa (f=1.4013e-44)
+r_parallaxGlobalScale                    rec=147d4e0 type=14b1be8 def=0x3f000000 (f=0.5)
+r_parallaxMaxSteps                       rec=147d4c8 type=14b1be8 def=0x41a00000 (f=20)
+r_parallaxMinSteps                       rec=147d4b0 type=14b1be8 def=0x40a00000 (f=5)
+r_parallel_gm_paint                      rec=147c290 type=14b0bb0 def=1 (f=1.4013e-45)
+r_particleMinCount                       rec=147b728 type=14b1bd0 def=5 (f=7.00649e-45)
+r_preserveEntityOpacity                  rec=14878e8 type=14b1bd0 def=0 (f=0)
+r_reflectionSize                         rec=147eac0 type=14b1bd0 def=0x200 (f=7.17465e-43)
+r_scaleBias                              rec=147e7d8 type=14b1be8 def=0x3ba3d70a (f=0.005)
+r_scaleBiasHw                            rec=147d3d0 type=14b1be8 def=0x41a00000 (f=20)
+r_shadowDepthBias                        rec=147ec38 type=14b1be8 def=0 (f=0)
+r_shadowDepthSlopeBias                   rec=147ec50 type=14b1be8 def=0x40800000 (f=4)
+r_shadowFalloffDepth                     rec=147ec08 type=14b1be8 def=0x43fa0000 (f=500)
+r_shadowFalloffEnd                       rec=147ec20 type=14b1be8 def=0x453b8000 (f=3000)
+r_shadowItemBoundCheck                   rec=147ebf0 type=14b0bb0 def=1 (f=1.4013e-45)
+r_shadowMapSizeHigh                      rec=147eb90 type=14b1bd0 def=0x1000 (f=5.73972e-42)
+r_shadowMapSizeLow                       rec=147eb60 type=14b1bd0 def=0x400 (f=1.43493e-42)
+r_shadowMapSizeMedium                    rec=147eb78 type=14b1bd0 def=0x800 (f=2.86986e-42)
+r_shadowMapSizeUltra                     rec=147eba8 type=14b1bd0 def=0x2000 (f=1.14794e-41)
+r_shadowMapsInCascadeHigh                rec=147eb30 type=14b1bd0 def=3 (f=4.2039e-45)
+r_shadowMapsInCascadeLow                 rec=147eb00 type=14b1bd0 def=3 (f=4.2039e-45)
+r_shadowMapsInCascadeMedium              rec=147eb18 type=14b1bd0 def=3 (f=4.2039e-45)
+r_shadowMapsInCascadeUltra               rec=147eb48 type=14b1bd0 def=3 (f=4.2039e-45)
+r_shadowMinProjSquare                    rec=147ebd8 type=14b1be8 def=0x41200000 (f=10)
+r_shadowSortItems                        rec=147ebc0 type=14b0bb0 def=1 (f=1.4013e-45)
+r_shadowSplit1                           rec=147ec68 type=14b1be8 def=0x44548000 (f=850)
+r_shadowSplit2                           rec=147ec80 type=14b1be8 def=0x44bb8000 (f=1500)
+r_shadowSplitBlendDepth                  rec=147ec98 type=14b1be8 def=0x42c80000 (f=100)
+r_shapePrecision                         rec=147d0f8 type=14b1be8 def=0x3e4ccccd (f=0.2)
+r_shapeSpriteScale                       rec=147d388 type=14b1be8 def=0x3f800000 (f=1)
+r_showSceneMapBound                      rec=1487168 type=14b0bb0 def=1 (f=1.4013e-45)
+r_silhouetteOpacity                      rec=147ea28 type=14b1be8 def=0x3f000000 (f=0.5)
+r_sortEntity                             rec=147e840 type=14b0bb0 def=1 (f=1.4013e-45)
+r_stampResolutionScale                   rec=147b710 type=14b1be8 def=rax
+r_useInstancing                          rec=147b7b0 type=14b0bb0 def=1 (f=1.4013e-45)
+r_waterOpacityMax                        rec=147e890 type=14b1be8 def=0x3f800000 (f=1)
+r_waterOpacityMin                        rec=147e878 type=14b1be8 def=0x3f4ccccd (f=0.8)
+r_wireframe                              rec=147e858 type=14b1bd0 def=0 (f=0)
+r_zNearClipHideMs                        rec=147f370 type=14b1bd0 def=0x14d (f=4.66632e-43)
+r_zNearClipOpacity                       rec=147f358 type=14b1bd0 def=0 (f=0)
+rail_break                               rec=14809b8 type=7ad530 def=rax
+rail_check_free                          rec=148bc80 type=b64310 def=rax
+rail_switch                              rec=14809a8 type=7ad4e0 def=rax
+railway                                  rec=1480918 type=7ad380 def=rax
+railway                                  rec=1481220 type=858580 def=rax
+rand                                     rec=1485948 type=9f9910 def=rax
+reinforce                                rec=148bec0 type=b6cd10 def=rax
+reinforcement                            rec=1485478 type=9c0970 def=rax
+reinforcements_score                     rec=14858d8 type=9f2760 def=rax
+render_tweaks                            rec=14769e8 type=3aef00 def=rax
+repair                                   rec=148be50 type=b6c990 def=rax
+reset_manual_control                     rec=147fbf0 type=747b70 def=rax
+restore_volume_states                    rec=147fef0 type=750600 def=rax
+rotate                                   rec=148bda0 type=b6c240 def=rax
+rt_function                              rec=1485208 type=9b1600 def=rax
+s_deltaQuant                             rec=147e2c0 type=14b1bd0 def=0 (f=0)
+s_fullPreload                            rec=1487930 type=14b0bb0 def=1 (f=1.4013e-45)
+s_shotType                               rec=14882b0 type=14b1bd0 def=3 (f=4.2039e-45)
+s_showStartVideo                         rec=148cbf0 type=14b0bb0 def=1 (f=1.4013e-45)
+scale                                    rec=14806d0 type=760bd0 def=rax
+scenario                                 rec=14853b8 type=9c0090 def=rax
+search_gameType                          rec=14773c0 type=4690c0 def=rax
+see_actors                               rec=14858a8 type=9f2550 def=rax
+see_enemy                                rec=1485898 type=9f24e0 def=rax
+select                                   rec=1485d30 type=a072a0 def=rax
+select                                   rec=148bd70 type=b6b8c0 def=rax
+set_clip                                 rec=1485520 type=9c81d0 def=rax
+set_heater                               rec=147fdf0 type=74fe50 def=rax
+set_i                                    rec=14854e0 type=9c7e80 def=rax
+set_idle_animation                       rec=147fc70 type=747e10 def=rax
+set_skeleton                             rec=1480650 type=760900 def=rax
+settings                                 rec=14769d0 type=3a81f0 def=rax
+shield                                   rec=1482b18 type=91af00 def=rax
+side                                     rec=14859b8 type=9f9bb0 def=rax
+signal                                   rec=147fe90 type=750230 def=rax
+signal                                   rec=1485958 type=9f9950 def=rax
+silhouette                               rec=147ea40 type=6eacf0 def=rax
+skin                                     rec=1483080 type=974080 def=rax
+sky                                      rec=1487c50 type=a4cf20 def=rax
+sky                                      rec=1487c60 type=a4e380 def=rax
+smoke                                    rec=147fc60 type=747dc0 def=rax
+smokescreen                              rec=146e4e0 type=123300 def=rax
+snd_ambientBuffersCount                  rec=14783f0 type=14b1bd0 def=8 (f=1.12104e-44)
+snd_antiReverbThreshold                  rec=14785b0 type=14b1bd0 def=0x32 (f=7.00649e-44)
+snd_cutoffPart                           rec=1478580 type=14b1be8 def=0x3f000000 (f=0.5)
+snd_disable                              rec=1478550 type=14b1bd0 def=0 (f=0)
+snd_keepTime                             rec=1478598 type=14b1be8 def=0x43480000 (f=200)
+snd_maxFilePlayedChannels                rec=1478568 type=14b1bd0 def=3 (f=4.2039e-45)
+snd_maxMediaChannels                     rec=14783c8 type=14b1bd0 def=4 (f=5.60519e-45)
+snd_mediaDisabled                        rec=14783b0 type=14b1bd0 def=0 (f=0)
+snd_rolloff                              rec=14785c8 type=14b1be8 def=0x3f800000 (f=1)
+soldier                                  rec=1482e88 type=957480 def=rax
+soldier.cover_horizontal                 rec=1482d98 type=9490e0 def=rax
+soldier.cover_vertical                   rec=1482db0 type=949950 def=rax
+soldier.outdoors                         rec=1482dc8 type=949ec0 def=rax
+sound                                    rec=14852e8 type=9b92c0 def=rax
+spawn                                    rec=14854f0 type=9c7ef0 def=rax
+spawn_human                              rec=147fa90 type=747320 def=rax
+spawn_point                              rec=14808a0 type=7a3ca0 def=rax
+speaker                                  rec=14809d8 type=7b0a30 def=rax
+speaker/Switch                           rec=14809e8 type=7b0bc0 def=rax
+squad                                    rec=1485610 type=9cfb00 def=rax
+squad_create                             rec=14855f0 type=9cfa30 def=rax
+squad_dismiss                            rec=1485600 type=9cfab0 def=rax
+squad_state                              rec=14855e0 type=9cf9d0 def=rax
+squad_to_waypoint                        rec=14855d0 type=9cf980 def=rax
+stat_notify                              rec=147fe40 type=750060 def=rax
+state.client                             rec=146e090 type=a7c00 def=rax
+store_units                              rec=1485418 type=9c0400 def=rax
+string                                   rec=147df08 type=14b24b0 def=rax
+stuff_detonate                           rec=147fa80 type=7472d0 def=rax
+stunned                                  rec=147fb20 type=7476d0 def=rax
+suppression_fire                         rec=148bfb0 type=b74890 def=rax
+switch                                   rec=1485d00 type=a07160 def=rax
+tags                                     rec=147fe10 type=74ff40 def=rax
+take_off                                 rec=147fa70 type=747260 def=rax
+talk                                     rec=146fad8 type=1a6810 def=rax
+talk                                     rec=147fb70 type=747890 def=rax
+talk                                     rec=1482b48 type=91ce60 def=rax
+talk                                     rec=148bca0 type=b643a0 def=rax
+task                                     rec=1485438 type=9c0680 def=rax
+task                                     rec=1485968 type=9f99c0 def=rax
+tcp_KeepAliveRetransmissions             rec=148d1a8 type=14b1bd0 def=3 (f=4.2039e-45)
+tcp_additionalRTO                        rec=148d208 type=14b1be8 def=rax
+tcp_additionalRetr                       rec=148d220 type=14b1bd0 def=4 (f=5.60519e-45)
+tcp_broadcastSendReadyPriority           rec=148d070 type=14b1bd0 def=0xa (f=1.4013e-44)
+tcp_connectBufferSize                    rec=148d0a0 type=14b1bd0 def=0x40000 (f=3.67342e-40)
+tcp_defaultRTO                           rec=148d0b8 type=14b1be8 def=rax
+tcp_defaultWindowSize                    rec=148d088 type=14b1bd0 def=0x4000 (f=2.29589e-41)
+tcp_delayAckTime                         rec=148d118 type=14b1be8 def=0x41f00000 (f=30)
+tcp_delayAckTimeThreshold                rec=148d148 type=14b1be8 def=0x42c80000 (f=100)
+tcp_delaySendTime                        rec=148d100 type=14b1be8 def=0x41a00000 (f=20)
+tcp_dump_showConnectById                 rec=148d250 type=14b1bd0 def=0xffffffff (f=nan)
+tcp_dump_showConnectionTiming            rec=148d020 type=14b1bd0 def=0 (f=0)
+tcp_dump_showFailedConnects              rec=148d038 type=14b1bd0 def=1 (f=1.4013e-45)
+tcp_dump_showFullInfo                    rec=148d2c8 type=14b1bd0 def=0 (f=0)
+tcp_dump_showRouterInfo                  rec=148d050 type=14b1bd0 def=0 (f=0)
+tcp_excludeRTO                           rec=148d2e8 type=14b1bd0 def=0 (f=0)
+tcp_hostPort                             rec=148cff0 type=14b1bd0 def=0xc8a (f=4.49817e-42)
+tcp_hostPortAdmin                        rec=148cfd8 type=14b1bd0 def=0xc89 (f=4.49677e-42)
+tcp_hostPortMM                           rec=148cfc0 type=14b1bd0 def=0xc88 (f=4.49537e-42)
+tcp_keepAliveTime                        rec=148d190 type=14b1be8 def=rax
+tcp_log_showDataCrc                      rec=148d280 type=14b1bd0 def=0 (f=0)
+tcp_log_showOptions                      rec=148d268 type=14b1bd0 def=0 (f=0)
+tcp_log_showRouterActivation             rec=148d298 type=14b1bd0 def=1 (f=1.4013e-45)
+tcp_log_showRouterActivationExt          rec=148d2b0 type=14b1bd0 def=1 (f=1.4013e-45)
+tcp_log_stateByClose                     rec=148d238 type=14b1bd0 def=0 (f=0)
+tcp_log_trafficDistrRefreshNid           rec=148d400 type=14b1bd0 def=1 (f=1.4013e-45)
+tcp_maxConnectResponseRetransmissions    rec=148d178 type=14b1bd0 def=2 (f=2.8026e-45)
+tcp_maxConnectRetransmissions            rec=148d160 type=14b1bd0 def=2 (f=2.8026e-45)
+tcp_maxDataRetransmissions               rec=148d1f0 type=14b1bd0 def=5 (f=7.00649e-45)
+tcp_maxProbingWindowRetransmissions      rec=148d1c0 type=14b1bd0 def=5 (f=7.00649e-45)
+tcp_probingWindowInterval                rec=148d1d8 type=14b1be8 def=0x447a0000 (f=1000)
+tcp_rcvSocketBuffer                      rec=148d320 type=14b1bd0 def=0x32000 (f=2.86986e-40)
+tcp_resetConnectionTiming                rec=148d008 type=14b1bd0 def=0 (f=0)
+tcp_sendSocketBuffer                     rec=148d308 type=14b1bd0 def=0x19000 (f=1.43493e-40)
+tcp_senderThreadPending                  rec=148d350 type=14b1bd0 def=1 (f=1.4013e-45)
+tcp_smallDelayAckTime                    rec=148d130 type=14b1be8 def=0x40400000 (f=3)
+tcp_socketSpeed                          rec=148d338 type=14b1bd0 def=0 (f=0)
+tcp_stopDispatchToService                rec=14770f8 type=14b1bd0 def=0 (f=0)
+tcp_timeClose                            rec=148d0d0 type=14b1be8 def=rax
+tcp_timeWait                             rec=148d0e8 type=14b1be8 def=rax
+tear                                     rec=14805c0 type=760510 def=rax
+teleport                                 rec=148bee0 type=b6ce20 def=rax
+tex_mod                                  rec=1480680 type=760a10 def=rax
+tex_morph                                rec=1480690 type=760a80 def=rax
+tex_morph                                rec=14806e0 type=760c30 def=rax
+third_person_control                     rec=146fa98 type=1a47e0 def=rax
+thread                                   rec=1485550 type=9c84a0 def=rax
+throw_ap_grenade                         rec=148bf60 type=b745c0 def=rax
+throw_at_grenade                         rec=148bf70 type=b74650 def=rax
+throw_off                                rec=147fbb0 type=7479f0 def=rax
+throw_off                                rec=1485170 type=99e450 def=rax
+throw_on_ground                          rec=147fbd0 type=747ad0 def=rax
+throw_sk_grenade                         rec=148bf80 type=b746e0 def=rax
+thunder                                  rec=1487c78 type=a4f320 def=rax
+timer                                    rec=1476f10 type=3e97b0 def=rax
+timer                                    rec=14853d8 type=9c0290 def=rax
+torpedo                                  rec=14813b0 type=867a30 def=rax
+track                                    rec=1481290 type=85c680 def=rax
+trigger                                  rec=14854d0 type=9c7e30 def=rax
+trigger                                  rec=1485938 type=9f98c0 def=rax
+ui_hintHideDelay                         rec=1488378 type=14b1bd0 def=0xfa0 (f=5.60519e-42)
+ui_hintShowDelay                         rec=1488360 type=14b1bd0 def=0x1f4 (f=7.00649e-43)
+ui_showArmorBar                          rec=1480c80 type=14b0bb0 def=0 (f=0)
+ui_showHealthBar                         rec=1476f60 type=14b0bb0 def=1 (f=1.4013e-45)
+ui_showHealthBar                         rec=1482bb8 type=14b0bb0 def=1 (f=1.4013e-45)
+ui_showSpawnUnitTime                     rec=148dbe8 type=14b0bb0 def=1 (f=1.4013e-45)
+ui_startPage                             rec=148cc20 type=14b24b0 def=rax
+ui_status_top_entry_count                rec=14712c0 type=14b1bd0 def=3 (f=4.2039e-45)
+ui_stuffUidAsName                        rec=148b750 type=14b1bd0 def=0 (f=0)
+ui_testPage                              rec=148cc08 type=14b0bb0 def=0 (f=0)
+ui_tpcDebugLines                         rec=1476ef8 type=14b0bb0 def=0 (f=0)
+undermine                                rec=148bce0 type=b64550 def=rax
+unlink                                   rec=147fc80 type=747e70 def=rax
+unlink                                   rec=14851f8 type=9b15a0 def=rax
+unlink_trailer                           rec=147fcb0 type=747f60 def=rax
+update_shadow                            rec=1480670 type=7609c0 def=rax
+update_visibility_patch                  rec=147fdb0 type=74fd10 def=rax
+use_blend_tex                            rec=14806a0 type=760ae0 def=rax
+use_local_light                          rec=14806b0 type=760b30 def=rax
+v_EIDs                                   rec=1487840 type=14b1bd0 def=0 (f=0)
+v_MIDs                                   rec=1487828 type=14b1bd0 def=0 (f=0)
+v_aiAccess                               rec=14873d8 type=14b1bd0 def=0 (f=0)
+v_aiAttackRate                           rec=1487408 type=14b1bd0 def=0 (f=0)
+v_aiAttackers                            rec=1487390 type=14b0bb0 def=0 (f=0)
+v_aiMorale                               rec=14873c0 type=14b1bd0 def=0 (f=0)
+v_aiRecon                                rec=14873f0 type=14b1bd0 def=0xffffffff (f=nan)
+v_aiRetreat                              rec=14873a8 type=14b1bd0 def=0 (f=0)
+v_aiSearchPoints                         rec=1482de0 type=14b1bd0 def=0 (f=0)
+v_aimGrenade                             rec=1480f08 type=14b0bb0 def=0 (f=0)
+v_aimPoint                               rec=1487480 type=14b1bd0 def=0 (f=0)
+v_aimTarget                              rec=148b550 type=14b1bd0 def=0 (f=0)
+v_aimTraces                              rec=14874c8 type=14b1bd0 def=0 (f=0)
+v_aimZ                                   rec=1487498 type=14b1bd0 def=0 (f=0)
+v_airAttack                              rec=1487600 type=14b1bd0 def=0 (f=0)
+v_areaLand                               rec=1480a58 type=14b1bd0 def=0 (f=0)
+v_areaSpecial                            rec=14872e8 type=14b0bb0 def=0 (f=0)
+v_areaTerritory                          rec=14872d0 type=14b1bd0 def=0 (f=0)
+v_armor                                  rec=14876a8 type=14b0bb0 def=0 (f=0)
+v_asyncPP                                rec=1482558 type=14b0bb0 def=1 (f=1.4013e-45)
+v_axisEntity                             rec=14877c8 type=14b1bd0 def=0 (f=0)
+v_axisWorld                              rec=14871e0 type=14b1bd0 def=0 (f=0)
+v_boarder                                rec=14876c0 type=14b1bd0 def=0 (f=0)
+v_bodyCom                                rec=1487768 type=14b1bd0 def=0 (f=0)
+v_bodyContacts                           rec=14872a0 type=14b1bd0 def=0 (f=0)
+v_bodyParticles                          rec=1487780 type=14b1bd0 def=0 (f=0)
+v_bones                                  rec=147c488 type=14b1bd0 def=0 (f=0)
+v_bonesIk                                rec=147c4f0 type=14b1bd0 def=0 (f=0)
+v_bonesScale                             rec=147c4a0 type=14b1be8 def=0x3f800000 (f=1)
+v_bonesSkeletonScale                     rec=147c4b8 type=14b1be8 def=0x41200000 (f=10)
+v_boxEntity                              rec=1487750 type=14b1bd0 def=0 (f=0)
+v_boxMesh                                rec=147b798 type=14b1bd0 def=0 (f=0)
+v_boxView                                rec=14877b0 type=14b1bd0 def=0 (f=0)
+v_boxWorld                               rec=14871b0 type=14b0bb0 def=0 (f=0)
+v_bulletPath                             rec=1481020 type=14b0bb0 def=0 (f=0)
+v_burning                                rec=1487618 type=14b0bb0 def=0 (f=0)
+v_camAutoLiftingVolume                   rec=148c810 type=14b1bd0 def=0 (f=0)
+v_capturePoints                          rec=14875b8 type=14b1bd0 def=0 (f=0)
+v_colliderId                             rec=1487738 type=14b1bd0 def=0 (f=0)
+v_components                             rec=1487810 type=14b0bb0 def=0 (f=0)
+v_coverCache                             rec=1487240 type=14b1bd0 def=0 (f=0)
+v_coverRanges                            rec=1487210 type=14b1bd0 def=0 (f=0)
+v_coverScores                            rec=1487228 type=14b1bd0 def=0 (f=0)
+v_coverWall                              rec=148b508 type=14b1bd0 def=0 (f=0)
+v_damage                                 rec=14875a0 type=14b1bd0 def=0 (f=0)
+v_dialogs                                rec=1489ab0 type=14b1bd0 def=0 (f=0)
+v_dyingAnimation                         rec=1483020 type=14b1bd0 def=0 (f=0)
+v_entityNames                            rec=1487720 type=14b1bd0 def=0 (f=0)
+v_entitySelection                        rec=148b4f0 type=14b1bd0 def=1 (f=1.4013e-45)
+v_fireLockEnabled                        rec=148b688 type=14b0bb0 def=0 (f=0)
+v_fogVisor                               rec=1487588 type=14b1bd0 def=0 (f=0)
+v_forth                                  rec=14877f8 type=14b1bd0 def=0 (f=0)
+v_gjkPenetration                         rec=148b580 type=14b0bb0 def=0 (f=0)
+v_grenadeMap                             rec=1487378 type=14b0bb0 def=0 (f=0)
+v_gridArea                               rec=1487630 type=14b0bb0 def=0 (f=0)
+v_gridAreaNames                          rec=1487648 type=14b0bb0 def=0 (f=0)
+v_gridEntity                             rec=1487258 type=14b1bd0 def=0 (f=0)
+v_gridShadow                             rec=1487288 type=14b0bb0 def=0 (f=0)
+v_gridView                               rec=1487270 type=14b1bd0 def=0 (f=0)
+v_headAltitude                           rec=1487570 type=14b0bb0 def=0 (f=0)
+v_hmapEx                                 rec=14879f8 type=14b1bd0 def=0 (f=0)
+v_hmapInconstructible                    rec=14879b0 type=14b1bd0 def=5 (f=7.00649e-45)
+v_hmapLand                               rec=1487138 type=14b1bd0 def=0 (f=0)
+v_hmapLevel                              rec=14879e0 type=14b1bd0 def=1 (f=1.4013e-45)
+v_hmapLod                                rec=14879c8 type=14b1bd0 def=0 (f=0)
+v_hmapMode                               rec=1487318 type=14b1bd0 def=0 (f=0)
+v_hmapNormals                            rec=1487a10 type=14b0bb0 def=0 (f=0)
+v_holdback                               rec=1487540 type=14b1bd0 def=0 (f=0)
+v_interior                               rec=1485aa8 type=14b1bd0 def=1 (f=1.4013e-45)
+v_lights                                 rec=14875d0 type=14b1bd0 def=0 (f=0)
+v_locatorPoint                           rec=1482d70 type=14b1bd0 def=0 (f=0)
+v_locatorZone                            rec=1487678 type=14b1bd0 def=0 (f=0)
+v_lookAtPoint                            rec=1487858 type=14b0bb0 def=0 (f=0)
+v_mapPoints                              rec=14878a0 type=14b1bd0 def=0 (f=0)
+v_mineFields                             rec=1487660 type=14b1bd0 def=0 (f=0)
+v_mouseOutScroll                         rec=1488318 type=14b0bb0 def=1 (f=1.4013e-45)
+v_moveMode                               rec=1487888 type=14b1bd0 def=0 (f=0)
+v_oldResources                           rec=1487150 type=14b1bd0 def=1 (f=1.4013e-45)
+v_path                                   rec=1487510 type=14b0bb0 def=0 (f=0)
+v_pathCollision                          rec=14875e8 type=14b1bd0 def=0 (f=0)
+v_pathGrid                               rec=14872b8 type=14b1bd0 def=0 (f=0)
+v_pathGridSize                           rec=1487300 type=14b1bd0 def=0xa (f=1.4013e-44)
+v_pathInsideGrid                         rec=1487798 type=14b1bd0 def=0 (f=0)
+v_pathOffset                             rec=1487528 type=14b0bb0 def=0 (f=0)
+v_patherId                               rec=14877e0 type=14b1bd0 def=0 (f=0)
+v_placementPrediction                    rec=14878d0 type=14b1bd0 def=0 (f=0)
+v_pnet                                   rec=14871f8 type=14b1bd0 def=0 (f=0)
+v_polygonToolHelper                      rec=1487900 type=14b1bd0 def=0 (f=0)
+v_props                                  rec=1487558 type=14b0bb0 def=0 (f=0)
+v_rails                                  rec=1480900 type=14b1bd0 def=0 (f=0)
+v_returnPoint                            rec=1487870 type=14b1bd0 def=0 (f=0)
+v_sensorBasic                            rec=1487330 type=14b0bb0 def=0 (f=0)
+v_sensorCategory                         rec=1487348 type=14b0bb0 def=0 (f=0)
+v_sensorSuspect                          rec=1487360 type=14b1bd0 def=0 (f=0)
+v_shadowCasters                          rec=1487690 type=14b1bd0 def=0 (f=0)
+v_showControlledUnits                    rec=148bf48 type=14b0bb0 def=0 (f=0)
+v_showSooterSpreading                    rec=148b670 type=14b0bb0 def=0 (f=0)
+v_snipingMoveFactor                      rec=1480f68 type=14b1be8 def=0x3c23d70a (f=0.01)
+v_snipingPitchFactor                     rec=1480f50 type=14b1be8 def=0x40a00000 (f=5)
+v_snipingYawFactor                       rec=1480f38 type=14b1be8 def=0x40a00000 (f=5)
+v_squad                                  rec=1487420 type=14b0bb0 def=0 (f=0)
+v_squadNames                             rec=1487438 type=14b0bb0 def=0 (f=0)
+v_supportPoints                          rec=14878b8 type=14b1bd0 def=0 (f=0)
+v_tags                                   rec=1487708 type=14b0bb0 def=0 (f=0)
+v_talks                                  rec=1482b28 type=14b1bd0 def=0 (f=0)
+v_targetClass                            rec=1487450 type=14b1bd0 def=0 (f=0)
+v_targetSelector                         rec=1487468 type=14b1bd0 def=0 (f=0)
+v_thickRay                               rec=148b568 type=14b0bb0 def=0 (f=0)
+v_throwTrajectories                      rec=14874b0 type=14b1bd0 def=0 (f=0)
+v_userBoxWorld                           rec=14871c8 type=14b0bb0 def=0 (f=0)
+v_velocity                               rec=14876f0 type=14b1bd0 def=0 (f=0)
+v_visor                                  rec=14874e0 type=14b1bd0 def=0 (f=0)
+v_visorInfo                              rec=14874f8 type=14b1bd0 def=0 (f=0)
+v_visualizeGrenadeTrace                  rec=1480f20 type=14b0bb0 def=1 (f=1.4013e-45)
+v_volumeDetails                          rec=147cc10 type=14b1bd0 def=0 (f=0)
+v_volumeMode                             rec=14807b8 type=14b1bd0 def=0 (f=0)
+v_volumeNames                            rec=14807d0 type=14b0bb0 def=0 (f=0)
+v_volumeSides                            rec=147cc28 type=14b1bd0 def=0 (f=0)
+v_volumes                                rec=14807a0 type=14b0bb0 def=0 (f=0)
+v_watcher                                rec=14807f8 type=14b0bb0 def=0 (f=0)
+v_weather                                rec=1487c98 type=14b1bd0 def=0 (f=0)
+v_zones                                  rec=14876d8 type=14b1bd0 def=0 (f=0)
+vehicle                                  rec=1484b40 type=98b7e0 def=rax
+vehicle                                  rec=1484be0 type=992be0 def=rax
+vehicle_client                           rec=146e060 type=a7b30 def=rax
+vehicle_health_damage_blast              rec=147fcd0 type=748000 def=rax
+vehicle_health_damage_pierce             rec=147fcc0 type=747fb0 def=rax
+video_overlay                            rec=1487c88 type=a50080 def=rax
+view                                     rec=14805d0 type=7605a0 def=rax
+vision_mode                              rec=1476f78 type=3f5e50 def=rax
+volume                                   rec=147fcf0 type=74f840 def=rax
+volumes                                  rec=147fd10 type=74f8e0 def=rax
+volumes_queue                            rec=147ff10 type=7506a0 def=rax
+wait                                     rec=146f9f8 type=19dbb0 def=rax
+water                                    rec=1475a48 type=36af60 def=rax
+water                                    rec=14764d8 type=37c790 def=rax
+water                                    rec=147d5b0 type=6521a0 def=rax
+water                                    rec=1481390 type=866a50 def=rax
+water                                    rec=14813a0 type=867550 def=rax
+waveWorksXposeProjeMatrix                rec=14766a8 type=14b0bb0 def=0 (f=0)
+waveWorksXposeViewMatrix                 rec=1476690 type=14b0bb0 def=0 (f=0)
+waypoint                                 rec=146fb20 type=1a90f0 def=rax
+waypoint                                 rec=14808b0 type=7a3f10 def=rax
+waypoint_canmove                         rec=14859a8 type=9f9b50 def=rax
+weapon                                   rec=1480b78 type=7d2dc0 def=rax
+weapon_work                              rec=147fb10 type=747660 def=rax
+weaponlight                              rec=1472680 type=323030 def=rax
+weather                                  rec=1487cb0 type=a50c60 def=rax
+wheel                                    rec=14813f8 type=86a4b0 def=rax
+while                                    rec=1485cf0 type=a070e0 def=rax
+wind                                     rec=1487d00 type=a55440 def=rax
+wind_detail_bending                      rec=1480610 type=760760 def=rax
+with_linked_entity                       rec=147fec0 type=7504f0 def=rax

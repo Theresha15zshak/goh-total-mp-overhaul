@@ -1,0 +1,13 @@
+{
+  "name": "goh-online",
+  "main": "src/index.js",
+  "compatibility_date": "2026-10-01",
+  "workers_dev": true,
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "goh-online",
+      "database_id": "38558763-7013-410b-8fb1-60901328826f"
+    }
+  ]
+}

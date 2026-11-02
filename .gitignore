@@ -1,0 +1,19 @@
+# toolchain and build output (tools/build.py)
+.tools/
+build/
+__pycache__/
+
+# the server's packages and local state (npm install / wrangler)
+server/node_modules/
+server/.wrangler/
+
+# made from the game's own files: the exe index and disassembly dumps, the game's layouts in the replay mod
+re/*.pkl
+re/fn_*.txt
+dist/**/replay_unlock/
+
+# binaries and packs: built or taken from elsewhere, handed out as zips
+*.dll
+*.exe
+*.zip
+*.log

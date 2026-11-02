@@ -1,0 +1,67 @@
+Ручная установка (если install.bat не сработал)
+================================================
+
+Перед началом закрой игру полностью.
+
+Папка игры (дальше — ИГРА), обычно:
+  C:\Program Files (x86)\Steam\steamapps\common\Call to Arms - Gates of Hell
+Если не знаешь, где она: Steam -> правой кнопкой по игре -> Управление -> Просмотреть локальные файлы.
+
+
+1. Файлы в ИГРА\binaries\x64
+----------------------------
+  а) В этой папке найди xvidcore.dll (файл игры, около 1 МБ) и переименуй его
+     в xvidcore_orig.dll. Не удаляй: он нужен фиксу реплеев.
+  б) Скопируй туда три файла из папки files этого архива:
+       files\iphlpapi.dll       — сам мод (перемотка, графики, музыка, компетитив)
+       files\xvidcore.dll       — фикс реплеев (около 64 КБ)
+       files\goh_snapshots.ini  — включает мгновенную перемотку
+     Если Windows спросит про замену, соглашайся.
+
+2. Мод replay_unlock в ИГРА\mods
+--------------------------------
+  Скопируй папку files\replay_unlock целиком в ИГРА\mods.
+  Должно получиться:
+    ИГРА\mods\replay_unlock\mod.info
+    ИГРА\mods\replay_unlock\preview.jpg
+    ИГРА\mods\replay_unlock\resource\interface\layout\PageExtras.xml
+    ИГРА\mods\replay_unlock\resource\interface\layout\views\GameResult.xml
+
+3. Включить мод
+---------------
+  Проще всего в самой игре: главное меню -> Моды -> включи replay_unlock -> Применить.
+
+  Или вручную в профиле. Открой Блокнотом файл
+    Документы\My Games\gates of hell\profiles\<номер>\options.set
+  (если номеров несколько, правь каждый). Найди внизу блок:
+    {mods
+        "mod_...:0"
+    }
+  и добавь в него строку "replay_unlock:0":
+    {mods
+        "replay_unlock:0"
+        "mod_...:0"
+    }
+  Если блока {mods нет, добавь его перед последней закрывающей скобкой } файла:
+    {mods
+        "replay_unlock:0"
+    }
+  Сохрани файл.
+
+4. Проверка
+-----------
+  Запусти игру. В главном меню «Дополнительно» -> «Реплеи».
+  Клавиши: F7 — компетитив, F8 — панель реплея, F9 — графики (в реплее и после боя),
+  F10 — музыка.
+  Если игра не запускается: удали iphlpapi.dll из ИГРА\binaries\x64 и пришли
+  ИГРА\binaries\x64\goh_replay.log.
+
+
+Ручное удаление
+===============
+  1. Из ИГРА\binaries\x64 удали iphlpapi.dll, goh_snapshots.ini и xvidcore.dll,
+     затем переименуй xvidcore_orig.dll обратно в xvidcore.dll.
+  2. Удали папку ИГРА\mods\replay_unlock.
+  3. В options.set убери строку "replay_unlock:0" (или выключи мод в меню «Моды»).
+  Если после обновления игры в binaries\x64 лежит большой (около 1 МБ) xvidcore.dll,
+  оставь его, а xvidcore_orig.dll просто удали.
