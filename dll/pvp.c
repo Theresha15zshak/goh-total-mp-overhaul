@@ -471,32 +471,57 @@ static void lb_apply_install(void (*patch)(void *, const void *, size_t)) {
 
 static uint64_t g_tall_listbox;          // the last one made taller (a new one is made each time a lobby opens)
 
-static void tall_walk(uint64_t d, int depth, int in_session, int *budget, uint64_t *listbox) {
-    if (!d || depth > 72 || --*budget < 0 || *listbox) return;
+// the session list and the names in its lines
+typedef struct { uint64_t listbox; void *names[MAX_NAMES]; int n; } SessionFind;
+
+static void tall_walk(uint64_t d, int depth, int in_session, int *budget, SessionFind *f) {
+    if (!d || depth > 72 || --*budget < 0) return;
     uint32_t flags = 0;
     if (!peek((void *)(d + 0x48), &flags, 4) || !(flags & 2)) return;
     uint64_t vt = pq(d);
     if (vt == (uintptr_t)(g_base + VT_SESSION_VIEW)) in_session = 1;
-    if (in_session && vt == (uintptr_t)(g_base + VT_MENU_LISTBOX)) { *listbox = d; return; }
+    if (in_session && vt == (uintptr_t)(g_base + VT_MENU_LISTBOX) && !f->listbox) f->listbox = d;
+    if (in_session && vt == (uintptr_t)(g_base + VT_NAME_VIEW)) { if (f->n < MAX_NAMES) f->names[f->n++] = (void *)(uintptr_t)d; return; }
     uint64_t b = pq(d + 0xd8), e = pq(d + 0xe0);
     if (!b || e < b || e - b > 8 * 4096) return;
-    for (uint64_t p = b; p < e; p += 8) tall_walk(pq(p), depth + 1, in_session, budget, listbox);
+    for (uint64_t p = b; p < e; p += 8) tall_walk(pq(p), depth + 1, in_session, budget, f);
 }
 
+static int rows_now(void **names, int count, LobbyRow *out, int max);
+static int names_alive(void **names, int count);
+// The MMR under the names is drawn on another thread than the one laying the list out: read there, the lines'
+// places were sometimes caught in the middle of a layout and the MMR blinked to a wrong place (2026-11-02). So the
+// places are read here, on the game's thread between its layouts, and the drawing takes the last copy.
+static LobbyRow g_rows[16];
+static int g_rows_n;
+static DWORD g_rows_at;
+static SRWLOCK g_rows_lock = SRWLOCK_INIT;
+
 void pvp_gui_tick(void) {
-    static DWORD at;
-    static uint64_t lb;                  // the session list as last found; checked on every iteration
+    static DWORD at, rows_at;
+    static SessionFind f;                // the session list and its names as last found; checked on every iteration
     DWORD now = GetTickCount();
     if (!g_base) return;
-    if (now - at >= 250) {
+    if (now - at >= 250 || (now - at >= 100 && !names_alive(f.names, f.n))) {   // a new look: in time, or a line made anew
         at = now;
         uint64_t root = pq((uintptr_t)(g_base + G_DESKTOP));
         if (!root || pq(root) != (uintptr_t)(g_base + VT_DESKTOP)) return;
         int budget = 20000;
-        lb = 0;
-        tall_walk(root, 0, 0, &budget, &lb);
+        memset(&f, 0, sizeof f);
+        tall_walk(root, 0, 0, &budget, &f);
     }
-    if (!lb || pq(lb) != (uintptr_t)(g_base + VT_MENU_LISTBOX)) { lb = 0; return; }
+    if (now - rows_at >= 30) {           // the places for the MMR, about thirty times a second
+        rows_at = now;
+        LobbyRow rows[16];
+        int n = rows_now(f.names, f.n, rows, 16);
+        AcquireSRWLockExclusive(&g_rows_lock);
+        memcpy(g_rows, rows, n * sizeof rows[0]);
+        g_rows_n = n;
+        g_rows_at = now;
+        ReleaseSRWLockExclusive(&g_rows_lock);
+    }
+    uint64_t lb = f.listbox;
+    if (!lb || pq(lb) != (uintptr_t)(g_base + VT_MENU_LISTBOX)) { f.listbox = 0; return; }
     int32_t *size = (int32_t *)(uintptr_t)(lb + LB_LINE_SIZE);
     if (size[1] == LINE_H) return;
     if (lb == g_tall_listbox) {          // ours taken back by something the hook did not see
@@ -524,21 +549,17 @@ static int names_alive(void **names, int count) {
     return 1;
 }
 
+// the lines' places as pvp_gui_tick last read them (none if it has not for half a second: not in a lobby)
 int lobby_rows(LobbyRow *out, int max) {
-    scan_names();
-    void *names[MAX_NAMES];
-    AcquireSRWLockShared(&g_names_lock);
-    int count = g_name_count;
-    memcpy(names, g_names, count * sizeof names[0]);
-    ReleaseSRWLockShared(&g_names_lock);
-    if (GetTickCount() - g_scan_at > 100 && !names_alive(names, count)) {     // at most ten looks a second
-        g_scan_at = GetTickCount() - 1000;
-        scan_names();
-        AcquireSRWLockShared(&g_names_lock);
-        count = g_name_count;
-        memcpy(names, g_names, count * sizeof names[0]);
-        ReleaseSRWLockShared(&g_names_lock);
-    }
+    AcquireSRWLockShared(&g_rows_lock);
+    int n = GetTickCount() - g_rows_at < 500 ? (g_rows_n < max ? g_rows_n : max) : 0;
+    memcpy(out, g_rows, n * sizeof out[0]);
+    ReleaseSRWLockShared(&g_rows_lock);
+    return n;
+}
+
+// the game's thread: each name's place, whose it is, and its line's bottom
+static int rows_now(void **names, int count, LobbyRow *out, int max) {
     int n = 0;
     for (int i = 0; i < count && n < max; i++) {
         int32_t x, y, w, h, rw, rh;
