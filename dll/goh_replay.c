@@ -836,12 +836,12 @@ static void __cdecl main_tick(void) {
     }
     case RW_WAIT_MENU:
         if (replay_core()) {
-            if (GetTickCount() - g_rw_t > 60000) rw_fail("Не удалось выйти из реплея.");
+            if (GetTickCount() - g_rw_t > 60000) rw_fail(TR("Не удалось выйти из реплея.", "Could not leave the replay."));
             break;
         }
         if (GetTickCount() - g_rw_t < 1500) break;      // let the exit and the menu page settle
         if (!is_a(g_load_dialog, VT_REPLAYS_DIALOG, 5) || !is_a(g_load_item, VT_REPLAY_INFO, 2)) {
-            rw_fail("Список реплеев изменился, загрузите реплей вручную.");
+            rw_fail(TR("Список реплеев изменился, загрузите реплей вручную.", "The replay list changed, load the replay by hand."));
             break;
         }
         rc_log("rewind: loading the replay again");
@@ -858,7 +858,7 @@ static void __cdecl main_tick(void) {
                 rc_log("rewind: replay is back at %d ms, seeking to %d", now, g_rw_target);
             }
         } else if (GetTickCount() - g_rw_t > 120000) {
-            rw_fail("Реплей не загрузился.");
+            rw_fail(TR("Реплей не загрузился.", "The replay did not load."));
         }
         break;
     }
@@ -1349,7 +1349,7 @@ static void handle_cmd(uintptr_t core) {
         case CMD_POV: g_pov_on = arg != 0; break;
         case CMD_PREPARE:
             if (!arg) prep_finish(core, "stopped");
-            else if (!prep_start(core)) ctl_msg("Снимки ещё готовятся, подождите пару секунд.");
+            else if (!prep_start(core)) ctl_msg(TR("Снимки ещё готовятся, подождите пару секунд.", "Snapshots are still being made, wait a couple of seconds."));
             break;
         case CMD_SEEK: {
             int target = arg < 0 ? 0 : (int)arg, now = game_ms(), snap = g_snapshots ? snap_best(target) : -1;
@@ -1361,19 +1361,19 @@ static void handle_cmd(uintptr_t core) {
                 seek_stop(core);
                 g_seek_after_restore = -1;
                 g_restore_req = target;
-                ctl_msg("Перескакиваю…");
+                ctl_msg(TR("Перескакиваю…", "Jumping…"));
             } else if (snap >= 0 && (target < now || snap > now + 1000)) {
                 // past the prepared stretch: its last snapshot, then play fast to the spot
                 seek_stop(core);
                 g_seek_after_restore = target;
                 g_restore_req = target;
-                ctl_msg("Перескакиваю…");
+                ctl_msg(TR("Перескакиваю…", "Jumping…"));
             } else if (target > now) {
                 seek_start(core, target);
             } else if (!g_rewind_ok) {
-                ctl_msg("Перемотка назад недоступна: код игры не совпал.");
+                ctl_msg(TR("Перемотка назад недоступна: код игры не совпал.", "Seeking back is unavailable: the game's code did not match."));
             } else if (!g_load_item || strcmp(g_load_path, g_ctl.path)) {
-                ctl_msg("Для перемотки назад откройте реплей через «Реплеи» в меню.");
+                ctl_msg(TR("Для перемотки назад откройте реплей через «Реплеи» в меню.", "To seek back, open the replay from \"Replays\" in the menu."));
             } else if (g_rw == RW_NONE) {
                 seek_stop(core);
                 g_rw_target = target;
@@ -1427,7 +1427,7 @@ static DWORD WINAPI worker(LPVOID _) {
                 g_ctl.msg[0] = 0;
                 now = game_ms();
                 if (landed >= 0 && g_seek_after_restore > landed + 300) seek_start(core, g_seek_after_restore);
-                if (landed == -2) ctl_msg("Снимка для этого места нет.");
+                if (landed == -2) ctl_msg(TR("Снимка для этого места нет.", "No snapshot for this point."));
                 g_seek_after_restore = -1;
             }
             if (g_seek_to >= 0) seek_tick(core, now);
@@ -1447,7 +1447,7 @@ static DWORD WINAPI worker(LPVOID _) {
         }
         if (g_rw != RW_NONE) {
             g_ctl.state = ST_REWIND;
-            ctl_msg("Перематываю назад: перезапуск реплея…");
+            ctl_msg(TR("Перематываю назад: перезапуск реплея…", "Seeking back: restarting the replay…"));
         }
         g_ctl.speed = g_speed;
         g_ctl.pov = g_pov_on && g_ctl.has_pov;
@@ -1504,7 +1504,7 @@ static void startup(HMODULE self) {
         return;
     }
     if (memcmp(g_base + SITE_RATIO, RATIO_INS, 9)) {
-        g_ctl.state = ST_ERROR; ctl_msg("Другая версия игры (нужна 1.067), панель выключена.");
+        g_ctl.state = ST_ERROR; ctl_msg(TR("Другая версия игры (нужна 1.067), панель выключена.", "Another game version (1.067 needed), the panel is off."));
         rc_log("unsupported build, nothing patched");
         return;
     }
@@ -1526,7 +1526,7 @@ static void startup(HMODULE self) {
         if (g_snap_test) rc_log("snapshots: test armed (at %d s of a replay, jump back to %d s)", TEST_AT_MS / 1000, TEST_BACK_MS / 1000);
     }
     AddVectoredExceptionHandler(1, fault_log);   // the first faults land in our log, whatever is on
-    if (!near_page()) { g_ctl.state = ST_ERROR; ctl_msg("Нет памяти рядом с игрой."); return; }
+    if (!near_page()) { g_ctl.state = ST_ERROR; ctl_msg(TR("Нет памяти рядом с игрой.", "No memory near the game.")); return; }
     g_cell = (float *)page_alloc(16);
     g_force_ratio = page_alloc(16);
     *g_cell = 1.0f;

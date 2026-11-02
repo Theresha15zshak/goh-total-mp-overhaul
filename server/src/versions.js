@@ -17,15 +17,16 @@ export async function text(env) {
 
 export async function page(env) {
   const rows = (await list(env)).map(v => `<tr${v.current ? ' class="cur"' : ''}><td>${esc(v.version)}</td><td>${esc(v.kind)}</td>
-<td>${new Date(v.released_at * 1000).toISOString().slice(0, 10)}</td><td>${v.current ? 'текущая' : 'старая'}</td><td><code>${esc(v.sha256)}</code></td></tr>`).join('');
+<td>${new Date(v.released_at * 1000).toISOString().slice(0, 10)}</td><td>${v.current ? 'текущая / current' : 'старая / old'}</td><td><code>${esc(v.sha256)}</code></td></tr>`).join('');
   return new Response(`<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width">
-<title>GoH mod: официальные сборки</title>
+<title>GoH mod: официальные сборки / official builds</title>
 <style>body{font:15px system-ui;margin:24px;background:#16181c;color:#ddd}td,th{padding:4px 10px;text-align:left}
 code{font-size:12px;word-break:break-all}.cur td{color:#d9a441}pre{background:#0d0e10;padding:10px;overflow:auto}</style>
-<h1>Официальные сборки мода</h1>
-<p>Проверить свой файл (PowerShell или командная строка):</p>
+<h1>Официальные сборки мода / Official builds of the mod</h1>
+<p>Проверить свой файл (PowerShell или командная строка) / Check your file (PowerShell or the command prompt):</p>
 <pre>certutil -hashfile "...\\Call to Arms - Gates of Hell\\binaries\\x64\\iphlpapi.dll" SHA256</pre>
-<p>Хеш должен совпасть с одной из строк ниже. Если нет, файл не официальный.</p>
-<table><tr><th>Версия</th><th>Сборка</th><th>Дата</th><th></th><th>SHA-256</th></tr>${rows}</table>`,
+<p>Хеш должен совпасть с одной из строк ниже. Если нет, файл не официальный.<br>
+The hash must match one of the lines below. If it does not, the file is not official.</p>
+<table><tr><th>Версия / Version</th><th>Сборка / Build</th><th>Дата / Date</th><th></th><th>SHA-256</th></tr>${rows}</table>`,
     { headers: { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' } });
 }

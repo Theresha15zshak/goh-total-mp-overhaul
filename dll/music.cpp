@@ -23,7 +23,9 @@ volatile long g_music_stop_vanilla;
 
 // level 0 is the main menu playlist (it also plays over loading screens)
 static const char *LEVEL_DIR[4] = {"main theme", "calm", "tension", "battle"};
-static const char *LEVEL_NAME[4] = {"главное меню", "спокойно", "напряжение", "бой"};
+static const char *LEVEL_RU[4] = {"главное меню", "спокойно", "напряжение", "бой"};
+static const char *LEVEL_EN[4] = {"main menu", "calm", "tension", "battle"};
+#define LEVEL_NAME (lang_en() ? LEVEL_EN : LEVEL_RU)
 
 // ---- tuning ----------------------------------------------------------------------------------------
 // heat: +1 for every unit lost by anyone, fading with this time constant (game seconds)
@@ -385,13 +387,13 @@ static void menu() {
         double played = d->played();
         if (d->length > 30 && played >= d->length - 1.0 && d->target > 0) d->fade(0, 1.0);
         int left = d->length > 0 ? (int)(d->length - played) : -1;
-        if (left >= 0) status("Главное меню \xC2\xB7 %s \xC2\xB7 %d:%02d", d->name.c_str(), left / 60, left % 60);
-        else status("Главное меню \xC2\xB7 %s", d->name.c_str());
+        if (left >= 0) status(TR("Главное меню · %s · %d:%02d", "Main menu · %s · %d:%02d"), d->name.c_str(), left / 60, left % 60);
+        else status(TR("Главное меню · %s", "Main menu · %s"), d->name.c_str());
         return;
     }
     if (d) { d->close(); g_cur = -1; g_music.level = 0; g_menu_next = t + frange(2, 4); }
     if (t >= g_menu_next && !open_track(MUS_MENU, 3)) g_menu_next = t + 10;
-    status("Главное меню");
+    status("%s", TR("Главное меню", "Main menu"));
 }
 
 static void director() {
@@ -404,7 +406,7 @@ static void director() {
             rc_log("music: quiet while the replay is prepared");
         }
         g_menu_request = 0;
-        status("Тихо: реплей готовится");
+        status("%s", TR("Тихо: реплей готовится", "Quiet: the replay is being prepared"));
         return;
     }
     bool want = g_music.enabled && g_in_match && total_tracks() > 0;
@@ -423,9 +425,9 @@ static void director() {
         }
         menu();
         if (g_menu_on) return;
-        if (!g_music.enabled) status("Выключено");
-        else if (!total_tracks() && !g_music.tracks[MUS_MENU]) status("Нет треков: положите файлы в папку music");
-        else status("Ждёт боя");
+        if (!g_music.enabled) status("%s", TR("Выключено", "Off"));
+        else if (!total_tracks() && !g_music.tracks[MUS_MENU]) status("%s", TR("Нет треков: положите файлы в папку music", "No tracks: put files in the music folder"));
+        else status("%s", TR("Ждёт боя", "Waiting for a battle"));
         return;
     }
     if (g_mode == M_OFF) {               // a battle starts: hush the game's music, begin quietly
@@ -448,12 +450,12 @@ static void director() {
     switch (g_mode) {
     case M_WAIT:
         if (t >= g_until) start_track(g_target, FADE_IN);
-        status("Пауза между треками \xC2\xB7 %s", LEVEL_NAME[g_target]);
+        status(TR("Пауза между треками · %s", "Pause between tracks · %s"), LEVEL_NAME[g_target]);
         break;
     case M_SILENCE:
         // fighting flares up during the silence: break it, but not in the first seconds
         if (t >= g_until || (g_target > g_silence_level && t - g_silence_from >= 6)) start_track(g_target, FADE_IN);
-        else status("Тишина %.0f с \xC2\xB7 %s", g_until - t, LEVEL_NAME[g_target]);
+        else status(TR("Тишина %.0f с · %s", "Silence %.0f s · %s"), g_until - t, LEVEL_NAME[g_target]);
         break;
     case M_PLAY: {
         Deck &d = g_deck[g_cur];
@@ -487,13 +489,13 @@ static void director() {
 
 static DWORD WINAPI audio_thread(LPVOID) {
     CoInitializeEx(nullptr, COINIT_MULTITHREADED);
-    if (FAILED(MFStartup(MF_VERSION, MFSTARTUP_LITE))) { rc_log("music: Media Foundation unavailable"); status("Media Foundation недоступен"); return 0; }
+    if (FAILED(MFStartup(MF_VERSION, MFSTARTUP_LITE))) { rc_log("music: Media Foundation unavailable"); status("%s", TR("Media Foundation недоступен", "Media Foundation unavailable")); return 0; }
     HMODULE xa = LoadLibraryA("xaudio2_9.dll");
     auto create = xa ? (HRESULT(WINAPI *)(IXAudio2 **, UINT32, XAUDIO2_PROCESSOR))GetProcAddress(xa, "XAudio2Create") : nullptr;
     if (!create || FAILED(create(&g_xa, 0, XAUDIO2_DEFAULT_PROCESSOR)) ||
         FAILED(g_xa->CreateMasteringVoice(&g_master, XAUDIO2_DEFAULT_CHANNELS, XAUDIO2_DEFAULT_SAMPLERATE, 0, nullptr, nullptr, AudioCategory_GameMedia))) {
         rc_log("music: XAudio2 unavailable");
-        status("XAudio2 недоступен");
+        status("%s", TR("XAudio2 недоступен", "XAudio2 unavailable"));
         return 0;
     }
     g_rng ^= GetTickCount();
@@ -516,7 +518,7 @@ extern "C" void music_start(const char *dir) {
     snprintf(ini, sizeof ini, "%sgoh_music.ini", g_dir);
     g_music.enabled = GetPrivateProfileIntA("music", "enabled", 0, ini);     // off until the player turns it on (F10)
     g_music.volume = GetPrivateProfileIntA("music", "volume", 70, ini) / 100.f;
-    status("Ждёт боя");
+    status("%s", TR("Ждёт боя", "Waiting for a battle"));
     CloseHandle(CreateThread(nullptr, 0, audio_thread, nullptr, 0, nullptr));
 }
 

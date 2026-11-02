@@ -113,6 +113,11 @@ int balance_install(uint8_t *exe, const char *dir, uint8_t *(*alloc)(size_t), vo
 void balance_tick(void);                    // worker: logs what each roster copy holds after a change
 void balance_dump(const char *why);
 
+// ---- the mod's language (online.c): Russian or English, as the game's language in Steam (Windows' until Steam
+// is up); goh_online.ini [ui] language=ru|en sets it by hand. Every text of ours is TR("по-русски", "in English").
+int lang_en(void);
+#define TR(ru, en) (lang_en() ? (en) : (ru))
+
 // ---- who is online with the mod (online.c, our server goh-online) ----
 #define ONLINE_MAX 200
 #define ONLINE_NAME 132             // Steam names are up to 32 characters of UTF-8

@@ -21,14 +21,15 @@ const CHANNELS = new Set(['ru', 'en']);
 const MAX_TEXT = 300, SLOW_MS = 2000, PAGE = 100;
 const BURST_MS = 30000, BURST = 5, REPEAT_MS = 60000;     // at most 5 messages in 30 s; the same text again after a minute
 
-// Links: only to these sites (and their subdomains); any other address in a message becomes "[ссылка удалена]".
+// Links: only to these sites (and their subdomains); any other address in a message becomes "[ссылка удалена]"
+// ("[link removed]" in the English channel).
 // An address is anything with "://", "www." or a name.tld (Latin letters), with or without a path.
 const ALLOWED_LINKS = ['discord.gg', 'youtube.com', 'youtu.be'];
 const LINK = /\b(?:[a-z][a-z0-9+.-]*:\/\/\S+|www\.\S+|(?:[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.)+[a-z]{2,}(?::\d+)?(?:[\/?#]\S*)?)/gi;
-export function cleanLinks(text) {
+export function cleanLinks(text, ch = 'ru') {
   return text.replace(LINK, m => {
     const host = m.replace(/^[a-z][a-z0-9+.-]*:\/\//i, '').split(/[\/?#:]/)[0].toLowerCase();
-    return ALLOWED_LINKS.some(d => host === d || host.endsWith('.' + d)) ? m : '[ссылка удалена]';
+    return ALLOWED_LINKS.some(d => host === d || host.endsWith('.' + d)) ? m : ch === 'en' ? '[link removed]' : '[ссылка удалена]';
   });
 }
 
@@ -93,7 +94,7 @@ export async function write(req, env) {
   const body = await req.text();
   if (body.length > 2048) return [413, 'too big'];
   const [id, key, ch, ...rest] = body.split('\n');
-  const text = cleanLinks(Array.from(rest.join(' ').replace(/[\u0000-\u001f\u007f]/g, ' ').trim()).slice(0, MAX_TEXT).join(''));
+  const text = cleanLinks(Array.from(rest.join(' ').replace(/[\u0000-\u001f\u007f]/g, ' ').trim()).slice(0, MAX_TEXT).join(''), ch);
   if (!CHANNELS.has(ch) || !text) return [400, 'bad'];
   const p = await player(env, id, key);
   if (!p) return [403, 'unknown key'];

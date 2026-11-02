@@ -1,0 +1,43 @@
+Manual install (if install.bat did not work)
+============================================
+
+Close the game completely first.
+
+The game folder (GAME below), usually:
+  C:\Program Files (x86)\Steam\steamapps\common\Call to Arms - Gates of Hell
+If you don't know where it is: Steam -> right click the game -> Manage -> Browse local files.
+
+
+1. Files into GAME\binaries\x64
+------------------------------
+  a) Find xvidcore.dll there (the game's file, about 1 MB) and rename it to xvidcore_orig.dll.
+     Don't delete it: the replay fix needs it.
+  b) Copy three files from the "files" folder of this archive there:
+       files\iphlpapi.dll       - the mod itself
+       files\xvidcore.dll       - the replay fix (about 64 KB)
+       files\goh_snapshots.ini  - turns on instant replay seeking
+     If Windows asks about replacing, say yes.
+
+2. If you had my replay_unlock mod before
+-----------------------------------------
+  It is not needed any more (the Replays tab is in iphlpapi.dll now):
+  delete the folder GAME\mods\replay_unlock and turn it off in the game's Mods menu.
+
+3. Check
+--------
+  Start the game. The mod asks about the online list and offers to sign in through Steam.
+  Multiplayer -> Internet: the PVP button and the global chat above the friends.
+  Bottom left in the menus: "Official build, latest version".
+  Keys: F6 - online, F7 - competitive, F8 - replay panel, F9 - charts.
+  If the game does not start: delete iphlpapi.dll from GAME\binaries\x64 and send
+  GAME\binaries\x64\goh_replay.log.
+
+
+Manual removal
+==============
+  1. Delete iphlpapi.dll, goh_snapshots.ini, goh_online.ini and xvidcore.dll from GAME\binaries\x64,
+     then rename xvidcore_orig.dll back to xvidcore.dll.
+     You can delete the rest the mod made too: goh_*.ini, goh_*.log, goh_balance_profile_*.bin.
+  2. If after a game update a big (about 1 MB) xvidcore.dll is in binaries\x64, keep it and just delete
+     xvidcore_orig.dll.
+  The key Documents\My Games\gates of hell\goh_mod_key.txt can stay: you need it if you come back.

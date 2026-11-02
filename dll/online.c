@@ -43,6 +43,33 @@ static volatile long g_beat_now;   // consent just given: send at once
 
 const char *online_my_id(void) { return g_id; }
 
+// ---- the language: the ini's if set, else the game's in Steam, else Windows' ---------------------------------
+static volatile long g_lang = -1;              // 0 Russian, 1 English, -1 not decided yet
+
+static int russian_lang(const char *steam) {
+    return !strcmp(steam, "russian") || !strcmp(steam, "ukrainian") || !strcmp(steam, "belarusian");
+}
+
+int lang_en(void) {
+    long v = g_lang;
+    if (v >= 0) return (int)v;
+    LANGID l = PRIMARYLANGID(GetUserDefaultUILanguage());
+    return !(l == LANG_RUSSIAN || l == LANG_UKRAINIAN || l == LANG_BELARUSIAN);
+}
+
+static void lang_decide(void) {
+    char set[8] = "";
+    GetPrivateProfileStringA("ui", "language", "", set, sizeof set, g_ini);
+    if (!_stricmp(set, "ru") || !_stricmp(set, "en")) { g_lang = !_stricmp(set, "en"); rc_log("ui: language %s (goh_online.ini)", set); return; }
+    HMODULE h = GetModuleHandleA("steam_api64.dll");
+    void *(*apps_if)(void) = h ? (void *(*)(void))GetProcAddress(h, "SteamAPI_SteamApps_v008") : NULL;
+    const char *(*cur)(void *) = h ? (const char *(*)(void *))GetProcAddress(h, "SteamAPI_ISteamApps_GetCurrentGameLanguage") : NULL;
+    void *apps = apps_if ? apps_if() : NULL;
+    const char *steam = apps && cur ? cur(apps) : NULL;
+    if (steam && *steam) g_lang = !russian_lang(steam);
+    rc_log("ui: language %s (the game's in Steam: %s)", lang_en() ? "en" : "ru", steam && *steam ? steam : "unknown, Windows' then");
+}
+
 // a SteamID as the server sends it: 17 digits, nothing else (it ends up in steam:// addresses)
 int steam_id_ok(const char *s) { return s && strlen(s) == 17 && strspn(s, "0123456789") == 17 && !strncmp(s, "7656119", 7); }
 
@@ -328,7 +355,7 @@ static void chat_tick(HINTERNET s, char *buf) {
     ReleaseSRWLockExclusive(&g_chat_lock);
     if ((out[0] || mod[0]) && (g_online_consent != 1 || !g_key[0])) {
         AcquireSRWLockExclusive(&g_chat_lock);
-        snprintf(g_chat_st.sent, sizeof g_chat_st.sent, "нужно согласие на онлайн (F6)");
+        snprintf(g_chat_st.sent, sizeof g_chat_st.sent, "%s", TR("нужно согласие на онлайн (F6)", "online consent needed (F6)"));
         ReleaseSRWLockExclusive(&g_chat_lock);
         out[0] = mod[0] = 0;
     }
@@ -336,10 +363,11 @@ static void chat_tick(HINTERNET s, char *buf) {
     if (out[0]) {
         snprintf(body, sizeof body, "%s\n%s\n%s\n%s", g_id, g_key, CHAT_CH[out_ch], out);
         int st = http(s, L"POST", L"/chat", body, buf);
-        const char *why = st == 200 ? "" : !strcmp(buf, "flood") ? "слишком много сообщений подряд, подождите" :
-                          !strcmp(buf, "repeat") ? "это сообщение уже было" : st == 429 ? "не так часто" :
-                          !strncmp(buf, "muted", 5) ? "вам запрещено писать" : !strcmp(buf, "banned") ? "вы забанены в чате" :
-                          st == 403 ? "сервер не знает ваш ключ" : "не отправлено";
+        const char *why = st == 200 ? "" : !strcmp(buf, "flood") ? TR("слишком много сообщений подряд, подождите", "too many messages in a row, wait") :
+                          !strcmp(buf, "repeat") ? TR("это сообщение уже было", "you already sent that") : st == 429 ? TR("не так часто", "not so often") :
+                          !strncmp(buf, "muted", 5) ? TR("вам запрещено писать", "you may not write") :
+                          !strcmp(buf, "banned") ? TR("вы забанены в чате", "you are banned from the chat") :
+                          st == 403 ? TR("сервер не знает ваш ключ", "the server does not know your key") : TR("не отправлено", "not sent");
         AcquireSRWLockExclusive(&g_chat_lock);
         snprintf(g_chat_st.sent, sizeof g_chat_st.sent, "%s", why);
         ReleaseSRWLockExclusive(&g_chat_lock);
@@ -498,6 +526,7 @@ static void integrity_check(HINTERNET s, char *buf) {
 static DWORD WINAPI online_thread(LPVOID unused) {
     load_key();
     while (!steam_me()) Sleep(2000);
+    lang_decide();
     steam_lobby_watch();
     pvp_lobby_pings();
     rc_log("online: steam user %s found", g_id);

@@ -50,7 +50,7 @@ export async function start(req, env, origin) {
 
 export function toSteam(url) {
   const t = url.searchParams.get('t') || '';
-  if (!/^[0-9a-f]{48}$/.test(t)) return page('Ссылка неверна', '<p>Откройте вход заново из игры.</p>', 400);
+  if (!/^[0-9a-f]{48}$/.test(t)) return page('Ссылка неверна / Wrong link', '<p>Откройте вход заново из игры.<br>Start the sign-in again from the game.</p>', 400);
   const q = new URLSearchParams({
     'openid.ns': 'http://specs.openid.net/auth/2.0',
     'openid.mode': 'checkid_setup',
@@ -65,21 +65,21 @@ export function toSteam(url) {
 export async function back(url, env) {
   const t = url.searchParams.get('t') || '';
   const p = url.searchParams;
-  const fail = why => page('Не получилось', `<p>${why}</p><p>Откройте вход заново из игры.</p>`, 400);
+  const fail = (why, en) => page('Не получилось / It did not work', `<p>${why}<br>${en}</p><p>Откройте вход заново из игры.<br>Start the sign-in again from the game.</p>`, 400);
   if (!/^[0-9a-f]{48}$/.test(t) || p.get('openid.mode') !== 'id_res' || p.get('openid.op_endpoint') !== STEAM_LOGIN ||
       p.get('openid.return_to') !== `${url.origin}/verify/back?t=${t}`)
-    return fail('Steam ответил не то, что ждали.');
+    return fail('Steam ответил не то, что ждали.', 'Steam answered something unexpected.');
   const m = CLAIMED.exec(p.get('openid.claimed_id') || '');
-  if (!m || p.get('openid.identity') !== p.get('openid.claimed_id')) return fail('Steam не назвал аккаунт.');
+  if (!m || p.get('openid.identity') !== p.get('openid.claimed_id')) return fail('Steam не назвал аккаунт.', 'Steam named no account.');
   const now = Math.floor(Date.now() / 1000);
   const tok = await env.DB.prepare('SELECT key_hash, at FROM verify_tokens WHERE token = ?1').bind(t).first();
-  if (!tok || tok.at < now - TOKEN_S) return fail('Ссылка устарела.');
+  if (!tok || tok.at < now - TOKEN_S) return fail('Ссылка устарела.', 'The link has expired.');
   // Steam itself says whether it signed this answer
   const check = new URLSearchParams();
   for (const [k, v] of p) if (k.startsWith('openid.')) check.set(k, v);
   check.set('openid.mode', 'check_authentication');
   const r = await fetch(STEAM_LOGIN, { method: 'POST', body: check, headers: { 'content-type': 'application/x-www-form-urlencoded' } });
-  if (!r.ok || !/^is_valid\s*:\s*true\s*$/m.test(await r.text())) return fail('Steam не подтвердил вход.');
+  if (!r.ok || !/^is_valid\s*:\s*true\s*$/m.test(await r.text())) return fail('Steam не подтвердил вход.', 'Steam did not confirm the sign-in.');
   const id = m[1];
   await env.DB.batch([
     env.DB.prepare('DELETE FROM verify_tokens WHERE token = ?1').bind(t),
@@ -88,8 +88,10 @@ export async function back(url, env) {
        ON CONFLICT(steam_id) DO UPDATE SET key_hash = ?2, verified_at = ?3`
     ).bind(id, tok.key_hash, now),
   ]);
-  return page('Готово', `<p>Аккаунт Steam <b>${id}</b> подтверждён. Можно закрыть эту страницу и вернуться в игру.</p>
-<p style="color:#999">Если в игре вы под другим аккаунтом Steam, войдите здесь под ним и повторите.</p>`);
+  return page('Готово / Done', `<p>Аккаунт Steam <b>${id}</b> подтверждён. Можно закрыть эту страницу и вернуться в игру.</p>
+<p>Steam account <b>${id}</b> is confirmed. You can close this page and go back to the game.</p>
+<p style="color:#999">Если в игре вы под другим аккаунтом Steam, войдите здесь под ним и повторите.<br>
+If the game runs under another Steam account, sign in with that one here and try again.</p>`);
 }
 
 export async function status(req, env) {

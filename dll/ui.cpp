@@ -35,6 +35,8 @@ static volatile bool g_balance_win;     // balance switch: F7
 #endif
 static volatile bool g_online_win;      // who is online with the mod: F6
 static bool g_chat_tab;                 // the lobby's chat panel shows our GLOBAL CHAT tab (lobby_chat_tab)
+static float g_integrity_top;           // where the version box starts on the screen (pixels): the "about" window sits above
+static bool about_shown();
 static volatile bool g_chat_drawn;      // the global chat was drawn this frame: mouse and keyboard over it are ours
 static volatile bool g_pvp_drawn;       // the PVP block over the game list was drawn this frame: the mouse over it is ours
 static ImFont *g_game_font;             // the game's anka 15 (the game list's rows), loaded from interface.pak
@@ -113,7 +115,7 @@ static void hotkeys() {
 static LRESULT CALLBACK wndproc(HWND h, UINT m, WPARAM w, LPARAM l) {
     if (g_ready) {
         if (panel_shown() || charts_shown() || music_shown() || prep_shown() || balance_shown() || online_shown() ||
-            consent_shown() || login_shown() || g_pvp_drawn || g_chat_drawn) {
+            consent_shown() || login_shown() || about_shown() || g_pvp_drawn || g_chat_drawn) {
             ImGui_ImplWin32_WndProcHandler(h, m, w, l);
             // typing into our chat line: the keys are not the game's
             if (ImGui::GetIO().WantTextInput && ((m >= WM_KEYFIRST && m <= WM_KEYLAST) || (m == WM_INPUT && raw_keyboard(l))))
@@ -148,7 +150,7 @@ static void panel() {
         return;
     }
 
-    if (ImGui::Button(c.paused ? "\xD0\x9F\xD1\x83\xD1\x81\xD0\xBA" : "\xD0\x9F\xD0\xB0\xD1\x83\xD0\xB7\xD0\xB0", ImVec2(70 * k, 0)))   // Пуск / Пауза
+    if (ImGui::Button(c.paused ? TR("Пуск", "Play") : TR("Пауза", "Pause"), ImVec2(70 * k, 0)))
         rc_send(CMD_PAUSE, c.paused ? 0 : 1);
     for (int i = 0; i < (int)(sizeof SPEEDS / sizeof SPEEDS[0]); i++) {
         ImGui::SameLine(0, i ? 2 * k : 10 * k);
@@ -158,24 +160,26 @@ static void panel() {
         if (cur) ImGui::PopStyleColor();
     }
     ImGui::SameLine(0, 10 * k);
-    if (ImGui::Button("+30\xD1\x81")) rc_send(CMD_SEEK, c.game_ms + 30000.0);    // +30с
+    if (ImGui::Button(TR("+30с", "+30s"))) rc_send(CMD_SEEK, c.game_ms + 30000.0);
     ImGui::SameLine(0, 2 * k);
-    if (ImGui::Button("+2\xD0\xBC")) rc_send(CMD_SEEK, c.game_ms + 120000.0);    // +2м
+    if (ImGui::Button(TR("+2м", "+2m"))) rc_send(CMD_SEEK, c.game_ms + 120000.0);
     if (c.snap_state == 2) {             // snapshots: the whole replay can be made instant
         ImGui::SameLine(0, 10 * k);
         if (c.preparing) {
-            if (ImGui::Button("Стоп")) rc_send(CMD_PREPARE, 0);
+            if (ImGui::Button(TR("Стоп", "Stop"))) rc_send(CMD_PREPARE, 0);
         } else if (SHOW_PREPARE && (!c.duration_s || c.snap_to_ms < c.duration_s * 1000 - 30000)) {   // hidden for now
-            if (ImGui::Button("Подготовить")) rc_send(CMD_PREPARE, 1);
+            if (ImGui::Button(TR("Подготовить", "Prepare"))) rc_send(CMD_PREPARE, 1);
             if (ImGui::IsItemHovered())
-                ImGui::SetTooltip("Прогнать реплей до конца на максимальной скорости и вернуться сюда.\n"
-                                  "После этого любая точка шкалы открывается сразу.");
+                ImGui::SetTooltip("%s", TR("Прогнать реплей до конца на максимальной скорости и вернуться сюда.\n"
+                                         "После этого любая точка шкалы открывается сразу.",
+                                         "Run the replay to its end at full speed and come back here.\n"
+                                         "After that any point of the bar opens at once."));
         }
     }
     if (c.has_pov) {                    // our own camera was recorded for this game
         ImGui::SameLine(0, 10 * k);
         if (c.pov) ImGui::PushStyleColor(ImGuiCol_Text, ACCENT);
-        if (ImGui::Button("\xD0" "\x92" "\xD0" "\xB8" "\xD0" "\xB4 " "\xD0" "\xB8" "\xD0" "\xB3" "\xD1" "\x80" "\xD0" "\xBE" "\xD0" "\xBA" "\xD0" "\xB0 (" "\xD1" "\x80" "\xD0" "\xB0" "\xD0" "\xB1" "\xD0" "\xBE" "\xD1" "\x82" "\xD0" "\xB0" "\xD0" "\xB5" "\xD1" "\x82 " "\xD1" "\x82" "\xD0" "\xBE" "\xD0" "\xBB" "\xD1" "\x8C" "\xD0" "\xBA" "\xD0" "\xBE " "\xD0" "\xB4" "\xD0" "\xBB" "\xD1" "\x8F " "\xD0" "\xB2" "\xD0" "\xB0" "\xD1" "\x88" "\xD0" "\xB5" "\xD0" "\xB3" "\xD0" "\xBE " "\xD0" "\xB8" "\xD0" "\xB3" "\xD1" "\x80" "\xD0" "\xBE" "\xD0" "\xBA" "\xD0" "\xB0)")) rc_send(CMD_POV, c.pov ? 0 : 1);   // Вид игрока (работает только для вашего игрока)
+        if (ImGui::Button(TR("Вид игрока (работает только для вашего игрока)", "Player view (your own player only)"))) rc_send(CMD_POV, c.pov ? 0 : 1);
         if (c.pov) ImGui::PopStyleColor();
     }
     char now[16], total[16];
@@ -207,7 +211,7 @@ static void panel() {
             fmt_time(a, sizeof a, at / 1000);
             if (snap >= 0 && at < c.snap_to_ms + SNAP_EVERY_MS && !(snap <= c.game_ms && c.game_ms < at)) {
                 fmt_time(b, sizeof b, snap / 1000);
-                ImGui::SetTooltip("%s â %s, ÑÑÐ°Ð·Ñ", a, b);   // "a → b, сразу"
+                ImGui::SetTooltip(TR("%s → %s, сразу", "%s → %s, instantly"), a, b);
             } else {
                 ImGui::SetTooltip("%s", a);
             }
@@ -239,41 +243,41 @@ static void panel() {
             fmt_time(at, sizeof at, c.game_ms / 1000);
             if (c.duration_s && c.rate >= 1) {
                 int left = (int)((c.duration_s * 1000.f - c.game_ms) / 1000.f / c.rate / 60.f + 0.99f);
-                ImGui::TextDisabled("Готовлю перемотку: %s, %d%% \xC2\xB7 \xC3\x97%.0f \xC2\xB7 ещё ~%d мин", at,
+                ImGui::TextDisabled(TR("Готовлю перемотку: %s, %d%% · ×%.0f · ещё ~%d мин", "Preparing jumps: %s, %d%% · ×%.0f · ~%d min left"), at,
                                     (int)((int64_t)c.game_ms * 100 / (c.duration_s * 1000)), c.rate, left < 1 ? 1 : left);
             } else {
-                ImGui::TextDisabled("Готовлю перемотку: %s \xC2\xB7 \xC3\x97%.0f", at, c.rate);
+                ImGui::TextDisabled(TR("Готовлю перемотку: %s · ×%.0f", "Preparing jumps: %s · ×%.0f"), at, c.rate);
             }
         } else if (c.rate >= 1) {
             int left = (int)((c.seek_target_ms - c.game_ms) / 1000.f / c.rate + 0.5f);
-            ImGui::TextDisabled("Перематываю к %s\xE2\x80\xA6 %d%% \xC2\xB7 \xC3\x97%.0f \xC2\xB7 ещё ~%d с", t, pct, c.rate, left < 0 ? 0 : left);
+            ImGui::TextDisabled(TR("Перематываю к %s… %d%% · ×%.0f · ещё ~%d с", "Seeking to %s… %d%% · ×%.0f · ~%d s left"), t, pct, c.rate, left < 0 ? 0 : left);
         } else {
-            ImGui::TextDisabled("Перематываю к %s\xE2\x80\xA6 %d%%", t, pct);
+            ImGui::TextDisabled(TR("Перематываю к %s… %d%%", "Seeking to %s… %d%%"), t, pct);
         }
     } else if (c.msg[0]) {
         ImGui::TextDisabled("%s", c.msg);
     } else {
-        ImGui::TextDisabled("%s \xC2\xB7 %s", name, c.paused ? "\xD0\xBF\xD0\xB0\xD1\x83\xD0\xB7\xD0\xB0" : "");   // name · пауза
+        ImGui::TextDisabled("%s \xC2\xB7 %s", name, c.paused ? TR("пауза", "paused") : "");
         if (!c.paused) { ImGui::SameLine(0, 0); ImGui::TextDisabled("%g\xC3\x97", c.speed); }
         if (c.snap_state == 1) {
             ImGui::SameLine(0, 10 * k);
-            ImGui::TextDisabled("\xC2\xB7 готовлю мгновенную перемотку\xE2\x80\xA6");
+            ImGui::TextDisabled("%s", TR("· готовлю мгновенную перемотку…", "· preparing instant jumps…"));
         } else if (c.snap_state == 2 && c.snap_from_ms >= 0) {
             char a[16], b[16];
             fmt_time(a, sizeof a, c.snap_from_ms / 1000);
             fmt_time(b, sizeof b, c.snap_to_ms / 1000);
             ImGui::SameLine(0, 10 * k);
-            ImGui::TextDisabled("\xC2\xB7 мгновенно %s\xE2\x80\x93%s, %d МБ", a, b, c.snap_mb);
+            ImGui::TextDisabled(TR("· мгновенно %s–%s, %d МБ", "· instant %s–%s, %d MB"), a, b, c.snap_mb);
         }
     }
     ImGui::SameLine(ImGui::GetWindowWidth() - 345 * k);
-    if (ImGui::SmallButton("Музыка (F10)")) g_music_win = !g_music_win;
+    if (ImGui::SmallButton(TR("Музыка (F10)", "Music (F10)"))) g_music_win = !g_music_win;
     if (g_ms.n > 1) {
         ImGui::SameLine(ImGui::GetWindowWidth() - 230 * k);
-        if (ImGui::SmallButton("Графики (F9)")) g_charts = !g_charts;
+        if (ImGui::SmallButton(TR("Графики (F9)", "Charts (F9)"))) g_charts = !g_charts;
     }
     ImGui::SameLine(ImGui::GetWindowWidth() - 120 * k);
-    ImGui::TextDisabled("F8 \xE2\x80\x94 \xD1\x81\xD0\xBA\xD1\x80\xD1\x8B\xD1\x82\xD1\x8C");   // F8 — скрыть
+    ImGui::TextDisabled("%s", TR("F8 — скрыть", "F8 — hide"));
     ImGui::End();
 }
 
@@ -363,7 +367,7 @@ static void chart(const char *id, int series, const char *title, float height) {
 // a player's name from the replay, or their number until it is known
 static void player_label(char *out, size_t n, const MatchStats &s, int p) {
     if (s.name[p][0]) snprintf(out, n, "%s", s.name[p]);
-    else snprintf(out, n, "Игрок %d", s.id[p]);
+    else snprintf(out, n, TR("Игрок %d", "Player %d"), s.id[p]);
 }
 
 static void charts() {
@@ -373,7 +377,7 @@ static void charts() {
     ImGui::SetNextWindowSize(ImVec2(860 * k, 600 * k), ImGuiCond_FirstUseEver);
     ImGui::SetNextWindowBgAlpha(0.94f);
     bool open = true;
-    if (!ImGui::Begin("Графики матча###goh_charts", &open, ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoCollapse)) {
+    if (!ImGui::Begin(TR("Графики матча###goh_charts", "Match charts###goh_charts"), &open, ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoCollapse)) {
         ImGui::End();
         g_charts = open;
         return;
@@ -398,29 +402,29 @@ static void charts() {
     if (ImGui::BeginTabBar("##tabs")) {
         float full = ImGui::GetContentRegionAvail().y - ImGui::GetFrameHeightWithSpacing() - 4 * k;
         float half = (full - ImGui::GetStyle().ItemSpacing.y) / 2;
-        if (ImGui::BeginTabItem("Траты")) {
-            chart("##spent", MS_SPENT, "Потрачено очков, всего", full);
+        if (ImGui::BeginTabItem(TR("Траты###Spending", "Spending###Spending"))) {
+            chart("##spent", MS_SPENT, TR("Потрачено очков, всего", "Points spent, total"), full);
             ImGui::EndTabItem();
         }
-        if (ImGui::BeginTabItem("Экономика")) {
-            chart("##armymp", MS_ARMY_MP, "Стоимость армии на поле, ЛС (оценка)", half);
-            chart("##budget", MS_BUDGET, "Очки на руках", half);
+        if (ImGui::BeginTabItem(TR("Экономика###Economy", "Economy###Economy"))) {
+            chart("##armymp", MS_ARMY_MP, TR("Стоимость армии на поле, ЛС (оценка)", "Army on the field, manpower (estimate)"), half);
+            chart("##budget", MS_BUDGET, TR("Очки на руках", "Points in hand"), half);
             ImGui::EndTabItem();
         }
-        if (ImGui::BeginTabItem("Армия")) {
-            chart("##army", MS_ARMY, "Стоимость армии на поле (очки лимита)", full);
+        if (ImGui::BeginTabItem(TR("Армия###Army", "Army###Army"))) {
+            chart("##army", MS_ARMY, TR("Стоимость армии на поле (очки лимита)", "Army on the field (limit points)"), full);
             ImGui::EndTabItem();
         }
-        if (ImGui::BeginTabItem("Убийства")) {
-            chart("##kills_inf", MS_KILLS_INF, "Убито пехоты противника, всего", half);
-            chart("##kills_veh", MS_KILLS_VEH, "Уничтожено техники противника, всего", half);
+        if (ImGui::BeginTabItem(TR("Убийства###Kills", "Kills###Kills"))) {
+            chart("##kills_inf", MS_KILLS_INF, TR("Убито пехоты противника, всего", "Enemy infantry killed, total"), half);
+            chart("##kills_veh", MS_KILLS_VEH, TR("Уничтожено техники противника, всего", "Enemy vehicles destroyed, total"), half);
             ImGui::EndTabItem();
         }
-        if (ImGui::BeginTabItem("Потери")) {
+        if (ImGui::BeginTabItem(TR("Потери###Losses", "Losses###Losses"))) {
             float third = (full - 2 * ImGui::GetStyle().ItemSpacing.y) / 3;
-            chart("##deaths_inf", MS_DEATHS_INF, "Потеряно пехоты, всего", third);
-            chart("##deaths_veh", MS_DEATHS_VEH, "Потеряно техники, всего", third);
-            chart("##lost", MS_LOST, "Потеряно стоимости армии (очки лимита), всего", third);
+            chart("##deaths_inf", MS_DEATHS_INF, TR("Потеряно пехоты, всего", "Infantry lost, total"), third);
+            chart("##deaths_veh", MS_DEATHS_VEH, TR("Потеряно техники, всего", "Vehicles lost, total"), third);
+            chart("##lost", MS_LOST, TR("Потеряно стоимости армии (очки лимита), всего", "Army value lost (limit points), total"), third);
             ImGui::EndTabItem();
         }
         ImGui::EndTabBar();
@@ -438,7 +442,7 @@ static void prep_window() {
     ImGui::SetNextWindowBgAlpha(0.94f);
     ImGui::Begin("##goh_prep", nullptr, ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoMove |
                                             ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoSavedSettings);
-    ImGui::Text("Готовлю реплей к перемотке");
+    ImGui::TextUnformatted(TR("Готовлю реплей к перемотке", "Preparing the replay for jumps"));
     // progress in snapshots, one per SNAP_EVERY_MS: the clock in between runs too fast to read and looked
     // as if every second were being saved
     int done = c.snap_to_ms > 0 ? c.snap_to_ms : 0;
@@ -447,20 +451,22 @@ static void prep_window() {
     fmt_time(at, sizeof at, done / 1000);
     float f = c.duration_s ? done / (c.duration_s * 1000.f) : 0;
     f = f < 0 ? 0 : f > 1 ? 1 : f;
-    if (c.duration_s) snprintf(label, sizeof label, "готово до %s · снимков %d · %d%%", at, shots, (int)(f * 100));
-    else snprintf(label, sizeof label, "готово до %s · снимков %d", at, shots);
+    if (c.duration_s) snprintf(label, sizeof label, TR("готово до %s · снимков %d · %d%%", "ready up to %s · %d snapshots · %d%%"), at, shots, (int)(f * 100));
+    else snprintf(label, sizeof label, TR("готово до %s · снимков %d", "ready up to %s · %d snapshots"), at, shots);
     ImGui::PushStyleColor(ImGuiCol_PlotHistogram, ImVec4(0.35f, 0.69f, 0.47f, 1));
     ImGui::ProgressBar(f, ImVec2(380 * k, 0), label);
     ImGui::PopStyleColor();
     if (c.duration_s && c.rate >= 1) {
         int left = (int)((c.duration_s * 1000.f - c.game_ms) / 1000.f / c.rate / 60.f + 0.99f);
-        ImGui::TextDisabled("×%.0f · ещё ~%d мин · звук выключен", c.rate, left < 1 ? 1 : left);
+        ImGui::TextDisabled(TR("×%.0f · ещё ~%d мин · звук выключен", "×%.0f · ~%d min left · sound off"), c.rate, left < 1 ? 1 : left);
     } else {
-        ImGui::TextDisabled("×%.0f · звук выключен", c.rate);
+        ImGui::TextDisabled(TR("×%.0f · звук выключен", "×%.0f · sound off"), c.rate);
     }
-    ImGui::TextDisabled("Снимок раз в %d с. Бой между снимками игра всё равно считает целиком:", SNAP_EVERY_MS / 1000);
-    ImGui::TextDisabled("без этого следующий снимок не получить. Потом любая точка шкалы — сразу.");
-    if (ImGui::Button("Пропустить")) rc_send(CMD_PREPARE, 0);
+    ImGui::TextDisabled(TR("Снимок раз в %d с. Бой между снимками игра всё равно считает целиком:",
+                               "A snapshot every %d s. The game still plays the battle between them in full:"), SNAP_EVERY_MS / 1000);
+    ImGui::TextDisabled("%s", TR("без этого следующий снимок не получить. Потом любая точка шкалы — сразу.",
+                                     "the next snapshot needs it. Afterwards any point of the bar opens at once."));
+    if (ImGui::Button(TR("Пропустить", "Skip"))) rc_send(CMD_PREPARE, 0);
     ImGui::End();
 }
 
@@ -473,17 +479,17 @@ static void music_window() {
     ImGui::SetNextWindowBgAlpha(0.92f);
     bool open = true;
     (void)io;
-    if (!ImGui::Begin("Музыка###goh_music", &open, ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoCollapse |
+    if (!ImGui::Begin(TR("Музыка###goh_music", "Music###goh_music"), &open, ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoCollapse |
                                                          ImGuiWindowFlags_AlwaysAutoResize)) {
         ImGui::End();
         g_music_win = open;
         return;
     }
     bool on = g_music.enabled != 0;
-    if (ImGui::Checkbox("Своя музыка (меню и бои)", &on)) { g_music.enabled = on; music_save(); }
+    if (ImGui::Checkbox(TR("Своя музыка (меню и бои)", "Own music (menu and battles)"), &on)) { g_music.enabled = on; music_save(); }
     float vol = g_music.volume * 100;
     ImGui::SetNextItemWidth(260 * k);
-    if (ImGui::SliderFloat("Громкость", &vol, 0, 100, "%.0f%%")) g_music.volume = vol / 100;
+    if (ImGui::SliderFloat(TR("Громкость", "Volume"), &vol, 0, 100, "%.0f%%")) g_music.volume = vol / 100;
     if (ImGui::IsItemDeactivatedAfterEdit()) music_save();
 
     ImGui::Separator();
@@ -491,15 +497,15 @@ static void music_window() {
     ImGui::TextWrapped("%s", g_music.now);
     ImGui::PopStyleColor();
     if (g_music.active) {
-        static const char *lv[4] = {"—", "спокойно", "напряжение", "бой"};
-        ImGui::TextDisabled("Бой требует: %s \xC2\xB7 накал %.1f", lv[g_music.target & 3], g_music.heat);
+        const char *lv[4] = {"—", TR("спокойно", "calm"), TR("напряжение", "tension"), TR("бой", "battle")};
+        ImGui::TextDisabled(TR("Бой требует: %s · накал %.1f", "Battle calls for: %s · heat %.1f"), lv[g_music.target & 3], g_music.heat);
     }
-    ImGui::TextDisabled("Треки: меню %d \xC2\xB7 спокойные %d \xC2\xB7 напряжение %d \xC2\xB7 бой %d", g_music.tracks[MUS_MENU],
+    ImGui::TextDisabled(TR("Треки: меню %d · спокойные %d · напряжение %d · бой %d", "Tracks: menu %d · calm %d · tension %d · battle %d"), g_music.tracks[MUS_MENU],
                         g_music.tracks[MUS_CALM], g_music.tracks[MUS_TENSION], g_music.tracks[MUS_BATTLE]);
-    if (ImGui::Button("Открыть папку music")) music_open_folder();
+    if (ImGui::Button(TR("Открыть папку music", "Open the music folder"))) music_open_folder();
     ImGui::SameLine();
     ImGui::TextDisabled("main theme / calm / tension / battle \xC2\xB7 mp3, flac, wav");
-    ImGui::TextDisabled("Новые файлы подхватываются со следующего боя. F10 \xE2\x80\x94 скрыть");
+    ImGui::TextDisabled("%s", TR("Новые файлы подхватываются со следующего боя. F10 — скрыть", "New files are picked up from the next battle. F10 — hide"));
     ImGui::End();
     g_music_win = open;
 }
@@ -510,42 +516,51 @@ static void balance_window() {
     ImGui::SetNextWindowPos(ImVec2(24 * k, 70 * k), ImGuiCond_FirstUseEver);
     ImGui::SetNextWindowBgAlpha(0.92f);
     bool open = true;
-    if (!ImGui::Begin("Баланс###goh_balance", &open, ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoCollapse |
+    if (!ImGui::Begin(TR("Баланс###goh_balance", "Balance###goh_balance"), &open, ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoCollapse |
                                                          ImGuiWindowFlags_AlwaysAutoResize)) {
         ImGui::End();
         g_balance_win = open;
         return;
     }
     if (!g_balance_ready) {
-        ImGui::TextWrapped("Недоступно: версия игры или её файлы не те, под которые сделан мод (подробности в goh_replay.log).");
+        ImGui::TextWrapped("%s", TR("Недоступно: версия игры или её файлы не те, под которые сделан мод (подробности в goh_replay.log).",
+                                   "Unavailable: the game's version or files are not the ones the mod was made for (details in goh_replay.log)."));
     } else {
         bool on = g_balance_on != 0;
         ImGui::BeginDisabled(g_balance_locked != 0);
-        if (ImGui::Checkbox("Компетитив", &on)) g_balance_on = on;
+        if (ImGui::Checkbox(TR("Компетитив", "Competitive"), &on)) g_balance_on = on;
+        ImGui::SameLine();
+        ImGui::TextColored(ImColor(209, 120, 54), "%s", TR("WIP: не включайте в обычном мультиплеере", "WIP: don't use in regular multiplayer"));
         ImGui::EndDisabled();
-        ImGui::TextDisabled("Германия, Оборонительная: т2 \xE2\x80\x94 15 см NbW 41, т3 \xE2\x80\x94 12 см sGrW 42");
-        if (g_balance_locked) ImGui::TextDisabled("Идёт бой или реплей: переключить можно после него.");
-        else ImGui::TextDisabled("Действует на следующий матч или реплей, который вы запустите.");
-        ImGui::Text("Версия баланса: %s", g_balance_tag);
+        ImGui::TextDisabled("%s", TR("Германия, Оборонительная: т2 — 15 см NbW 41, т3 — 12 см sGrW 42", "Germany, Defensive: t2 — 15 cm NbW 41, t3 — 12 cm sGrW 42"));
+        if (g_balance_locked) ImGui::TextDisabled("%s", TR("Идёт бой или реплей: переключить можно после него.", "A battle or replay is on: switch after it."));
+        else ImGui::TextDisabled("%s", TR("Действует на следующий матч или реплей, который вы запустите.", "Applies to the next match or replay you start."));
+        ImGui::Text(TR("Версия баланса: %s", "Balance version: %s"), g_balance_tag);
         ImGui::PushStyleColor(ImGuiCol_Text, ACCENT);
-        ImGui::TextWrapped("Игры это пока не сверяют: у всех игроков матча должны быть эта же версия и галочка, "
-                           "иначе рассинхрон или вылет.");
+        ImGui::TextWrapped("%s", TR("Игры это пока не сверяют: у всех игроков матча должны быть эта же версия и галочка, иначе рассинхрон или вылет.",
+                                   "The games do not check this yet: every player of the match needs this same version and the box ticked, "
+                                   "or the game desyncs or crashes."));
         ImGui::PopStyleColor();
         if (g_balance_reads)
-            ImGui::TextDisabled("Игра читала файл баланса: %ld раз, последний \xE2\x80\x94 %s", g_balance_reads,
-                                g_balance_last ? "компетитив" : "ваниль");
+            ImGui::TextDisabled(TR("Игра читала файл баланса: %ld раз, последний — %s", "The game read the balance file: %ld times, last — %s"), g_balance_reads,
+                                g_balance_last ? TR("компетитив", "competitive") : TR("ваниль", "vanilla"));
     }
-    ImGui::TextDisabled("F7 \xE2\x80\x94 скрыть");
+    ImGui::TextDisabled("%s", TR("F7 — скрыть", "F7 — hide"));
     ImGui::End();
     g_balance_win = open;
 }
 
 // ---- who is online with the mod -----------------------------------------------------------------------
-static const char *CONSENT_TEXT =
+#define CONSENT_TEXT TR(CONSENT_RU, CONSENT_EN)
+static const char *CONSENT_RU =
     "Мод отправляет на сервер мода (goh-online.goh-mod.workers.dev): раз в 2 минуты ваш SteamID, ник Steam "
     "и версию баланса (список онлайн), а после рейтингового матча (Ось против Союзников, «Зоны боевых действий» "
     "или «Превосходство») его итог из реплея игры: режим, карту, время, игроков (SteamID, ник, нация) и победителя. "
     "Больше ничего.";
+static const char *CONSENT_EN =
+    "The mod sends to its server (goh-online.goh-mod.workers.dev): every 2 minutes your SteamID, Steam name and "
+    "balance version (the online list), and after a rated match (Axis vs Allies, \"Battle Zones\" or \"Domination\") "
+    "its result from the game's replay: mode, map, time, players (SteamID, name, nation) and the winner. Nothing else.";
 
 static void consent_window() {
     float k = ImGui::GetFontSize() / 18.f;
@@ -553,16 +568,17 @@ static void consent_window() {
     ImGui::SetNextWindowPos(ImVec2(io.DisplaySize.x * 0.5f, io.DisplaySize.y * 0.4f), ImGuiCond_Always, ImVec2(0.5f, 0.5f));
     ImGui::SetNextWindowSize(ImVec2(460 * k, 0));
     ImGui::SetNextWindowBgAlpha(0.96f);
-    ImGui::Begin("Мод: онлайн и рейтинг PVP###goh_consent", nullptr, ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoCollapse |
+    ImGui::Begin(TR("Мод: онлайн и рейтинг PVP###goh_consent", "Mod: online and PVP rating###goh_consent"), nullptr, ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoCollapse |
                                                              ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoMove);
-    ImGui::TextWrapped("Показывать вас в списке игроков с модом и засчитывать ваши матчи в рейтинг PVP?");
+    ImGui::TextWrapped("%s", TR("Показывать вас в списке игроков с модом и засчитывать ваши матчи в рейтинг PVP?",
+                                   "Show you in the list of players with the mod and count your matches in the PVP rating?"));
     ImGui::Spacing();
     ImGui::TextDisabled("%s", CONSENT_TEXT);
     ImGui::Spacing();
-    if (ImGui::Button("Да, показывать")) online_set_consent(1);
+    if (ImGui::Button(TR("Да, показывать", "Yes, show me"))) online_set_consent(1);
     ImGui::SameLine();
-    if (ImGui::Button("Нет")) online_set_consent(0);
-    ImGui::TextDisabled("Поменять можно в окне F6.");
+    if (ImGui::Button(TR("Нет", "No"))) online_set_consent(0);
+    ImGui::TextDisabled("%s", TR("Поменять можно в окне F6.", "You can change it in the F6 window."));
     ImGui::End();
 }
 
@@ -580,13 +596,21 @@ static void open_login(const char *url, bool browser) {
     else ShellExecuteA(nullptr, "open", url, nullptr, nullptr, SW_SHOWNORMAL);
 }
 
-static const char *LOGIN_WHY =
+#define LOGIN_WHY TR(LOGIN_WHY_RU, LOGIN_WHY_EN)
+static const char *LOGIN_WHY_RU =
     "Чтобы ваши матчи засчитывались в рейтинг PVP, а в глобальном чате был виден ваш ник, подтвердите, что этот "
     "аккаунт Steam ваш.\n\n"
     "Откроется официальная страница steamcommunity.com (в оверлее Steam или в браузере): нажмите там «Войти». "
     "Steam сообщит серверу мода только ваш SteamID. Пароль, сессия и доступ к аккаунту моду не передаются, "
     "регистрироваться нигде не нужно.\n\n"
     "Без входа: в чате вы Anonymous, ваши матчи не отправляются в рейтинг, личная статистика недоступна.";
+static const char *LOGIN_WHY_EN =
+    "To have your matches count in the PVP rating and your name shown in the global chat, confirm that this "
+    "Steam account is yours.\n\n"
+    "Steam's official page steamcommunity.com opens (in the Steam overlay or a browser): press \"Sign In\" there. "
+    "Steam tells the mod's server only your SteamID. No password, session or access to your account reaches the mod, "
+    "and there is nothing to sign up for.\n\n"
+    "Without it: you are Anonymous in the chat, your matches are not sent to the rating, your stats are unavailable.";
 
 static void login_window() {
     float k = ImGui::GetFontSize() / 18.f;
@@ -594,50 +618,54 @@ static void login_window() {
     ImGui::SetNextWindowPos(ImVec2(io.DisplaySize.x * 0.5f, io.DisplaySize.y * 0.4f), ImGuiCond_Always, ImVec2(0.5f, 0.5f));
     ImGui::SetNextWindowSize(ImVec2(520 * k, 0));
     ImGui::SetNextWindowBgAlpha(0.96f);
-    ImGui::Begin("Мод: вход через Steam###goh_login", nullptr, ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoCollapse |
+    ImGui::Begin(TR("Мод: вход через Steam###goh_login", "Mod: sign in through Steam###goh_login"), nullptr, ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoCollapse |
                                                            ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoMove);
     static char url[1024];
     bool have = online_login_url(url, sizeof url);
     if (g_steam_verified == 1) {
-        ImGui::TextColored(ImColor(120, 200, 100), "Готово: аккаунт Steam подтверждён.");
-        ImGui::TextWrapped("Ваши матчи теперь идут в рейтинг, в чате виден ваш ник.");
-        if (ImGui::Button("Закрыть")) g_login_win = false;
+        ImGui::TextColored(ImColor(120, 200, 100), "%s", TR("Готово: аккаунт Steam подтверждён.", "Done: your Steam account is confirmed."));
+        ImGui::TextWrapped("%s", TR("Ваши матчи теперь идут в рейтинг, в чате виден ваш ник.", "Your matches now count in the rating, and the chat shows your name."));
+        if (ImGui::Button(TR("Закрыть", "Close"))) g_login_win = false;
         ImGui::End();
         return;
     }
     if (g_steam_verified == 2)
-        ImGui::TextColored(ImColor(209, 120, 54), "Ваш SteamID на сервере мода занят другим ключом. Войдите через Steam, чтобы вернуть его.");
+        ImGui::TextColored(ImColor(209, 120, 54), "%s", TR("Ваш SteamID на сервере мода занят другим ключом. Войдите через Steam, чтобы вернуть его.",
+                                                         "Another key holds your SteamID on the mod's server. Sign in through Steam to get it back."));
     ImGui::PushTextWrapPos(0);
     ImGui::TextUnformatted(LOGIN_WHY);
     ImGui::PopTextWrapPos();
     ImGui::Spacing();
     if (!g_login_opened) {
-        if (ImGui::Button("Войти через Steam")) { online_steam_login(); g_login_opened = true; }
+        if (ImGui::Button(TR("Войти через Steam", "Sign in through Steam"))) { online_steam_login(); g_login_opened = true; }
         ImGui::SameLine();
-        if (ImGui::Button("Позже")) g_login_win = false;
+        if (ImGui::Button(TR("Позже", "Later"))) g_login_win = false;
         bool remind = online_remind() != 0;
-        if (ImGui::Checkbox("Напоминать при запуске игры", &remind)) online_set_remind(remind);
+        if (ImGui::Checkbox(TR("Напоминать при запуске игры", "Remind me when the game starts"), &remind)) online_set_remind(remind);
     } else if (!have) {
-        ImGui::TextDisabled("Получаем ссылку от сервера мода...");
+        ImGui::TextDisabled("%s", TR("Получаем ссылку от сервера мода...", "Getting the link from the mod's server..."));
     } else {
         static bool auto_opened;
         if (!auto_opened) { auto_opened = true; open_login(url, false); }
-        ImGui::TextColored(ImColor(ACCENT), "Ждём подтверждения от Steam...");
-        ImGui::TextWrapped("Если страница не открылась, откройте её в браузере. Это страница входа самого Steam "
-                           "(steamcommunity.com), ссылка одноразовая и действует 15 минут:");
+        ImGui::TextColored(ImColor(ACCENT), "%s", TR("Ждём подтверждения от Steam...", "Waiting for Steam to confirm..."));
+        ImGui::TextWrapped("%s", TR("Если страница не открылась, откройте её в браузере. Это страница входа самого Steam "
+                                       "(steamcommunity.com), ссылка одноразовая и действует 15 минут:",
+                                       "If the page did not open, open it in a browser. It is Steam's own sign-in page "
+                                       "(steamcommunity.com); the link works once, for 15 minutes:"));
         ImGui::SetNextItemWidth(-1);
         ImGui::InputText("##login_url", url, sizeof url, ImGuiInputTextFlags_ReadOnly);
-        if (ImGui::Button("Открыть в браузере")) open_login(url, true);
+        if (ImGui::Button(TR("Открыть в браузере", "Open in browser"))) open_login(url, true);
         ImGui::SameLine();
-        if (ImGui::Button("Скопировать ссылку")) ImGui::SetClipboardText(url);
+        if (ImGui::Button(TR("Скопировать ссылку", "Copy link"))) ImGui::SetClipboardText(url);
         ImGui::SameLine();
-        if (ImGui::Button("Позже")) g_login_win = false;
+        if (ImGui::Button(TR("Позже", "Later"))) g_login_win = false;
     }
     ImGui::End();
 }
 
 // ---- bottom left, in the menus: is this DLL an official build (online.c integrity_check) ------------------
 static void integrity_window() {
+    g_integrity_top = 0;
     if (g_live_match || g_ctl.state != ST_IDLE) return;
     long st = g_integrity;
     if (st == INTEGRITY_CHECKING) return;
@@ -645,25 +673,89 @@ static void integrity_window() {
     float k = ImGui::GetFontSize() / 18.f;
     ImU32 col = IM_COL32(150, 150, 150, 255), bg = IM_COL32(16, 16, 15, 200);
     char line1[96], line2[160] = "";
-    snprintf(line1, sizeof line1, "Мод %s", g_mod_version);
-    if (st == INTEGRITY_CURRENT) snprintf(line2, sizeof line2, "Официальная сборка, последняя версия");
-    else if (st == INTEGRITY_UNREACHABLE) snprintf(line2, sizeof line2, "Не удалось проверить сборку: сервер мода не отвечает");
+    snprintf(line1, sizeof line1, TR("Мод %s", "Mod %s"), g_mod_version);
+    if (st == INTEGRITY_CURRENT) snprintf(line2, sizeof line2, "%s", TR("Официальная сборка, последняя версия", "Official build, latest version"));
+    else if (st == INTEGRITY_UNREACHABLE) snprintf(line2, sizeof line2, "%s", TR("Не удалось проверить сборку: сервер мода не отвечает", "Could not check the build: the mod's server does not answer"));
     else if (st == INTEGRITY_OLD) {
         col = IM_COL32(230, 160, 70, 255);
-        snprintf(line2, sizeof line2, "Устаревшая версия: обновите мод%s%s", g_integrity_newest[0] ? " до " : "", g_integrity_newest);
+        snprintf(line2, sizeof line2, TR("Устаревшая версия: обновите мод%s%s", "Outdated version: update the mod%s%s"),
+                 g_integrity_newest[0] ? TR(" до ", " to ") : "", g_integrity_newest);
     } else {            // not on the list: blinks red
         float a = 0.55f + 0.45f * sinf((float)ImGui::GetTime() * 6.f);
         col = IM_COL32(255, 70, 60, 255);
         bg = IM_COL32(110, 10, 8, (int)(90 + 140 * a));
-        snprintf(line2, sizeof line2, "На вашем компьютере НЕ официальная DLL мода. Используйте на свой страх и риск.");
+        snprintf(line2, sizeof line2, "%s", TR("На вашем компьютере НЕ официальная DLL мода. Используйте на свой страх и риск.",
+                                               "This is NOT an official DLL of the mod. Use it at your own risk."));
     }
     ImDrawList *dl = ImGui::GetForegroundDrawList();
     ImVec2 t1 = ImGui::CalcTextSize(line1), t2 = ImGui::CalcTextSize(line2);
     float pad = 8 * k, w = (t1.x > t2.x ? t1.x : t2.x) + 2 * pad, h = t1.y + t2.y + 2 * pad + 2 * k;
     ImVec2 p0(12 * k, io.DisplaySize.y - 12 * k - h);
+    g_integrity_top = p0.y;
     dl->AddRectFilled(p0, ImVec2(p0.x + w, p0.y + h), bg, 4 * k);
     dl->AddText(ImVec2(p0.x + pad, p0.y + pad), IM_COL32(120, 120, 120, 255), line1);
     dl->AddText(ImVec2(p0.x + pad, p0.y + pad + t1.y + 2 * k), col, line2);
+}
+
+// ---- bottom left, above the version: what the mod does and what the latest update changed -----------------
+// Shown in the menus at every start of the game until closed. ABOUT_* below: kept up to date with each release.
+static bool g_about_win = true;
+
+static const char *ABOUT_RU[] = {
+    "PVP-рейтинг (MMR) за «Ось против Союзников»: «Зоны боевых действий» и «Превосходство», 1×1 и команды",
+    "Кнопка PVP на странице «Интернет»: кто онлайн с модом, ваша статистика, лидеры",
+    "MMR под никами в лобби, колонка Ping в списке игр",
+    "Глобальный чат RU / ENG: на странице «Интернет» и вкладка GLOBAL CHAT в лобби; /invite, упоминания",
+    "Реплеи: вкладка в «Дополнительно», перемотка (F8), графики матча (F9)",
+    "Вход через Steam: мод получает только SteamID, без пароля",
+};
+static const char *ABOUT_EN[] = {
+    "PVP rating (MMR) for Axis vs Allies: Battle Zones and Domination, 1v1 and teams",
+    "PVP button on the Internet page: who is online with the mod, your stats, leaders",
+    "MMR under names in the lobby, a Ping column in the list of games",
+    "Global chat RU / ENG: on the Internet page and the GLOBAL CHAT tab in the lobby; /invite, mentions",
+    "Replays: a tab in Extras, seeking (F8), match charts (F9)",
+    "Sign in through Steam: the mod gets only your SteamID, no password",
+};
+static const char *NEWS_RU[] = {
+    "Английский язык (по языку игры в Steam)",
+    "Колонка Ping в списке игр: быстрее и без скачков",
+    "Чат: правый клик по нику (упомянуть, профиль Steam), звук при упоминании",
+    "/invite: кнопка «Войти в лобби» прямо в чате",
+    "Аватарки Steam в списке онлайн",
+    "Исправлено: курсор игры, вкладка PVP больше не закрывается сама",
+};
+static const char *NEWS_EN[] = {
+    "English (follows the game's language in Steam)",
+    "Ping column in the list of games: faster and steady",
+    "Chat: right click on a name (mention, Steam profile), a sound when you are mentioned",
+    "/invite: a \"Join lobby\" button right in the chat",
+    "Steam avatars in the online list",
+    "Fixed: the game's cursor, the PVP tab no longer closes by itself",
+};
+
+static bool about_shown() { return g_about_win && !g_live_match && g_ctl.state == ST_IDLE && g_integrity_top > 0; }
+
+static void about_window() {
+    ImGuiIO &io = ImGui::GetIO();
+    float k = ImGui::GetFontSize() / 18.f;
+    ImGui::SetNextWindowPos(ImVec2(12 * k, g_integrity_top - 6 * k), ImGuiCond_Always, ImVec2(0, 1));
+    ImGui::SetNextWindowSize(ImVec2(520 * k, 0), ImGuiCond_Always);
+    ImGui::SetNextWindowBgAlpha(0.9f);
+    ImGui::Begin("##goh_about", nullptr, ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoMove |
+                                           ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoCollapse);
+    bool en = lang_en();
+    ImGui::TextColored(ImColor(ACCENT), "%s", TR("Что добавляет мод", "What the mod adds"));
+    ImGui::PushTextWrapPos(0);
+    for (const char *s : en ? ABOUT_EN : ABOUT_RU) ImGui::BulletText("%s", s);
+    ImGui::Spacing();
+    ImGui::TextColored(ImColor(ACCENT), TR("Что нового (%s)", "What's new (%s)"), g_mod_version);
+    for (const char *s : en ? NEWS_EN : NEWS_RU) ImGui::BulletText("%s", s);
+    ImGui::PopTextWrapPos();
+    ImGui::Spacing();
+    if (ImGui::Button(TR("Понятно", "Got it"))) g_about_win = false;
+    ImGui::End();
+    (void)io;
 }
 
 // the players online with the mod; the table fills the height left but `bottom`
@@ -672,26 +764,27 @@ static void online_list(float bottom) {
     int state = 0;
     int n = online_copy(list, ONLINE_MAX, &state);
     bool me = g_online_consent == 1;
-    if (ImGui::Checkbox("Показывать меня и засчитывать мои матчи", &me)) online_set_consent(me);
+    if (ImGui::Checkbox(TR("Показывать меня и засчитывать мои матчи", "Show me and count my matches"), &me)) online_set_consent(me);
     if (ImGui::IsItemHovered()) ImGui::SetTooltip("%s", CONSENT_TEXT);
     if (g_online_held) {
         ImGui::PushStyleColor(ImGuiCol_Text, ACCENT);
-        ImGui::TextWrapped("Ваш SteamID закреплён за другим ключом (goh_mod_key.txt в Документы\\My Games\\gates of hell): напишите автору мода.");
+        ImGui::TextWrapped("%s", TR("Ваш SteamID закреплён за другим ключом (goh_mod_key.txt в Документы\\My Games\\gates of hell): напишите автору мода.",
+                                   "Your SteamID is held by another key (goh_mod_key.txt in Documents\\My Games\\gates of hell): write to the mod's author."));
         ImGui::PopStyleColor();
     }
-    if (state == 0) ImGui::TextDisabled("Загрузка...");
+    if (state == 0) ImGui::TextDisabled("%s", TR("Загрузка...", "Loading..."));
     else {
         if (state == 2) {
             ImGui::PushStyleColor(ImGuiCol_Text, ACCENT);
-            ImGui::TextUnformatted("Сервер не отвечает, список может быть старым.");
+            ImGui::TextUnformatted(TR("Сервер не отвечает, список может быть старым.", "The server does not answer, the list may be old."));
             ImGui::PopStyleColor();
         }
-        ImGui::Text("Сейчас в игре с модом: %d", n);
+        ImGui::Text(TR("Сейчас в игре с модом: %d", "Playing with the mod now: %d"), n);
         ImGui::Separator();
         const char *my = online_my_id();
         if (ImGui::BeginTable("##players", 2, ImGuiTableFlags_ScrollY | ImGuiTableFlags_RowBg, ImVec2(0, -bottom))) {
-            ImGui::TableSetupColumn("Игрок", ImGuiTableColumnFlags_WidthStretch);
-            ImGui::TableSetupColumn("Баланс", ImGuiTableColumnFlags_WidthFixed);
+            ImGui::TableSetupColumn(TR("Игрок", "Player"), ImGuiTableColumnFlags_WidthStretch);
+            ImGui::TableSetupColumn(TR("Баланс", "Balance"), ImGuiTableColumnFlags_WidthFixed);
             for (int i = 0; i < n; i++) {
                 ImGui::TableNextRow();
                 ImGui::TableNextColumn();
@@ -704,12 +797,12 @@ static void online_list(float bottom) {
                     ShellExecuteA(nullptr, "open", url, nullptr, nullptr, SW_SHOWNORMAL);
                 }
                 if (self) ImGui::PopStyleColor();
-                if (ImGui::IsItemHovered()) ImGui::SetTooltip("Открыть профиль в Steam");
+                if (ImGui::IsItemHovered()) ImGui::SetTooltip("%s", TR("Открыть профиль в Steam", "Open the Steam profile"));
                 ImGui::TableNextColumn();
                 bool same = !strcmp(list[i].version, g_balance_tag);
                 if (same) ImGui::TextDisabled("%s", list[i].version);
                 else ImGui::TextColored(ImVec4(0.9f, 0.4f, 0.35f, 1), "%s", list[i].version);
-                if (!same && ImGui::IsItemHovered()) ImGui::SetTooltip("Другая версия баланса: компетитив вместе не сыграть");
+                if (!same && ImGui::IsItemHovered()) ImGui::SetTooltip("%s", TR("Другая версия баланса: компетитив вместе не сыграть", "Another balance version: no competitive together"));
                 ImGui::PopID();
             }
             ImGui::EndTable();
@@ -723,13 +816,13 @@ static void online_window() {
     ImGui::SetNextWindowSize(ImVec2(380 * k, 360 * k), ImGuiCond_FirstUseEver);
     ImGui::SetNextWindowBgAlpha(0.92f);
     bool open = true;
-    if (!ImGui::Begin("Онлайн###goh_online", &open, ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoCollapse)) {
+    if (!ImGui::Begin(TR("Онлайн###goh_online", "Online###goh_online"), &open, ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoCollapse)) {
         ImGui::End();
         g_online_win = open;
         return;
     }
     online_list(ImGui::GetFrameHeightWithSpacing());
-    ImGui::TextDisabled("F6 \xE2\x80\x94 скрыть");
+    ImGui::TextDisabled("%s", TR("F6 — скрыть", "F6 — hide"));
     ImGui::End();
     g_online_win = open;
 }
@@ -784,17 +877,18 @@ static void doc_get(Doc &d, int which) {
     }
 }
 
-static const char *NATIONS[5][2] = {{"ger", "Рейх"}, {"fin", "Финляндия"}, {"eng", "Британия"}, {"usa", "США"}, {"rus", "СССР"}};
+static const char *NATIONS[5][3] = {{"ger", "Рейх", "Germany"}, {"fin", "Финляндия", "Finland"}, {"eng", "Британия", "Britain"},
+                                    {"usa", "США", "USA"}, {"rus", "СССР", "USSR"}};
 static const char *nation_name(const char *n) {
-    for (auto &x : NATIONS) if (!strcmp(x[0], n)) return x[1];
+    for (auto &x : NATIONS) if (!strcmp(x[0], n)) return TR(x[1], x[2]);
     return n;
 }
 static const char *mode_name(const char *m) {
-    return !strcmp(m, "battle_zones") ? "Зоны боевых действий" : !strcmp(m, "ammunition") ? "Превосходство" : m;
+    return !strcmp(m, "battle_zones") ? TR("Зоны боевых действий", "Battle Zones") : !strcmp(m, "ammunition") ? TR("Превосходство", "Domination") : m;
 }
 static void mmr_text(char *out, size_t n, const char *mmr, int games) {
     if (games <= 0) snprintf(out, n, "-");
-    else if (games < 10) snprintf(out, n, "%s (калибровка %d/10)", mmr, games);
+    else if (games < 10) snprintf(out, n, TR("%s (калибровка %d/10)", "%s (calibration %d/10)"), mmr, games);
     else snprintf(out, n, "%s", mmr);
 }
 
@@ -818,6 +912,8 @@ static void van_empty(const Pane &p, ImDrawList *dl, ImVec2 at, const char *msg)
     van_text(dl, at.x + (p.size.x - tw) * 0.5f, at.y + p.row * 1.5f, VAN_TITLE, msg);
 }
 
+static ID3D11ShaderResourceView *steam_avatar(const char *id_text);    // below, with the leaders
+
 static void tab_online(const Pane &p, float top, float bottom) {
     static OnlinePlayer list[ONLINE_MAX];
     static Doc rd;
@@ -830,16 +926,17 @@ static void tab_online(const Pane &p, float top, float bottom) {
     float col[4];
     for (int i = 0; i < 4; i++) col[i] = p.p0.x + VAN_COL_ONLINE[i] * p.size.x;
     float ty = top + (p.row - p.lh) * 0.5f;
-    van_text(p.dl, col[0], ty, VAN_TITLE, "Игрок");
-    van_text(p.dl, col[1], ty, VAN_TITLE, "Версия баланса");
-    van_text(p.dl, col[2], ty, VAN_TITLE, "Совместимость");
-    van_text(p.dl, col[3], ty, VAN_TITLE, "MMR 1\xC3\x97" "1 / ком.");
+    van_text(p.dl, col[0], ty, VAN_TITLE, TR("Игрок", "Player"));
+    van_text(p.dl, col[1], ty, VAN_TITLE, TR("Версия баланса", "Balance version"));
+    van_text(p.dl, col[2], ty, VAN_TITLE, TR("Совместимость", "Compatibility"));
+    van_text(p.dl, col[3], ty, VAN_TITLE, TR("MMR 1×1 / ком.", "MMR 1×1 / team"));
     ImGui::SetCursorScreenPos(ImVec2(p.p0.x, top + p.row));
     ImGui::BeginChild("##online", ImVec2(p.size.x, bottom - top - p.row), ImGuiChildFlags_None, ImGuiWindowFlags_NoBackground);
     ImGui::SetWindowFontScale(p.sy);
     ImDrawList *dl = ImGui::GetWindowDrawList();
     ImVec2 o = ImGui::GetCursorScreenPos();
-    if (state != 1 || n == 0) van_empty(p, dl, o, state == 0 ? "Загрузка..." : state == 2 && !n ? "Сервер мода не отвечает" : "Сейчас никого нет");
+    if (state != 1 || n == 0) van_empty(p, dl, o, state == 0 ? TR("Загрузка...", "Loading...") : state == 2 && !n ? TR("Сервер мода не отвечает", "The mod's server does not answer") :
+                                                                                       TR("Сейчас никого нет", "Nobody right now"));
     for (int i = 0; i < n; i++) {
         ImGui::PushID(i);
         ImVec2 r0(o.x, o.y + i * p.row);
@@ -848,9 +945,12 @@ static void tab_online(const Pane &p, float top, float bottom) {
         float yy = r0.y + (p.row - p.lh) * 0.5f;
         ImU32 c = hot ? VAN_HOVER : VAN_TEXT;
         if (self) dl->AddRectFilled(ImVec2(r0.x + 14 * p.sx, yy + p.lh * 0.3f), ImVec2(r0.x + 20 * p.sx, yy + p.lh * 0.3f + 6 * p.sy), ACCENT);
-        van_text(dl, col[0], yy, c, list[i].name);
+        float av = p.row * 0.8f;                 // the player's Steam avatar, left of the name (signed in ones)
+        ID3D11ShaderResourceView *img = list[i].verified ? steam_avatar(list[i].id) : nullptr;
+        if (img) dl->AddImage((ImTextureID)(intptr_t)img, ImVec2(col[0], r0.y + (p.row - av) * 0.5f), ImVec2(col[0] + av, r0.y + (p.row + av) * 0.5f));
+        van_cell(dl, col[0] + av + 8 * p.sx, yy, col[1] - col[0] - av - 16 * p.sx, c, list[i].name);
         van_text(dl, col[1], yy, same ? c : VAN_WARN, list[i].version);
-        van_text(dl, col[2], yy, self ? VAN_TITLE : same ? c : VAN_WARN, self ? "это вы" : same ? "можно играть компетитив" : "другая версия");
+        van_text(dl, col[2], yy, self ? VAN_TITLE : same ? c : VAN_WARN, self ? TR("это вы", "that's you") : same ? TR("можно играть компетитив", "can play competitive") : TR("другая версия", "another version"));
         const char *m1 = "-", *mt = "-";
         for (int k = 0; k < rd.n; k++)
             if (rd.nf[k] >= 3 && !strcmp(rd.f[k][0], list[i].id)) (strcmp(rd.f[k][1], "1v1") ? mt : m1) = rd.f[k][2];
@@ -870,8 +970,8 @@ static void tab_stats(const Pane &p, float top, float bottom) {
     ImDrawList *dl = p.dl;
     float x0 = p.p0.x + 0.03f * p.size.x, y = top + (p.row - p.lh) * 0.5f;
     if (g_steam_verified != 1) {            // only for players signed in with Steam: the stats are theirs then
-        van_empty(p, dl, ImVec2(p.p0.x, top), "Личная статистика - после входа через Steam");
-        const char *b = "ВОЙТИ ЧЕРЕЗ STEAM";
+        van_empty(p, dl, ImVec2(p.p0.x, top), TR("Личная статистика - после входа через Steam", "Your stats - after signing in through Steam"));
+        const char *b = TR("ВОЙТИ ЧЕРЕЗ STEAM", "SIGN IN THROUGH STEAM");
         float tw = ImGui::CalcTextSize(b).x, bx = p.p0.x + (p.size.x - tw) * 0.5f, by = top + p.row * 2.6f;
         ImGui::SetCursorScreenPos(ImVec2(bx, by));
         if (ImGui::InvisibleButton("##login", ImVec2(tw, p.lh))) { g_login_win = true; online_steam_login(); g_login_opened = true; }
@@ -879,33 +979,34 @@ static void tab_stats(const Pane &p, float top, float bottom) {
         return;
     }
     if (!online_my_id()[0] || d.state != 1) {
-        van_empty(p, dl, ImVec2(p.p0.x, top), d.state == 2 ? "Сервер мода не отвечает" : "Загрузка...");
+        van_empty(p, dl, ImVec2(p.p0.x, top), d.state == 2 ? TR("Сервер мода не отвечает", "The mod's server does not answer") : TR("Загрузка...", "Loading..."));
         return;
     }
     // the two ladders
-    const char *lad[2] = {"1v1", "team"}, *lad_name[2] = {"1 НА 1", "КОМАНДЫ (2\xC3\x97" "2, 3\xC3\x97" "3)"};
+    const char *lad[2] = {"1v1", "team"}, *lad_name[2] = {TR("1 НА 1", "1 VS 1"), TR("КОМАНДЫ (2×2, 3×3)", "TEAMS (2×2, 3×3)")};
     for (int l = 0; l < 2; l++) {
         float x = x0 + l * 0.5f * p.size.x;
         van_text(dl, x, y, VAN_TITLE, lad_name[l]);
-        char line[128] = "Ещё не играл";
+        char line[128];
+        snprintf(line, sizeof line, "%s", TR("Ещё не играл", "Not played yet"));
         for (int k = 0; k < d.n; k++)
             if (d.nf[k] >= 5 && !strcmp(d.f[k][0], "L") && !strcmp(d.f[k][1], lad[l])) {
                 int g = atoi(d.f[k][3]), w = atoi(d.f[k][4]);
                 char mm[64];
                 mmr_text(mm, sizeof mm, d.f[k][2], g);
-                snprintf(line, sizeof line, "MMR %s  \xC2\xB7  игр %d  \xC2\xB7  побед %d%%", mm, g, g ? w * 100 / g : 0);
+                snprintf(line, sizeof line, TR("MMR %s  ·  игр %d  ·  побед %d%%", "MMR %s  ·  games %d  ·  won %d%%"), mm, g, g ? w * 100 / g : 0);
             }
         van_text(dl, x, y + p.lh * 1.3f, VAN_TEXT, line);
     }
     // by nation
     float ny = y + p.lh * 3.2f, nrow = p.lh * 1.45f;
     float nc[3] = {x0, x0 + 0.22f * p.size.x, x0 + 0.58f * p.size.x};
-    van_text(dl, nc[0], ny, VAN_TITLE, "Нация");
-    van_text(dl, nc[1], ny, VAN_TITLE, "1 на 1: MMR \xC2\xB7 игр \xC2\xB7 побед");
-    van_text(dl, nc[2], ny, VAN_TITLE, "Команды: MMR \xC2\xB7 игр \xC2\xB7 побед");
+    van_text(dl, nc[0], ny, VAN_TITLE, TR("Нация", "Nation"));
+    van_text(dl, nc[1], ny, VAN_TITLE, TR("1 на 1: MMR · игр · побед", "1 vs 1: MMR · games · won"));
+    van_text(dl, nc[2], ny, VAN_TITLE, TR("Команды: MMR · игр · побед", "Teams: MMR · games · won"));
     for (int i = 0; i < 5; i++) {
         float yy = ny + (i + 1) * nrow;
-        van_text(dl, nc[0], yy, VAN_TEXT, NATIONS[i][1]);
+        van_text(dl, nc[0], yy, VAN_TEXT, TR(NATIONS[i][1], NATIONS[i][2]));
         for (int l = 0; l < 2; l++) {
             char cell[96] = "-";
             for (int k = 0; k < d.n; k++)
@@ -919,7 +1020,8 @@ static void tab_stats(const Pane &p, float top, float bottom) {
     // history
     float hy = ny + 6 * nrow + p.lh * 0.6f;
     static const float HC[7] = {0.03f, 0.13f, 0.37f, 0.43f, 0.55f, 0.67f, 0.83f};
-    static const char *HT[7] = {"Дата", "Режим \xC2\xB7 карта", "Бой", "Нация", "Итог", "Союзники", "Противники"};
+    const char *HT[7] = {TR("Дата", "Date"), TR("Режим · карта", "Mode · map"), TR("Бой", "Size"), TR("Нация", "Nation"),
+                         TR("Итог", "Result"), TR("Союзники", "Allies"), TR("Противники", "Opponents")};
     float hc[8];
     for (int i = 0; i < 7; i++) hc[i] = p.p0.x + HC[i] * p.size.x;
     hc[7] = p.p0.x + 0.99f * p.size.x;
@@ -948,8 +1050,8 @@ static void tab_stats(const Pane &p, float top, float bottom) {
         snprintf(size, sizeof size, "%s\xC3\x97%s", f[5], f[5]);
         bool won = atoi(f[7]) != 0, rated = !strcmp(f[9], "rated");
         int delta = atoi(f[8]);
-        if (rated) snprintf(result, sizeof result, "%s %+d", won ? "Победа" : "Поражение", delta);
-        else snprintf(result, sizeof result, "%s (спорный)", won ? "Победа" : "Поражение");
+        if (rated) snprintf(result, sizeof result, "%s %+d", won ? TR("Победа", "Win") : TR("Поражение", "Loss"), delta);
+        else snprintf(result, sizeof result, TR("%s (спорный)", "%s (disputed)"), won ? TR("Победа", "Win") : TR("Поражение", "Loss"));
         van_cell(hl, hc[0], yy, hc[1] - hc[0] - 6, c, date);
         van_cell(hl, hc[1], yy, hc[2] - hc[1] - 6, c, what);
         van_cell(hl, hc[2], yy, hc[3] - hc[2] - 6, c, size);
@@ -957,13 +1059,14 @@ static void tab_stats(const Pane &p, float top, float bottom) {
         van_cell(hl, hc[4], yy, hc[5] - hc[4] - 6, !rated ? VAN_TITLE : won ? VAN_WIN : VAN_WARN, result);
         van_cell(hl, hc[5], yy, hc[6] - hc[5] - 6, c, f[10][0] ? f[10] : "-");
         van_cell(hl, hc[6], yy, hc[7] - hc[6] - 6, c, f[11]);
-        if (hot && (f[10][0] || f[11][0])) ImGui::SetTooltip("Союзники: %s\nПротивники: %s", f[10][0] ? f[10] : "-", f[11]);
+        if (hot && (f[10][0] || f[11][0])) ImGui::SetTooltip(TR("Союзники: %s\nПротивники: %s", "Allies: %s\nOpponents: %s"), f[10][0] ? f[10] : "-", f[11]);
         ImGui::PopID();
     }
     if (!shown)
         van_text(hl, o.x + 0.03f * p.size.x, o.y + p.lh * 0.5f, VAN_TITLE,
-                 "Рейтинговых игр пока нет. Засчитываются: Ось против Союзников, «Зоны боевых действий» или «Превосходство», "
-                 "равные команды, от 3 минут.");
+                 TR("Рейтинговых игр пока нет. Засчитываются: Ось против Союзников, «Зоны боевых действий» или «Превосходство», "
+                     "равные команды, от 3 минут.",
+                     "No rated games yet. Rated: Axis vs Allies, \"Battle Zones\" or \"Domination\", even teams, 3 minutes or longer."));
     else ImGui::Dummy(ImVec2(1, 0));
     ImGui::EndChild();
 }
@@ -1023,7 +1126,7 @@ static void tab_leaders(const Pane &p, float top, float bottom) {
     ImDrawList *dl = p.dl;
     float x0 = p.p0.x + 0.03f * p.size.x, y = top + (p.row - p.lh) * 0.5f;
     // which ladder, as the page's tabs do it
-    const char *names[2] = {"1 на 1", "Команды"};
+    const char *names[2] = {TR("1 на 1", "1 vs 1"), TR("Команды", "Teams")};
     float x = x0;
     for (int i = 0; i < 2; i++) {
         float tw = ImGui::CalcTextSize(names[i]).x;
@@ -1037,7 +1140,7 @@ static void tab_leaders(const Pane &p, float top, float bottom) {
         if (!i) { van_text(dl, x - 9 * p.sx, y, VAN_TAB_OFF, "|"); }
     }
     static const float LC[5] = {0.03f, 0.10f, 0.44f, 0.70f, 0.82f};     // MMR wide: "1674 (калибровка 5/10)"
-    static const char *LT[5] = {"#", "Игрок", "MMR", "Игр", "Побед"};
+    const char *LT[5] = {"#", TR("Игрок", "Player"), "MMR", TR("Игр", "Games"), TR("Побед", "Won")};
     float lc[5];
     for (int i = 0; i < 5; i++) lc[i] = p.p0.x + LC[i] * p.size.x;
     float hy = top + p.row;
@@ -1073,7 +1176,8 @@ static void tab_leaders(const Pane &p, float top, float bottom) {
         if (click) open_profile(f[1]);
         ImGui::PopID();
     }
-    if (!shown) van_empty(p, bl, o, d.state == 0 ? "Загрузка..." : d.state == 2 ? "Сервер мода не отвечает" : "Пока никто не сыграл рейтинговых игр");
+    if (!shown) van_empty(p, bl, o, d.state == 0 ? TR("Загрузка...", "Loading...") : d.state == 2 ? TR("Сервер мода не отвечает", "The mod's server does not answer") :
+                                                                                       TR("Пока никто не сыграл рейтинговых игр", "Nobody has played rated games yet"));
     else ImGui::Dummy(ImVec2(1, 0));
     ImGui::EndChild();
 }
@@ -1124,25 +1228,25 @@ static void chat_mod_menu(const char *id, const char *name, bool mod) {
     if (!ImGui::BeginPopup("##chatmod")) return;
     ImGui::TextDisabled("%s", name);
     ImGui::Separator();
-    if (ImGui::Selectable("Упомянуть")) {           // "@name " at the end of the line being written
+    if (ImGui::Selectable(TR("Упомянуть", "Mention"))) {           // "@name " at the end of the line being written
         char at[ONLINE_NAME + 4];
         size_t len = strlen(g_chat_text);
         snprintf(at, sizeof at, "%s@%s ", len && g_chat_text[len - 1] != ' ' ? " " : "", name);
         if (len + strlen(at) < 300 * 3) strcat(g_chat_text, at);
         g_chat_focus = true;
     }
-    if (strncmp(name, "Anonymous", 9) && ImGui::Selectable("Профиль Steam")) open_profile(id);
+    if (strncmp(name, "Anonymous", 9) && ImGui::Selectable(TR("Профиль Steam", "Steam profile"))) open_profile(id);
     if (!mod) { ImGui::EndPopup(); return; }
     ImGui::Separator();
     static const int DAYS[4] = {1, 3, 7, 30};
     for (int d : DAYS) {
         char t[48];
-        snprintf(t, sizeof t, "Замутить на %d дн.", d);
+        snprintf(t, sizeof t, TR("Замутить на %d дн.", "Mute for %d days"), d);
         if (ImGui::Selectable(t)) chat_mod("mute", id, d);
     }
-    if (ImGui::Selectable("Удалить его сообщения")) chat_mod("del", id, 0);
-    if (ImGui::Selectable("Забанить в чате")) chat_mod("ban", id, 0);
-    if (ImGui::Selectable("Разбанить")) chat_mod("unban", id, 0);
+    if (ImGui::Selectable(TR("Удалить его сообщения", "Delete their messages"))) chat_mod("del", id, 0);
+    if (ImGui::Selectable(TR("Забанить в чате", "Ban from the chat"))) chat_mod("ban", id, 0);
+    if (ImGui::Selectable(TR("Разбанить", "Unban"))) chat_mod("unban", id, 0);
     ImGui::EndPopup();
 }
 
@@ -1214,11 +1318,17 @@ static bool mentions(const char *text, const char *name) {
     return false;
 }
 
-static const char *CHAT_RULES[] = {
+static const char *CHAT_RULES_RU[] = {
     "0. Не быть мудаком.",
     "1. Старайтесь не обсуждать других и не переходить на личности и конфликты.",
     "2. Не выкладывайте материалы жестокого, насильственного или сексуального характера.",
     "3. Ссылки удаляются, кроме discord.gg и youtube.com.",
+};
+static const char *CHAT_RULES_EN[] = {
+    "0. Don't be a jerk.",
+    "1. Try not to talk about others, get personal or start conflicts.",
+    "2. No cruel, violent or sexual content.",
+    "3. Links are removed, except discord.gg and youtube.com.",
 };
 
 // The lobby's chat panel: a GLOBAL CHAT tab after the game's, ours over the channel while it is on; a click on
@@ -1398,7 +1508,7 @@ static void chat_block() {
     }
 
     // the channels, as the page's own tabs (ДРУЗЬЯ | ПОСЛЕДНЯЯ ИГРА)
-    static const char *TABS[2] = {"ЧАТ RU", "CHAT ENG"};
+    const char *TABS[2] = {TR("ЧАТ RU", "CHAT RU"), TR("ЧАТ ENG", "CHAT ENG")};
     float tx = lobby ? msg0.x : p0.x + pad, ty = tabs_y;
     for (int i = 0; i < 2; i++) {
         float tw = ImGui::CalcTextSize(TABS[i]).x;
@@ -1413,26 +1523,27 @@ static void chat_block() {
     }
     if (mod) {          // the punishments in force, for the moderator
         char t[48];
-        snprintf(t, sizeof t, "Наказания: %d", st.bans);
+        snprintf(t, sizeof t, TR("Наказания: %d", "Punishments: %d"), st.bans);
         float tw = ImGui::CalcTextSize(t).x, bx = bans_r - tw;
         ImGui::SetCursorScreenPos(ImVec2(bx, ty));
         if (ImGui::InvisibleButton("##bans", ImVec2(tw, lh))) ImGui::OpenPopup("##chatbans");
         van_text(dl, bx, ty, ImGui::IsItemHovered() ? VAN_HOVER : VAN_TAB_OFF, t);
         if (ImGui::BeginPopup("##chatbans")) {
-            if (!st.bans) ImGui::TextDisabled("никого");
+            if (!st.bans) ImGui::TextDisabled("%s", TR("никого", "none"));
             for (int i = 0; i < st.bans; i++) {
                 const ChatBan &b = st.ban[i];
-                char when[48] = "навсегда";
+                char when[48];
+                snprintf(when, sizeof when, "%s", TR("навсегда", "for good"));
                 if (!b.ban) {
                     time_t u = (time_t)b.until;
                     struct tm tmv;
                     localtime_s(&tmv, &u);
-                    strftime(when, sizeof when, "мут до %d.%m %H:%M", &tmv);
+                    strftime(when, sizeof when, TR("мут до %d.%m %H:%M", "muted until %d.%m %H:%M"), &tmv);
                 }
                 ImGui::PushID(i);
-                ImGui::Text("%s  ·  %s", b.name, b.ban ? "бан" : when);
+                ImGui::Text("%s  ·  %s", b.name, b.ban ? TR("бан", "ban") : when);
                 ImGui::SameLine();
-                if (ImGui::SmallButton("Разбанить")) chat_mod("unban", b.sid, 0);
+                if (ImGui::SmallButton(TR("Разбанить", "Unban"))) chat_mod("unban", b.sid, 0);
                 ImGui::PopID();
             }
             ImGui::EndPopup();
@@ -1445,7 +1556,7 @@ static void chat_block() {
     ImGui::SetWindowFontScale(sy);
     {
         ImGui::PushStyleColor(ImGuiCol_Text, VAN_TITLE);
-        ImGui::Text("Онлайн: %d", on);
+        ImGui::Text(TR("Онлайн: %d", "Online: %d"), on);
         ImGui::PopStyleColor();
         // MMR under each name (1x1 and teams), for players signed in with Steam: the first 16 of the list
         static Doc rd;
@@ -1473,7 +1584,7 @@ static void chat_block() {
                 ImVec2 at(floorf(c.x + av + 6 * sx), floorf(c.y + lh + 1 * sy));
                 ImGui::GetWindowDrawList()->AddText(small, small_size, at, VAN_ITEM, mm);
                 if (ImGui::IsMouseHoveringRect(at, ImVec2(at.x + small->CalcTextSizeA(small_size, FLT_MAX, 0, mm).x, at.y + small_size)))
-                    ImGui::SetTooltip("MMR: 1\xC3\x97" "1 / команды");
+                    ImGui::SetTooltip("%s", TR("MMR: 1×1 / команды", "MMR: 1×1 / teams"));
             }
             ImGui::SetCursorScreenPos(ImVec2(c.x, c.y + av + 4 * sy));
             ImGui::Dummy(ImVec2(1, 0));
@@ -1491,17 +1602,17 @@ static void chat_block() {
     {
         static long long last_id[2];
         bool at_end = ImGui::GetScrollY() >= ImGui::GetScrollMaxY() - 4;
-        if (st.banned) ImGui::TextColored(ImColor(VAN_WARN), "Вы забанены в глобальном чате.");
-        else if (st.state == 0 && !n) ImGui::TextColored(ImColor(VAN_TITLE), "Загрузка...");
-        else if (st.state == 2 && !n) ImGui::TextColored(ImColor(VAN_WARN), "Сервер мода не отвечает");
+        if (st.banned) ImGui::TextColored(ImColor(VAN_WARN), "%s", TR("Вы забанены в глобальном чате.", "You are banned from the global chat."));
+        else if (st.state == 0 && !n) ImGui::TextColored(ImColor(VAN_TITLE), "%s", TR("Загрузка...", "Loading..."));
+        else if (st.state == 2 && !n) ImGui::TextColored(ImColor(VAN_WARN), "%s", TR("Сервер мода не отвечает", "The mod's server does not answer"));
         if (!st.banned) {           // the rules, at the top: only here, every game
-            ImGui::TextColored(ImColor(ACCENT), "Правила чата");
+            ImGui::TextColored(ImColor(ACCENT), "%s", TR("Правила чата", "Chat rules"));
             ImGui::PushStyleColor(ImGuiCol_Text, VAN_TITLE);
-            for (const char *r : CHAT_RULES) ImGui::TextWrapped("%s", r);
+            for (const char *r : lang_en() ? CHAT_RULES_EN : CHAT_RULES_RU) ImGui::TextWrapped("%s", r);
             ImGui::PopStyleColor();
             ImGui::Dummy(ImVec2(1, 4 * sy));
         }
-        if (!st.banned && !n && st.state == 1) ImGui::TextColored(ImColor(VAN_TITLE), "Пока тихо. Сообщения стираются каждые два часа.");
+        if (!st.banned && !n && st.state == 1) ImGui::TextColored(ImColor(VAN_TITLE), "%s", TR("Пока тихо. Сообщения стираются каждые два часа.", "Quiet so far. Messages are wiped every two hours."));
         for (int i = 0; i < n; i++) {
             const ChatMsg &m = msgs[i];
             ImGui::PushID((int)m.id);
@@ -1518,8 +1629,8 @@ static void chat_block() {
             if (mod && !strcmp(menu_id, m.sid)) snprintf(menu_name, sizeof menu_name, "%s", m.name);
             ImGui::SameLine();
             if (uint64_t lobby = invite_lobby(m.text)) {       // an invite: a button to the sender's lobby
-                if (!strcmp(m.sid, my)) ImGui::TextColored(ImColor(VAN_TAB_OFF), "приглашает в своё лобби");
-                else if (ImGui::SmallButton("Войти в лобби")) join_lobby(lobby, m.sid);
+                if (!strcmp(m.sid, my)) ImGui::TextColored(ImColor(VAN_TAB_OFF), "%s", TR("приглашает в своё лобби", "invites to their lobby"));
+                else if (ImGui::SmallButton(TR("Войти в лобби", "Join lobby"))) join_lobby(lobby, m.sid);
             } else if (my_name[0] && mentions(m.text, my_name)) {
                 ImGui::PushStyleColor(ImGuiCol_Text, ACCENT);       // naming me: in the accent colour
                 ImGui::TextWrapped("%s", m.text);
@@ -1548,7 +1659,7 @@ static void chat_block() {
     if (g_chat_focus && can) ImGui::SetKeyboardFocusHere();
     bool to_end = g_chat_focus;
     g_chat_focus = false;
-    bool enter = ImGui::InputTextWithHint("##chat_in", can ? "Сообщение, Enter - отправить. /invite - позвать в своё лобби" : "", text, 300 * 3 + 1,
+    bool enter = ImGui::InputTextWithHint("##chat_in", can ? TR("Сообщение, Enter - отправить. /invite - позвать в своё лобби", "Message, Enter to send. /invite - invite to your lobby") : "", text, 300 * 3 + 1,
                                           ImGuiInputTextFlags_EnterReturnsTrue | ImGuiInputTextFlags_CallbackAlways,
                                           [](ImGuiInputTextCallbackData *d) -> int {      // after a mention: cursor at the end
                                               if (*(bool *)d->UserData) { d->CursorPos = d->SelectionStart = d->SelectionEnd = d->BufTextLen; *(bool *)d->UserData = false; }
@@ -1562,7 +1673,7 @@ static void chat_block() {
             uint64_t lobby = my_lobby();
             rc_log("chat: /invite, lobby %llu", (unsigned long long)lobby);
             if (lobby) { snprintf(text, text_size, "/invite %llu", (unsigned long long)lobby); local_note[0] = 0; }
-            else { snprintf(local_note, sizeof local_note, "Не вижу вашего лобби: зайдите в лобби игры и повторите /invite"); text[0] = 0; }
+            else { snprintf(local_note, sizeof local_note, "%s", TR("Не вижу вашего лобби: зайдите в лобби игры и повторите /invite", "Can't see your lobby: join a game lobby and try /invite again")); text[0] = 0; }
         } else
             local_note[0] = 0;
         if (text[0]) chat_send(g_chat_ch, text);
@@ -1570,16 +1681,17 @@ static void chat_block() {
         ImGui::SetKeyboardFocusHere(-1);         // stay in the line for the next one
     }
     char note[128] = "";
-    if (g_online_consent != 1) snprintf(note, sizeof note, "Чтобы писать, включите \"Показывать меня\" во вкладке PVP");
-    else if (st.banned) snprintf(note, sizeof note, "Вы забанены в чате");
+    if (g_online_consent != 1) snprintf(note, sizeof note, "%s", TR("Чтобы писать, включите \"Показывать меня\" во вкладке PVP", "To write, turn on \"Show me\" in the PVP tab"));
+    else if (st.banned) snprintf(note, sizeof note, "%s", TR("Вы забанены в чате", "You are banned from the chat"));
     else if (st.muted_until) {
         time_t u = (time_t)st.muted_until;
         struct tm tmv;
         localtime_s(&tmv, &u);
-        strftime(note, sizeof note, "Вам запрещено писать до %d.%m %H:%M", &tmv);
+        strftime(note, sizeof note, TR("Вам запрещено писать до %d.%m %H:%M", "You may not write until %d.%m %H:%M"), &tmv);
     } else if (local_note[0]) snprintf(note, sizeof note, "%s", local_note);
     else if (st.sent[0]) snprintf(note, sizeof note, "%s", st.sent);
-    else if (g_steam_verified != 1) snprintf(note, sizeof note, "Вы пишете как Anonymous: войдите через Steam (вкладка PVP > Моя статистика)");
+    else if (g_steam_verified != 1) snprintf(note, sizeof note, "%s", TR("Вы пишете как Anonymous: войдите через Steam (вкладка PVP > Моя статистика)",
+                                              "You write as Anonymous: sign in through Steam (PVP tab > My stats)"));
     if (note[0]) {
         ImVec4 clip(mx, 0, mx + mw, io.DisplaySize.y);
         dl->AddText(ImGui::GetFont(), ImGui::GetFontSize(), ImVec2(floorf(mx), floorf(lobby ? iy - lh - 4 * sy : iy + input_h + 4 * sy)), VAN_WARN, note,
@@ -1621,7 +1733,7 @@ static void pvp_block() {
     float col0 = p0.x + VAN_COL[0] * size.x;
 
     // the tabs, where the page has its column titles
-    static const char *TABS[3] = {"ОНЛАЙН", "МОЯ СТАТИСТИКА", "ЛИДЕРЫ"};
+    const char *TABS[3] = {TR("ОНЛАЙН", "ONLINE"), TR("МОЯ СТАТИСТИКА", "MY STATS"), TR("ЛИДЕРЫ", "LEADERS")};
     float tx = p0.x + 0.03f * size.x, ty = p0.y + (top > lh ? (top - lh) * 0.5f : 0);
     for (int i = 0; i < 3; i++) {
         float tw = ImGui::CalcTextSize(TABS[i]).x;
@@ -1646,10 +1758,11 @@ static void pvp_block() {
     char line[160];
     static OnlinePlayer all[ONLINE_MAX];
     int online_n = online_copy(all, ONLINE_MAX, &state);
-    if (g_online_held) snprintf(line, sizeof line, "Ваш SteamID закреплён за другим ключом: напишите автору мода");
-    else snprintf(line, sizeof line, state == 2 ? "С модом онлайн: %d  \xC2\xB7  сервер не отвечает" : "С модом онлайн: %d", online_n);
+    if (g_online_held) snprintf(line, sizeof line, "%s", TR("Ваш SteamID закреплён за другим ключом: напишите автору мода", "Your SteamID is held by another key: write to the mod's author"));
+    else snprintf(line, sizeof line, state == 2 ? TR("С модом онлайн: %d  ·  сервер не отвечает", "Online with the mod: %d  ·  the server does not answer") :
+                                                  TR("С модом онлайн: %d", "Online with the mod: %d"), online_n);
     van_text(dl, col0, fy, state == 2 || g_online_held ? VAN_WARN : VAN_TITLE, line);
-    const char *me_txt = "Показывать меня и засчитывать мои матчи";
+    const char *me_txt = TR("Показывать меня и засчитывать мои матчи", "Show me and count my matches");
     float box = lh * 0.7f, mw = ImGui::CalcTextSize(me_txt).x;
     ImVec2 b0(p0.x + VAN_COL[2] * size.x, fy + (lh - box) * 0.5f);
     ImGui::SetCursorScreenPos(ImVec2(b0.x, fy));
@@ -1865,6 +1978,7 @@ static void draw(IDXGISwapChain *sc) {
     g_online_want = online_shown() || g_pvp_drawn || g_chat_drawn;
     if (online_shown()) online_window();
     integrity_window();
+    if (about_shown()) about_window();
     if (consent_shown()) consent_window();
     else if (login_shown()) login_window();
     if (prep_shown()) {

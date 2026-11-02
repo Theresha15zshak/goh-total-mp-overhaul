@@ -81,13 +81,13 @@ function esc(s) {
 
 function page(list) {
   const rows = list.map(p =>
-    `<tr><td>${p.verified ? `<a href="https://steamcommunity.com/profiles/${p.steam_id}">${esc(p.name)}</a>` : esc(p.name)}</td><td>${esc(p.version)}</td><td>${p.ago} с назад</td></tr>`
+    `<tr><td>${p.verified ? `<a href="https://steamcommunity.com/profiles/${p.steam_id}">${esc(p.name)}</a>` : esc(p.name)}</td><td>${esc(p.version)}</td><td>${p.ago} s</td></tr>`
   ).join('');
   return `<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width">
-<title>GoH онлайн</title>
+<title>GoH online</title>
 <style>body{font:15px system-ui;margin:24px;background:#16181c;color:#ddd}a{color:#9cf}td,th{padding:4px 12px;text-align:left}</style>
-<h1>Сейчас в игре с модом: ${list.length}</h1>
-<table><tr><th>Игрок</th><th>Версия</th><th>Был</th></tr>${rows}</table>`;
+<h1>Сейчас в игре с модом / Playing with the mod now: ${list.length}</h1>
+<table><tr><th>Игрок / Player</th><th>Версия / Version</th><th>Был / Seen</th></tr>${rows}</table>`;
 }
 
 // Requests per IP address and minute (wrangler.jsonc ratelimits): a game polls the chat every 3 s and the

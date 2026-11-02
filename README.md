@@ -1,23 +1,42 @@
-# GoH mod: replays, match charts, competitive balance, PVP
+# GoH mod: PVP rating, global chat, replays, match charts
 
 A client-side mod for Call to Arms - Gates of Hell 1.067, shipped as one proxy DLL (`iphlpapi.dll` in the
-game's `binaries\x64`). Vanilla-compatible: nothing on disk changes, the lobby's resource check is untouched.
+game's `binaries\x64`). Vanilla-compatible: the game's files on disk stay as they are and you can play with
+people who don't have the mod. Russian and English (it follows the game's language in Steam).
 
-- **Replays:** pause, speed 1/4..16x, seek and rewind, instant jumps from in-memory snapshots, a player's own camera.
-- **Match charts** (F9): points, army, kills per player, in replays and after a battle (never during one).
-- **Competitive balance** (F7): a switch for a few balance files, followed by the match server a hosted game starts.
-- **Online / PVP:** a PVP button in the game's Internet list, players with the mod online (F6), our server `server/`.
-- **Music** (F10): own battle music in place of the maps' triggers.
+**Download:** [Releases](../../releases) — unpack, close the game, run `install.bat` (`uninstall.bat` removes it all).
+
+- **PVP rating (MMR):** Axis vs Allies in Battle Zones and Domination, 1v1 and teams, counted from the replays
+  the game writes; a PVP button on the Internet page with who is online, your stats and the leaders; MMR under
+  names in the lobby.
+- **Global chat:** RU and ENG channels on the Internet page and a GLOBAL CHAT tab in the lobby; `/invite` puts
+  a "Join lobby" button in the chat; right click a name to mention someone (they hear a sound).
+- **Ping column** in the list of games (the game's own, turned on and made faster).
+- **Replays:** a Replays tab in Extras, files named by mode, map, nation and date; pause, speed, seeking (F8);
+  match charts (F9).
+- **Sign in through Steam** (Steam OpenID on steamcommunity.com): the mod gets only your SteamID, never a
+  password or a session.
+- **Competitive balance** (F7, work in progress).
+- Bottom left in the menus the mod says whether your DLL is an official build; check by hand against
+  [the list of official builds](https://goh-online.goh-mod.workers.dev/versions.html).
+
+## Русский
+
+Клиентский мод для Gates of Hell 1.067: PVP-рейтинг (MMR) по реплеям, кнопка PVP со списком онлайна,
+статистикой и лидерами, глобальный чат RU / ENG (с `/invite` и упоминаниями), колонка Ping в списке игр,
+вкладка «Реплеи» с перемоткой и графиками матча, вход через Steam (только SteamID). С игроками без мода
+играть можно. Скачать: [Releases](../../releases), запустить `install.bat`.
 
 ## Layout
 
 | Path | What |
 |---|---|
-| `dll/` | the DLL: `goh_replay.c` (entry, replay logic), `ui.cpp` (ImGui panel), `balance.c`, `online.c`, `pvp.c`, `snap.c`, `music.cpp` |
+| `dll/` | the DLL: `goh_replay.c` (entry, replay logic), `ui.cpp` (ImGui interface), `online.c` (server, chat), `pvp.c` (the game's pages), `steamlobby.c`, `report.c`, `balance.c`, `snap.c`, `music.cpp` |
 | `tools/build.py` | builds `build/iphlpapi.dll` (`python tools/build.py`, or `competitive` for the switch-only build) |
-| `server/` | Cloudflare Worker + D1: online list, player keys (`npx wrangler deploy`) |
+| `tools/release.py` | puts the builds' SHA-256 on the server's list of official builds |
+| `server/` | Cloudflare Worker + D1: online list, ratings, chat, Steam sign-in (`npx wrangler deploy`) |
 | `re/` | reverse-engineering notes (`NOTES.md`) and tools (`gx.py`, `twin.py`) |
-| `dist/` | install packs: scripts and readmes (the DLLs and the replay mod's layouts are added when packing) |
+| `dist/` | the install pack: scripts and readmes (the DLLs are added when packing) |
 | `third_party/` | Dear ImGui and stb (submodules) |
 
 ## Build
@@ -29,3 +48,4 @@ python tools/build.py
 ```
 
 The build reads a few files from the installed game (balance and layout copies are made from them).
+A DLL you build yourself is not on the list of official builds, so the mod will say so in the menus.
