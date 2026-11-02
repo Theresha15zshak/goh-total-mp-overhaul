@@ -2,6 +2,9 @@
 // Only with the player's yes (asked once, kept in goh_online.ini): every 2 minutes the SteamID, the Steam
 // name and the balance version go to the server. The list is fetched while the F6 window is open.
 // The SteamID and name come from the game's own steam_api64.dll; the server cannot verify them.
+// Steam sign-in: the server knows a SteamID is ours once the player signed in on steamcommunity.com (the
+// game's Steam overlay or a browser, server/src/verify.js); until then the player is Anonymous in the chat and
+// sends no match reports. Whether we are signed in comes with each heartbeat.
 // The global chat (server/src/chat.js) goes through here too: read while it is on screen, written with the key.
 // Everything here runs on a thread of ours with short timeouts: no server, no effect on the game.
 // The player's key (Documents\My Games\gates of hell\goh_mod_key.txt, made at the first start): the server
@@ -25,6 +28,10 @@
 volatile long g_online_consent = -1;
 volatile long g_online_want;
 volatile long g_online_held;
+volatile long g_steam_verified = -1;
+static volatile long g_login_want;          // the player asked to sign in
+static char g_login_url[160];               // where to sign in, once the server gave it
+static DWORD g_login_at;                    // when; the status is asked every few seconds for 15 minutes
 static char g_ini[MAX_PATH];
 static char g_key[65];          // 64 hex characters, "" if it could be neither read nor made
 static char g_id[18];           // our SteamID, "" until Steam is up
@@ -142,17 +149,23 @@ static void parse_list(char *t) {
         line = strchr(p, '\n');
         if (!line) break;
         *line = 0;
-        char *f[4];
+        char *f[5] = {0};
         int k = 0;
         f[k++] = p;
         for (char *q = p; *q && k < 4; q++) if (*q == '\t') { *q = 0; f[k++] = q + 1; }
-        if (k != 4 || strlen(f[0]) != 17 || strspn(f[0], "0123456789") != 17) continue;
-        if (strlen(f[1]) >= ONLINE_NAME || strlen(f[2]) >= sizeof tmp->version || strchr(f[3], '\t')) continue;
+        if (k == 4 && f[3] && strchr(f[3], '\t')) {         // ?v=2: "\tverified" after the seconds
+            char *t = strchr(f[3], '\t');
+            *t = 0;
+            f[k++] = t + 1;
+        }
+        if (k < 4 || strlen(f[0]) != 17 || strspn(f[0], "0123456789") != 17) continue;
+        if (strlen(f[1]) >= ONLINE_NAME || strlen(f[2]) >= sizeof tmp->version) continue;
         OnlinePlayer *o = &tmp[n++];
         strcpy(o->id, f[0]);
         strcpy(o->name, f[1]);
         strcpy(o->version, f[2]);
         o->ago = atoi(f[3]);
+        o->verified = k > 4 && atoi(f[4]) == 1;
     }
     AcquireSRWLockExclusive(&g_lock);
     memcpy(g_list, tmp, n * sizeof *tmp);
@@ -262,10 +275,10 @@ static void chat_parse(int ch, char *t) {
     for (char *line = t, *next; line && *line; line = next) {
         next = strchr(line, '\n');
         if (next) *next++ = 0;
-        char *f[6];
+        char *f[7];
         int k = 0;
         f[k++] = line;
-        for (char *q = line; *q && k < 6; q++) if (*q == '\t') { *q = 0; f[k++] = q + 1; }
+        for (char *q = line; *q && k < 7; q++) if (*q == '\t') { *q = 0; f[k++] = q + 1; }
         if (!strcmp(f[0], "E") && k >= 2) epoch = _atoi64(f[1]);
         else if (!strcmp(f[0], "S") && k >= 2) { if (!strcmp(f[1], "ban")) st.banned = 1; else if (k >= 3) st.muted_until = _atoi64(f[2]); }
         else if (!strcmp(f[0], "A")) st.moderator = 1;
@@ -275,13 +288,14 @@ static void chat_parse(int ch, char *t) {
             snprintf(b->name, sizeof b->name, "%s", f[2]);
             b->ban = !strcmp(f[3], "ban");
             b->until = _atoi64(f[4]);
-        } else if (!strcmp(f[0], "M") && k == 6 && n < CHAT_MAX && strlen(f[3]) == 17) {
+        } else if (!strcmp(f[0], "M") && k >= 6 && n < CHAT_MAX && strlen(f[3]) == 17) {
             ChatMsg *m = &add[n++];
             m->id = _atoi64(f[1]);
             m->at_ms = _atoi64(f[2]);
             strcpy(m->sid, f[3]);
             snprintf(m->name, sizeof m->name, "%s", f[4]);
             snprintf(m->text, sizeof m->text, "%s", f[5]);
+            m->verified = k > 6 && atoi(f[6]) == 1;
         }
     }
     if (epoch < 0) return;
@@ -349,6 +363,55 @@ static void chat_tick(HINTERNET s, char *buf) {
     }
 }
 
+// ---- Steam sign-in: the address from the server, then its answer awaited ----------------------------------
+void online_steam_login(void) {
+    if (g_online_consent != 1) online_set_consent(1);   // signing in is asking to take part
+    g_login_want = 1;
+}
+
+int online_login_url(char *out, size_t n) {
+    AcquireSRWLockShared(&g_lock);
+    int ok = g_login_url[0] != 0;
+    snprintf(out, n, "%s", g_login_url);
+    ReleaseSRWLockShared(&g_lock);
+    return ok;
+}
+
+int online_remind(void) { return GetPrivateProfileIntA("online", "steam_remind", 1, g_ini); }
+void online_set_remind(int on) { WritePrivateProfileStringA("online", "steam_remind", on ? "1" : "0", g_ini); }
+
+static void login_tick(HINTERNET s, char *buf) {
+    static DWORD asked;
+    DWORD now = GetTickCount();
+    char body[128];
+    if (!g_key[0]) return;
+    snprintf(body, sizeof body, "%s\n%s", g_id, g_key);
+    if (InterlockedExchange(&g_login_want, 0)) {
+        int st = http(s, L"POST", L"/verify/start", body, buf);
+        rc_log("online: steam sign-in asked: %d", st);
+        AcquireSRWLockExclusive(&g_lock);
+        if (st == 200 && !strncmp(buf, "https://", 8) && strlen(buf) < sizeof g_login_url) strcpy(g_login_url, buf);
+        ReleaseSRWLockExclusive(&g_lock);
+        g_login_at = now | 1;
+        asked = 0;
+    }
+    if (!g_login_at || g_steam_verified == 1) return;
+    if (now - g_login_at > 15 * 60000) { g_login_at = 0; return; }
+    if (asked && now - asked < 4000) return;
+    asked = now;
+    if (http(s, L"POST", L"/verify/status", body, buf) != 200) return;
+    long v = !strcmp(buf, "verified") ? 1 : !strcmp(buf, "held") ? 2 : 0;
+    if (v == 1 && g_steam_verified != 1) {
+        rc_log("online: signed in with Steam");
+        g_login_at = 0;
+        AcquireSRWLockExclusive(&g_doc_lock);
+        g_doc_at[DOC_PLAYER] = 0;
+        ReleaseSRWLockExclusive(&g_doc_lock);
+        g_beat_now = 1;                         // the online list gets our name
+    }
+    g_steam_verified = v;
+}
+
 static DWORD WINAPI online_thread(LPVOID unused) {
     load_key();
     while (!steam_me()) Sleep(2000);
@@ -371,10 +434,12 @@ static DWORD WINAPI online_thread(LPVOID unused) {
             if (st != 200 && beat_fails++ < 3) rc_log("online: heartbeat got %d%s", st, st == 403 ? " (the SteamID is held by another key)" : "");
             if (st == 200) beat_fails = 0;
             if (st == 200 || st == 403) g_online_held = st == 403;
+            if (st == 200) g_steam_verified = strstr(buf, "verified") ? 1 : 0;
+            else if (st == 403) g_steam_verified = 2;
         }
         long want = g_online_want;
         if (want && (!wanted || now - last_list >= LIST_MS)) {
-            int st = http(s, L"GET", L"/online", NULL, buf);
+            int st = http(s, L"GET", L"/online?v=2", NULL, buf);
             last_list = now;
             if (st == 200) parse_list(buf);
             else { AcquireSRWLockExclusive(&g_lock); g_state = 2; ReleaseSRWLockExclusive(&g_lock); }
@@ -382,7 +447,7 @@ static DWORD WINAPI online_thread(LPVOID unused) {
         wanted = want;
         // finished matches out of the game's replays, one at a time (report.c); and their names
         if (!last_report || now - last_report >= REPORT_MS) replays_rename(g_id);
-        if (g_online_consent == 1 && g_key[0] && (!last_report || now - last_report >= REPORT_MS)) {
+        if (g_online_consent == 1 && g_key[0] && g_steam_verified == 1 && (!last_report || now - last_report >= REPORT_MS)) {
             last_report = now | 1;
             long long end = 0;
             if (report_next(g_id, g_key, body_r, sizeof body_r, &end)) {
@@ -398,6 +463,7 @@ static DWORD WINAPI online_thread(LPVOID unused) {
         }
         fetch_docs(s, buf);
         chat_tick(s, buf);
+        login_tick(s, buf);
         Sleep(chat_busy() ? 100 : 500);
     }
 }

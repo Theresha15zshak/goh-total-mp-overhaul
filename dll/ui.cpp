@@ -63,6 +63,14 @@ static bool prep_shown() { return g_ctl.preparing && g_ctl.state != ST_IDLE; }
 static bool balance_shown() { return g_balance_win; }
 static bool online_shown() { return g_online_win; }
 // asked once, outside battles: may we show this player in the online list
+// the Steam sign-in window (login_window)
+static bool g_login_win = true;         // this session: "Позже" puts it away
+static bool g_login_opened;             // the sign-in page was opened once (the overlay or a browser)
+
+static bool login_shown() {
+    return g_login_win && g_online_consent == 1 && (g_steam_verified == 0 || g_steam_verified == 2 || g_login_opened) &&
+           !g_live_match && g_ctl.state == ST_IDLE && (g_login_opened || online_remind());
+}
 static bool consent_shown() { return g_online_consent == -1 && !g_live_match && g_ctl.state == ST_IDLE; }
 
 static bool raw_mouse_button(LPARAM l) {
@@ -104,7 +112,7 @@ static void hotkeys() {
 static LRESULT CALLBACK wndproc(HWND h, UINT m, WPARAM w, LPARAM l) {
     if (g_ready) {
         if (panel_shown() || charts_shown() || music_shown() || prep_shown() || balance_shown() || online_shown() ||
-            consent_shown() || g_pvp_drawn || g_chat_drawn) {
+            consent_shown() || login_shown() || g_pvp_drawn || g_chat_drawn) {
             ImGui_ImplWin32_WndProcHandler(h, m, w, l);
             // typing into our chat line: the keys are not the game's
             if (ImGui::GetIO().WantTextInput && ((m >= WM_KEYFIRST && m <= WM_KEYLAST) || (m == WM_INPUT && raw_keyboard(l))))
@@ -558,6 +566,75 @@ static void consent_window() {
     ImGui::End();
 }
 
+// ---- Steam sign-in (online.c, server/src/verify.js): asked at the start until the player signs in --------
+
+// in the game's Steam overlay when it is on, else in the browser
+static void open_login(const char *url, bool browser) {
+    HMODULE h = GetModuleHandleA("steam_api64.dll");
+    auto friends_if = h ? (void *(*)())GetProcAddress(h, "SteamAPI_SteamFriends_v017") : nullptr;
+    auto utils_if = h ? (void *(*)())GetProcAddress(h, "SteamAPI_SteamUtils_v010") : nullptr;
+    auto overlay = h ? (void (*)(void *, const char *, int))GetProcAddress(h, "SteamAPI_ISteamFriends_ActivateGameOverlayToWebPage") : nullptr;
+    auto enabled = h ? (bool (*)(void *))GetProcAddress(h, "SteamAPI_ISteamUtils_IsOverlayEnabled") : nullptr;
+    void *fr = friends_if ? friends_if() : nullptr, *ut = utils_if ? utils_if() : nullptr;
+    if (!browser && fr && ut && overlay && enabled && enabled(ut)) overlay(fr, url, 0);
+    else ShellExecuteA(nullptr, "open", url, nullptr, nullptr, SW_SHOWNORMAL);
+}
+
+static const char *LOGIN_WHY =
+    "Чтобы ваши матчи засчитывались в рейтинг PVP, а в глобальном чате был виден ваш ник, подтвердите, что этот "
+    "аккаунт Steam ваш.\n\n"
+    "Откроется официальная страница steamcommunity.com (в оверлее Steam или в браузере): нажмите там «Войти». "
+    "Steam сообщит серверу мода только ваш SteamID. Пароль, сессия и доступ к аккаунту моду не передаются, "
+    "регистрироваться нигде не нужно.\n\n"
+    "Без входа: в чате вы Anonymous, ваши матчи не отправляются в рейтинг, личная статистика недоступна.";
+
+static void login_window() {
+    float k = ImGui::GetFontSize() / 18.f;
+    ImGuiIO &io = ImGui::GetIO();
+    ImGui::SetNextWindowPos(ImVec2(io.DisplaySize.x * 0.5f, io.DisplaySize.y * 0.4f), ImGuiCond_Always, ImVec2(0.5f, 0.5f));
+    ImGui::SetNextWindowSize(ImVec2(520 * k, 0));
+    ImGui::SetNextWindowBgAlpha(0.96f);
+    ImGui::Begin("Мод: вход через Steam###goh_login", nullptr, ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoCollapse |
+                                                           ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoMove);
+    static char url[160];
+    bool have = online_login_url(url, sizeof url);
+    if (g_steam_verified == 1) {
+        ImGui::TextColored(ImColor(120, 200, 100), "Готово: аккаунт Steam подтверждён.");
+        ImGui::TextWrapped("Ваши матчи теперь идут в рейтинг, в чате виден ваш ник.");
+        if (ImGui::Button("Закрыть")) g_login_win = false;
+        ImGui::End();
+        return;
+    }
+    if (g_steam_verified == 2)
+        ImGui::TextColored(ImColor(209, 120, 54), "Ваш SteamID на сервере мода занят другим ключом. Войдите через Steam, чтобы вернуть его.");
+    ImGui::PushTextWrapPos(0);
+    ImGui::TextUnformatted(LOGIN_WHY);
+    ImGui::PopTextWrapPos();
+    ImGui::Spacing();
+    if (!g_login_opened) {
+        if (ImGui::Button("Войти через Steam")) { online_steam_login(); g_login_opened = true; }
+        ImGui::SameLine();
+        if (ImGui::Button("Позже")) g_login_win = false;
+        bool remind = online_remind() != 0;
+        if (ImGui::Checkbox("Напоминать при запуске игры", &remind)) online_set_remind(remind);
+    } else if (!have) {
+        ImGui::TextDisabled("Получаем ссылку от сервера мода...");
+    } else {
+        static bool auto_opened;
+        if (!auto_opened) { auto_opened = true; open_login(url, false); }
+        ImGui::TextColored(ImColor(ACCENT), "Ждём подтверждения от Steam...");
+        ImGui::TextWrapped("Если страница не открылась, откройте её в браузере. Ссылка одноразовая, действует 15 минут:");
+        ImGui::SetNextItemWidth(-1);
+        ImGui::InputText("##login_url", url, sizeof url, ImGuiInputTextFlags_ReadOnly);
+        if (ImGui::Button("Открыть в браузере")) open_login(url, true);
+        ImGui::SameLine();
+        if (ImGui::Button("Скопировать ссылку")) ImGui::SetClipboardText(url);
+        ImGui::SameLine();
+        if (ImGui::Button("Позже")) g_login_win = false;
+    }
+    ImGui::End();
+}
+
 // the players online with the mod; the table fills the height left but `bottom`
 static void online_list(float bottom) {
     static OnlinePlayer list[ONLINE_MAX];
@@ -748,7 +825,7 @@ static void tab_online(const Pane &p, float top, float bottom) {
         char mm[48];
         snprintf(mm, sizeof mm, "%s / %s", m1, mt);
         van_text(dl, col[3], yy, c, mm);
-        if (click) open_profile(list[i].id);
+        if (click && list[i].verified) open_profile(list[i].id);
         ImGui::PopID();
     }
     if (n) ImGui::Dummy(ImVec2(1, 0));
@@ -760,6 +837,15 @@ static void tab_stats(const Pane &p, float top, float bottom) {
     doc_get(d, DOC_PLAYER);
     ImDrawList *dl = p.dl;
     float x0 = p.p0.x + 0.03f * p.size.x, y = top + (p.row - p.lh) * 0.5f;
+    if (g_steam_verified != 1) {            // only for players signed in with Steam: the stats are theirs then
+        van_empty(p, dl, ImVec2(p.p0.x, top), "Личная статистика - после входа через Steam");
+        const char *b = "ВОЙТИ ЧЕРЕЗ STEAM";
+        float tw = ImGui::CalcTextSize(b).x, bx = p.p0.x + (p.size.x - tw) * 0.5f, by = top + p.row * 2.6f;
+        ImGui::SetCursorScreenPos(ImVec2(bx, by));
+        if (ImGui::InvisibleButton("##login", ImVec2(tw, p.lh))) { g_login_win = true; online_steam_login(); g_login_opened = true; }
+        van_text(dl, bx, by, ImGui::IsItemHovered() ? VAN_HOVER : ACCENT, b);
+        return;
+    }
     if (!online_my_id()[0] || d.state != 1) {
         van_empty(p, dl, ImVec2(p.p0.x, top), d.state == 2 ? "Сервер мода не отвечает" : "Загрузка...");
         return;
@@ -1013,13 +1099,13 @@ static void chat_mod_menu(const char *id, const char *name, bool mod) {
     ImGui::EndPopup();
 }
 
-// a name: left click the Steam profile, right click (moderators) the menu
-static void chat_name(const char *id, const char *name, ImU32 col, bool mod, char *menu_id, char *menu_name) {
-    ImGui::PushStyleColor(ImGuiCol_Text, col);
+// a name: left click the Steam profile (players signed in with Steam), right click (moderators) the menu
+static void chat_name(const char *id, const char *name, ImU32 col, bool verified, bool mod, char *menu_id, char *menu_name) {
+    ImGui::PushStyleColor(ImGuiCol_Text, verified ? col : VAN_TAB_OFF);
     ImGui::TextUnformatted(name);
     ImGui::PopStyleColor();
-    if (ImGui::IsItemHovered()) ImGui::SetMouseCursor(ImGuiMouseCursor_Hand);
-    if (ImGui::IsItemClicked(ImGuiMouseButton_Left)) open_profile(id);
+    if (verified && ImGui::IsItemHovered()) ImGui::SetMouseCursor(ImGuiMouseCursor_Hand);
+    if (verified && ImGui::IsItemClicked(ImGuiMouseButton_Left)) open_profile(id);
     if (mod && ImGui::IsItemClicked(ImGuiMouseButton_Right)) {
         snprintf(menu_id, 18, "%s", id);
         snprintf(menu_name, ONLINE_NAME, "%s", name);
@@ -1125,10 +1211,11 @@ static void chat_block() {
         for (int i = 0; i < on; i++) {
             ImGui::PushID(i);
             ImVec2 c = ImGui::GetCursorScreenPos();
-            if (ID3D11ShaderResourceView *img = steam_avatar(online[i].id))
-                ImGui::GetWindowDrawList()->AddImage((ImTextureID)(intptr_t)img, c, ImVec2(c.x + av, c.y + av));
+            ID3D11ShaderResourceView *img = online[i].verified ? steam_avatar(online[i].id) : nullptr;
+            if (img) ImGui::GetWindowDrawList()->AddImage((ImTextureID)(intptr_t)img, c, ImVec2(c.x + av, c.y + av));
+            else ImGui::GetWindowDrawList()->AddRect(c, ImVec2(c.x + av, c.y + av), IM_COL32(70, 66, 60, 255));
             ImGui::SetCursorScreenPos(ImVec2(c.x + av + 6 * sx, c.y + 1 * sy));
-            chat_name(online[i].id, online[i].name, !strcmp(online[i].id, my) ? ACCENT : VAN_TEXT, mod, menu_id, menu_name);
+            chat_name(online[i].id, online[i].name, !strcmp(online[i].id, my) ? ACCENT : VAN_TEXT, online[i].verified, mod, menu_id, menu_name);
             ImGui::SetCursorScreenPos(ImVec2(c.x, c.y + av + 4 * sy));
             ImGui::Dummy(ImVec2(1, 0));
             ImGui::PopID();
@@ -1161,7 +1248,7 @@ static void chat_block() {
             ImGui::SameLine();
             char nm[ONLINE_NAME + 2];
             snprintf(nm, sizeof nm, "%s:", m.name);
-            chat_name(m.sid, nm, !strcmp(m.sid, my) ? ACCENT : VAN_HOVER, mod, menu_id, menu_name);
+            chat_name(m.sid, nm, !strcmp(m.sid, my) ? ACCENT : VAN_HOVER, m.verified, mod, menu_id, menu_name);
             if (mod && !strcmp(menu_id, m.sid)) snprintf(menu_name, sizeof menu_name, "%s", m.name);
             ImGui::SameLine();
             ImGui::TextWrapped("%s", m.text);
@@ -1201,6 +1288,7 @@ static void chat_block() {
         localtime_s(&tmv, &u);
         strftime(note, sizeof note, "Вам запрещено писать до %d.%m %H:%M", &tmv);
     } else if (st.sent[0]) snprintf(note, sizeof note, "%s", st.sent);
+    else if (g_steam_verified != 1) snprintf(note, sizeof note, "Вы пишете как Anonymous: войдите через Steam (вкладка PVP > Моя статистика)");
     if (note[0]) van_text(dl, mx, iy + input_h + 4 * sy, VAN_WARN, note);
 
     ImGui::SetWindowFontScale(1);
@@ -1480,6 +1568,7 @@ static void draw(IDXGISwapChain *sc) {
     g_online_want = online_shown() || g_pvp_drawn || g_chat_drawn;
     if (online_shown()) online_window();
     if (consent_shown()) consent_window();
+    else if (login_shown()) login_window();
     if (prep_shown()) {
         ImGui::GetBackgroundDrawList()->AddRectFilled(ImVec2(0, 0), io.DisplaySize, IM_COL32(0, 0, 0, 120));
         prep_window();

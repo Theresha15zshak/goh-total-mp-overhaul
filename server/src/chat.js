@@ -7,10 +7,13 @@
 //          "S\tmute\tuntil" / "S\tban"   ME may not write (a ban also hides the channel)
 //          "A"                           ME is a moderator, then "B\tsteam_id\tname\tkind\tuntil" per
 //                                        punishment in force
-//          "M\tid\tat_ms\tsteam_id\tname\ttext"   oldest first, at most 100
+//          "M\tid\tat_ms\tsteam_id\tname\ttext\tverified"   oldest first, at most 100; players not signed in
+//                                        with Steam (verify.js) write as Anonymous####, verified 0
 //   POST /chat      "steam_id\nkey\nchannel\ntext"            -> "ok" / "muted <until>" / "banned" / "slow" ...
 //   POST /chatmod   "steam_id\nkey\naction\ntarget\ndays"     moderators only (env.MODERATORS, comma separated):
 //                   mute (days) / ban / unban / del (the target's messages in every channel)
+import { anonName } from './verify.js';
+
 const STEAM_ID = /^7656119\d{10}$/;
 const KEY = /^[0-9a-f]{64}$/;
 const CHANNELS = new Set(['ru', 'en']);
@@ -31,16 +34,19 @@ async function epoch(env) {
 const bump = env => env.DB.prepare(
   "INSERT INTO chat_meta (k, v) VALUES ('epoch', 1) ON CONFLICT(k) DO UPDATE SET v = v + 1");
 
-// the punishment in force for a player, if any: { kind, until } (until 0 = for good)
-async function punished(env, id, now) {
-  const r = await env.DB.prepare('SELECT kind, until FROM chat_bans WHERE steam_id = ?1').bind(id).first();
-  return r && (r.until === 0 || r.until > now) ? r : null;
+// the punishment in force for a player (or for their key, when it is known), if any: { kind, until } (until
+// 0 = for good); a ban wins over a mute
+async function punished(env, id, now, keyHash = null) {
+  const { results } = await env.DB.prepare(
+    'SELECT kind, until FROM chat_bans WHERE (steam_id = ?1 OR (?2 IS NOT NULL AND key_hash = ?2)) AND (until = 0 OR until > ?3)'
+  ).bind(id, keyHash, now).all();
+  return results.find(r => r.kind === 'ban') || results[0] || null;
 }
 
 // the reporting player with their key, or null
 async function player(env, id, key) {
   if (!STEAM_ID.test(id || '') || !KEY.test(key || '')) return null;
-  const p = await env.DB.prepare('SELECT name, key_hash FROM players WHERE steam_id = ?1').bind(id).first();
+  const p = await env.DB.prepare('SELECT name, key_hash, verified_at FROM players WHERE steam_id = ?1').bind(id).first();
   return p && p.key_hash && p.key_hash === (await sha256(key)) ? p : null;
 }
 
@@ -64,9 +70,9 @@ export async function read(url, env) {
   if (p && p.kind === 'ban') return out;
   const after = String(e) === url.searchParams.get('epoch') ? Math.max(0, Number(url.searchParams.get('after')) || 0) : 0;
   const { results } = await env.DB.prepare(
-    'SELECT id, at, steam_id, name, text FROM chat_messages WHERE channel = ?1 AND id > ?2 ORDER BY id DESC LIMIT ' + PAGE
+    'SELECT id, at, steam_id, name, text, verified FROM chat_messages WHERE channel = ?1 AND id > ?2 ORDER BY id DESC LIMIT ' + PAGE
   ).bind(ch, after).all();
-  for (const m of results.reverse()) out += tsv('M', m.id, m.at, m.steam_id, m.name, m.text);
+  for (const m of results.reverse()) out += tsv('M', m.id, m.at, m.steam_id, m.name, m.text, m.verified);
   return out;
 }
 
@@ -79,12 +85,13 @@ export async function write(req, env) {
   const p = await player(env, id, key);
   if (!p) return [403, 'unknown key'];
   const now = Date.now();
-  const pun = await punished(env, id, Math.floor(now / 1000));
+  const pun = await punished(env, id, Math.floor(now / 1000), p.key_hash);
   if (pun) return [403, pun.kind === 'ban' ? 'banned' : 'muted ' + pun.until];
   const last = await env.DB.prepare('SELECT max(at) AS at FROM chat_messages WHERE steam_id = ?1').bind(id).first();
   if (last && last.at && now - last.at < SLOW_MS) return [429, 'slow'];
-  await env.DB.prepare('INSERT INTO chat_messages (channel, steam_id, name, text, at) VALUES (?1, ?2, ?3, ?4, ?5)')
-    .bind(ch, id, p.name, text, now).run();
+  const verified = p.verified_at ? 1 : 0;
+  await env.DB.prepare('INSERT INTO chat_messages (channel, steam_id, name, text, at, verified) VALUES (?1, ?2, ?3, ?4, ?5, ?6)')
+    .bind(ch, id, verified ? p.name : anonName(p.key_hash), text, now, verified).run();
   return [200, 'ok'];
 }
 
@@ -95,10 +102,11 @@ export async function moderate(req, env) {
   if (!isMod(env, id) || !(await player(env, id, key))) return [403, 'not a moderator'];
   if (!STEAM_ID.test(target || '')) return [400, 'bad target'];
   const now = Math.floor(Date.now() / 1000);
+  const held = await env.DB.prepare('SELECT key_hash FROM players WHERE steam_id = ?1').bind(target).first();
   const put = (kind, until) => env.DB.prepare(
-    `INSERT INTO chat_bans (steam_id, kind, until, by, at) VALUES (?1, ?2, ?3, ?4, ?5)
-     ON CONFLICT(steam_id) DO UPDATE SET kind = ?2, until = ?3, by = ?4, at = ?5`
-  ).bind(target, kind, until, id, now).run();
+    `INSERT INTO chat_bans (steam_id, kind, until, by, at, key_hash) VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+     ON CONFLICT(steam_id) DO UPDATE SET kind = ?2, until = ?3, by = ?4, at = ?5, key_hash = ?6`
+  ).bind(target, kind, until, id, now, held ? held.key_hash : null).run();
   if (action === 'mute') {
     const days = Number(daysS);
     if (!(days > 0 && days <= 3650)) return [400, 'bad days'];

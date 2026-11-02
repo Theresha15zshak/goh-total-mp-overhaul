@@ -1,4 +1,4 @@
-// Rated matches. A player with the mod reports each match they finish (the DLL reads it out of the replay the
+// Rated matches. A player with the mod, signed in with Steam, reports each match they finish (the DLL reads it out of the replay the
 // game writes, dll/report.c); everyone in it is rated, with the mod or without. Rated: Axis vs Allies, Battle
 // Zones ("battle_zones") or Domination ("ammunition", «Превосходство»), equal sides of 1..4, at least 3 minutes.
 //
@@ -74,8 +74,9 @@ export async function report(req, env) {
   const now = Math.floor(Date.now() / 1000);
   const r = parse(body, now);
   if (r.err) return [400, r.err];
-  const held = await env.DB.prepare('SELECT key_hash FROM players WHERE steam_id = ?1').bind(r.reporter).first();
+  const held = await env.DB.prepare('SELECT key_hash, verified_at FROM players WHERE steam_id = ?1').bind(r.reporter).first();
   if (!held || !held.key_hash || held.key_hash !== (await sha256(r.key))) return [403, 'unknown key'];
+  if (!held.verified_at) return [403, 'not verified'];     // only players signed in with Steam report (verify.js)
   const recent = await env.DB.prepare('SELECT count(*) AS n FROM reports WHERE reporter = ?1 AND at > ?2').bind(r.reporter, now - 3600).first();
   if (recent.n >= REPORTS_PER_HOUR) return [429, 'too many reports'];
 

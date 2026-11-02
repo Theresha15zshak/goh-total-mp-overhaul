@@ -116,10 +116,17 @@ void balance_dump(const char *why);
 // ---- who is online with the mod (online.c, our server goh-online) ----
 #define ONLINE_MAX 200
 #define ONLINE_NAME 132             // Steam names are up to 32 characters of UTF-8
-typedef struct { char id[18]; char name[ONLINE_NAME]; char version[17]; int ago; } OnlinePlayer;
+typedef struct { char id[18]; char name[ONLINE_NAME]; char version[17]; int ago, verified; } OnlinePlayer;
 extern volatile long g_online_consent;      // -1 not asked yet, 0 no, 1 we report this player as online
 extern volatile long g_online_want;         // the window is open: the list is fetched every 20 s
 extern volatile long g_online_held;         // the server refused us: this SteamID is held by another key
+// Steam sign-in (server/src/verify.js): -1 not known yet, 0 not signed in (Anonymous in the chat, no reports),
+// 1 signed in, 2 another key holds our SteamID
+extern volatile long g_steam_verified;
+void online_steam_login(void);              // the player asked: the sign-in address is fetched
+int online_login_url(char *out, size_t n);  // 1 = the address to open (once fetched), the login is awaited
+int online_remind(void);                    // the start-up window about the sign-in is wanted
+void online_set_remind(int on);
 void online_start(const char *dir);
 void online_set_consent(int yes);
 int online_copy(OnlinePlayer *out, int max, int *state);   // state 0 nothing yet, 1 list, 2 server unreachable
@@ -133,7 +140,7 @@ int online_doc(int doc, char *out, size_t n, int *state);   // the last text; st
 // ---- global chat (online.c, server/src/chat.js): channels RU and EN, wiped by the server every two hours ----
 #define CHAT_MAX 200
 #define CHAT_TEXT 904               // 300 characters of UTF-8
-typedef struct { long long id, at_ms; char sid[18]; char name[ONLINE_NAME]; char text[CHAT_TEXT]; } ChatMsg;
+typedef struct { long long id, at_ms; char sid[18]; char name[ONLINE_NAME]; char text[CHAT_TEXT]; int verified; } ChatMsg;
 typedef struct { char sid[18]; char name[ONLINE_NAME]; int ban; long long until; } ChatBan;
 typedef struct {
     int state;                      // 0 nothing yet, 1 ok, 2 server unreachable
