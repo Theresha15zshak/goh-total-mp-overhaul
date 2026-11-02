@@ -971,12 +971,15 @@ static void lobby_overlay() {
         const char *m1 = nullptr, *mt = nullptr;
         for (int k = 0; k < d.n; k++)
             if (d.nf[k] >= 3 && !strcmp(d.f[k][0], r.id)) (strcmp(d.f[k][1], "1v1") ? mt : m1) = d.f[k][2];
-        char text[64];
-        if (m1 && mt) snprintf(text, sizeof text, "MMR 1\xC3\x97" "1 %s \xC2\xB7 ком. %s", m1, mt);
-        else if (m1 || mt) snprintf(text, sizeof text, "MMR %s%s", m1 ? "1\xC3\x97" "1 " : "", m1 ? m1 : mt);
-        else snprintf(text, sizeof text, d.state == 1 ? "MMR -" : "MMR ...");
-        // under the name (r is the name's own place: its left edge, just below it)
-        ImVec2 at(floorf(r.x * sx + 0.5f), floorf((r.y + r.h - 1) * sy + 0.5f));
+        // the lobby's own ladder: two players are a 1x1, more a team game; the other one if that is all there is
+        const char *m = n == 2 ? (m1 ? m1 : mt) : (mt ? mt : m1);
+        char text[32];
+        snprintf(text, sizeof text, "MMR %s", m ? m : d.state == 1 ? "-" : "...");
+        // on the name's own line, there is no room under it: right after the name when its place is fitted to it,
+        // else at the right end of that place
+        float tw = font->CalcTextSizeA(size, FLT_MAX, 0, text).x, end = (r.x + r.w) * sx, line_r = r.line_r * sx;
+        float x = end + 6 * sx + tw <= line_r && r.w < 0.75f * (r.line_r - r.x) ? end + 6 * sx : end - tw - 4 * sx;
+        ImVec2 at(floorf(x + 0.5f), floorf((r.y + r.h * 0.5f) * sy - size * 0.5f + 0.5f));
         dl->AddText(font, size, ImVec2(at.x + 1, at.y + 1), IM_COL32(0, 0, 0, 200), text);
         dl->AddText(font, size, at, VAN_ITEM, text);
     }

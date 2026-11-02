@@ -146,8 +146,9 @@ int pvp_install(uint8_t *exe, const char *dir, uint8_t *(*alloc)(size_t), void (
 // being root_w x root_h); 0 = the page is not up
 int pvp_rect(float *x, float *y, float *w, float *h, float *head_h, float *root_w, float *root_h);
 unsigned char *pvp_pak_file(const char *name, size_t *n);   // an unpacked file of interface.pak, malloc'd
-// the lobby's player list lines on screen (game units, as pvp_rect) and whose they are
-typedef struct { float x, y, w, h, root_w, root_h; char id[18]; } LobbyRow;
+// the lobby's player list lines on screen (game units, as pvp_rect) and whose they are: the name's own place and
+// the right edge of the line it is on
+typedef struct { float x, y, w, h, root_w, root_h, line_r; char id[18]; } LobbyRow;
 int lobby_rows(LobbyRow *out, int max);
 void pvp_page_shown(void *page);             // the game shows a page: the way to the screen's root
 

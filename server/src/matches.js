@@ -14,7 +14,8 @@
 //
 // The same match comes from several players: it is found again by its mode, map, start time and players.
 // Reports that disagree on the winner make it disputed, and its rating changes are taken back out.
-import { rate, mmr, MU, SIGMA } from './rating.js';
+// Rating: rating.js; uncertainty grows with time away, and the same players again within a day count for less.
+import { rate, drift, repeatFactor, mmr, MU, SIGMA } from './rating.js';
 
 const STEAM_ID = /^7656119\d{10}$/;
 const KEY = /^[0-9a-f]{64}$/;
@@ -60,7 +61,7 @@ async function tracks(env, ladder, players) {
   // each player's 'all' and nation tracks, new ones at the start values
   const ids = players.map(p => p.id);
   const { results } = await env.DB.prepare(
-    `SELECT steam_id, nation, mu, sigma, games, wins FROM ratings WHERE ladder = ?1 AND steam_id IN (${ids.map((_, i) => '?' + (i + 2)).join(',')})`
+    `SELECT steam_id, nation, mu, sigma, games, wins, last_at FROM ratings WHERE ladder = ?1 AND steam_id IN (${ids.map((_, i) => '?' + (i + 2)).join(',')})`
   ).bind(ladder, ...ids).all();
   const got = new Map(results.map(r => [r.steam_id + '/' + r.nation, r]));
   const one = (id, nation) => got.get(id + '/' + nation) || { mu: MU, sigma: SIGMA, games: 0, wins: 0 };
@@ -87,21 +88,29 @@ export async function report(req, env) {
   const t = await tracks(env, ladder, r.players);
   const sideIdx = s => r.players.map((p, i) => (p.side === s ? i : -1)).filter(i => i >= 0);
   const ax = sideIdx('axis'), al = sideIdx('allies'), axisWon = r.winner === 'axis';
+  const pkey = r.players.map(p => p.id).sort().join(',');
+  const rep = await env.DB.prepare(
+    "SELECT count(*) AS n FROM matches WHERE pkey = ?1 AND status = 'rated' AND ended_at >= ?2 AND ended_at < ?3"
+  ).bind(pkey, r.end - 86400, r.end).first();
+  const f = repeatFactor(rep.n);
   const after = { all: [], nat: [] };
   for (const k of ['all', 'nat']) {
-    const [a, b] = rate(ax.map(i => t[i][k]), al.map(i => t[i][k]), axisWon);
+    const before = t.map(x => drift(x[k], r.end));
+    const [a, b] = rate(ax.map(i => before[i]), al.map(i => before[i]), axisWon);
     ax.forEach((i, j) => (after[k][i] = a[j]));
     al.forEach((i, j) => (after[k][i] = b[j]));
+    after[k] = after[k].map((x, i) => ({ mu: t[i][k].mu + f * (x.mu - t[i][k].mu), sigma: x.sigma }));
   }
   const ins = await env.DB.prepare(
-    `INSERT INTO matches (fp, mode, map, size, ladder, duration_s, winner, ended_at, status, reports)
-     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, 'rated', 1)`
-  ).bind(fp, r.mode, r.map, r.size, ladder, r.duration, r.winner, r.end).run();
+    `INSERT INTO matches (fp, mode, map, size, ladder, duration_s, winner, ended_at, status, reports, pkey)
+     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, 'rated', 1, ?9)`
+  ).bind(fp, r.mode, r.map, r.size, ladder, r.duration, r.winner, r.end, pkey).run();
   const id = ins.meta.last_row_id;
   const put = (pid, nation, x, won) => env.DB.prepare(
-    `INSERT INTO ratings (steam_id, ladder, nation, mu, sigma, games, wins) VALUES (?1, ?2, ?3, ?4, ?5, 1, ?6)
-     ON CONFLICT(steam_id, ladder, nation) DO UPDATE SET mu = ?4, sigma = ?5, games = games + 1, wins = wins + ?6`
-  ).bind(pid, ladder, nation, x.mu, x.sigma, won);
+    `INSERT INTO ratings (steam_id, ladder, nation, mu, sigma, games, wins, last_at) VALUES (?1, ?2, ?3, ?4, ?5, 1, ?6, ?7)
+     ON CONFLICT(steam_id, ladder, nation) DO UPDATE SET mu = ?4, sigma = ?5, games = games + 1, wins = wins + ?6,
+       last_at = max(coalesce(last_at, 0), ?7)`
+  ).bind(pid, ladder, nation, x.mu, x.sigma, won, r.end);
   const st = [env.DB.prepare('INSERT INTO reports (match_id, reporter, winner, at) VALUES (?1, ?2, ?3, ?4)').bind(id, r.reporter, r.winner, now)];
   r.players.forEach((p, i) => {
     const won = p.side === r.winner ? 1 : 0;

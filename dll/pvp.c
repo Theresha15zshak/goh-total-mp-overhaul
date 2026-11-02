@@ -377,6 +377,10 @@ int lobby_rows(LobbyRow *out, int max) {
         if (!peek((uint8_t *)names[i] + 0x178, &id, 8) || id < 76561190000000000ull || id > 76561199999999999ull) continue;
         LobbyRow *r = &out[n++];
         r->x = (float)x; r->y = (float)y; r->w = (float)w; r->h = (float)h; r->root_w = (float)rw; r->root_h = (float)rh;
+        uint64_t parent = 0;
+        int32_t px, py, pw, ph;
+        r->line_r = peek((uint8_t *)names[i] + 0xf0, &parent, 8) && parent && place((void *)parent, 1, &px, &py, &pw, &ph, &rw, &rh)
+                    ? (float)(px + pw) : r->x + r->w;
         snprintf(r->id, sizeof r->id, "%llu", (unsigned long long)id);
     }
     return n;
