@@ -568,7 +568,7 @@ static void consent_window() {
     ImGui::SetNextWindowPos(ImVec2(io.DisplaySize.x * 0.5f, io.DisplaySize.y * 0.4f), ImGuiCond_Always, ImVec2(0.5f, 0.5f));
     ImGui::SetNextWindowSize(ImVec2(460 * k, 0));
     ImGui::SetNextWindowBgAlpha(0.96f);
-    ImGui::Begin(TR("Мод: онлайн и рейтинг PVP###goh_consent", "Mod: online and PVP rating###goh_consent"), nullptr, ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoCollapse |
+    ImGui::Begin(TR(MOD_NAME ": онлайн и рейтинг PVP###goh_consent", MOD_NAME ": online and PVP rating###goh_consent"), nullptr, ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoCollapse |
                                                              ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoMove);
     ImGui::TextWrapped("%s", TR("Показывать вас в списке игроков с модом и засчитывать ваши матчи в рейтинг PVP?",
                                    "Show you in the list of players with the mod and count your matches in the PVP rating?"));
@@ -618,7 +618,7 @@ static void login_window() {
     ImGui::SetNextWindowPos(ImVec2(io.DisplaySize.x * 0.5f, io.DisplaySize.y * 0.4f), ImGuiCond_Always, ImVec2(0.5f, 0.5f));
     ImGui::SetNextWindowSize(ImVec2(520 * k, 0));
     ImGui::SetNextWindowBgAlpha(0.96f);
-    ImGui::Begin(TR("Мод: вход через Steam###goh_login", "Mod: sign in through Steam###goh_login"), nullptr, ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoCollapse |
+    ImGui::Begin(TR(MOD_NAME ": вход через Steam###goh_login", MOD_NAME ": sign in through Steam###goh_login"), nullptr, ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoCollapse |
                                                            ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoMove);
     static char url[1024];
     bool have = online_login_url(url, sizeof url);
@@ -673,7 +673,7 @@ static void integrity_window() {
     float k = ImGui::GetFontSize() / 18.f;
     ImU32 col = IM_COL32(150, 150, 150, 255), bg = IM_COL32(16, 16, 15, 200);
     char line1[96], line2[160] = "";
-    snprintf(line1, sizeof line1, TR("Мод %s", "Mod %s"), g_mod_version);
+    snprintf(line1, sizeof line1, MOD_NAME " %s", g_mod_version);
     if (st == INTEGRITY_CURRENT) snprintf(line2, sizeof line2, "%s", TR("Официальная сборка, последняя версия", "Official build, latest version"));
     else if (st == INTEGRITY_UNREACHABLE) snprintf(line2, sizeof line2, "%s", TR("Не удалось проверить сборку: сервер мода не отвечает", "Could not check the build: the mod's server does not answer"));
     else if (st == INTEGRITY_OLD) {
@@ -745,7 +745,7 @@ static void about_window() {
     ImGui::Begin("##goh_about", nullptr, ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoMove |
                                            ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoCollapse);
     bool en = lang_en();
-    ImGui::TextColored(ImColor(ACCENT), "%s", TR("Что добавляет мод", "What the mod adds"));
+    ImGui::TextColored(ImColor(ACCENT), "%s", TR(MOD_NAME ": что добавляет мод", MOD_NAME ": what the mod adds"));
     ImGui::PushTextWrapPos(0);
     for (const char *s : en ? ABOUT_EN : ABOUT_RU) ImGui::BulletText("%s", s);
     ImGui::Spacing();

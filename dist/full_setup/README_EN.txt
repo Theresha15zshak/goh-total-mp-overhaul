@@ -1,5 +1,6 @@
-Mod for Gates of Hell 1.067: PVP rating, online list, global chat, replays, charts, competitive balance
-=========================================================================================================
+GoH TOTAL MP OVERHAUL — mod for Gates of Hell 1.067
+PVP rating, online list, global chat, replays, charts, competitive balance
+==========================================================================
 
 Install: close the game, unpack the archive anywhere and run install.bat.
   It finds the game in Steam and puts into binaries\x64:

@@ -1,4 +1,6 @@
-# GoH mod: PVP rating, global chat, replays, match charts
+# GoH TOTAL MP OVERHAUL
+
+PVP rating, global chat, replays and match charts for Gates of Hell.
 
 A client-side mod for Call to Arms - Gates of Hell 1.067, shipped as one proxy DLL (`iphlpapi.dll` in the
 game's `binaries\x64`). Vanilla-compatible: the game's files on disk stay as they are and you can play with
