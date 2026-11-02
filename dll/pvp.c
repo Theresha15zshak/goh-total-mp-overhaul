@@ -487,6 +487,12 @@ static int vt_slot(uint32_t vt, int slot, uint32_t want) {
 // the game has started, after its statics, and before the player gets to the page.
 #define G_LOBBY_PINGS 0x1471500
 #define FN_LOBBY_PINGS_REG 0x1c32d             // mov byte ptr [1471500], 0
+// The service (eSteamLobbyPingService, 43b780) pings every lobby on one repeating timer of 2500 ms, through
+// Steam P2P; the first packets to a host go while Steam still sets up the P2P session and get no answer, and each
+// try waits for the next tick: the column filled in slowly (2026-11-02). The timer's period, the "mov r8d, 2500"
+// at 43b7ae, becomes PING_PERIOD_MS: the answers come about five times sooner, a small packet per lobby each time.
+#define FN_PING_PERIOD 0x43b7ae
+#define PING_PERIOD_MS 500
 
 void pvp_lobby_pings(void) {
     static const uint8_t REG[7] = {0xc6, 0x05, 0xcc, 0x51, 0x45, 0x01, 0x00};   // the registration, as checked
@@ -535,6 +541,12 @@ int pvp_install(uint8_t *exe, const char *dir, uint8_t *(*alloc)(size_t), void (
     uint8_t jmp[10] = {0xe9, 0, 0, 0, 0, 0x90, 0x90, 0x90, 0x90, 0x90};
     int32_t rel = (int32_t)(s - (entry + 5)); memcpy(jmp + 1, &rel, 4);
     patch(entry, jmp, 10);
+    static const uint8_t PERIOD[6] = {0x41, 0xb8, 0xc4, 0x09, 0x00, 0x00};       // mov r8d, 2500
+    if (!memcmp(exe + FN_PING_PERIOD, PERIOD, 6)) {
+        uint32_t ms = PING_PERIOD_MS;
+        patch(exe + FN_PING_PERIOD + 2, &ms, 4);
+    } else
+        rc_log("pvp: the lobby ping timer is not as expected, left as it is");
     // the pages: their vtable slots point at ours, which call the game's
     void *binds[2] = {(void *)bind_online, (void *)bind_lan}, *cmds[2] = {(void *)cmd_online, (void *)cmd_lan};
     void *dtors[2] = {(void *)dtor_online, (void *)dtor_lan};
