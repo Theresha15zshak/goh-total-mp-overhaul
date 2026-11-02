@@ -66,9 +66,17 @@ static void owner(uintptr_t at, char *out, size_t n) {
     snprintf(out, n, "(no class within 0x1000)");
 }
 
+// text for the log; runs of 16+ hex digits become '#': the player's key sits in memory (the heartbeat) and
+// must never reach a log someone may send around
 static void printable(const uint8_t *p, size_t n, char *out) {
     for (size_t i = 0; i < n; i++) out[i] = p[i] >= 32 && p[i] < 127 ? (char)p[i] : '.';
     out[n] = 0;
+    for (size_t i = 0; i < n;) {
+        size_t k = i;
+        while (k < n && strchr("0123456789abcdefABCDEF", out[k]) && out[k]) k++;
+        if (k - i >= 16 && !(k - i == 17 && !memcmp(out + i, "7656119", 7))) memset(out + i, '#', k - i);
+        i = k > i ? k : i + 1;
+    }
 }
 
 static void scan_steam_ids(void) {
@@ -100,6 +108,7 @@ static void scan_steam_ids(void) {
                 char o[200], ctx[97];
                 size_t from = i >= 40 ? i - 40 : 0;
                 printable(buf + from, got - from < 96 ? got - from : 96, ctx);
+                if (i >= 8 && !memcmp(buf + i - 8, "STEAMID=", 8)) { i += 16; continue; }   // environment blocks
                 owner(p + i, o, sizeof o);
                 clog("txt at %llx [%s] in %s", (unsigned long long)(p + i), ctx, o);
                 txt++;
