@@ -34,6 +34,7 @@ static volatile bool g_balance_win = true;   // the test build opens with its sw
 static volatile bool g_balance_win;     // balance switch: F7
 #endif
 static volatile bool g_online_win;      // who is online with the mod: F6
+static volatile bool g_chat_drawn;      // the global chat was drawn this frame: mouse and keyboard over it are ours
 static volatile bool g_pvp_drawn;       // the PVP block over the game list was drawn this frame: the mouse over it is ours
 static ImFont *g_game_font;             // the game's anka 15 (the game list's rows), loaded from interface.pak
 static ImFont *g_game_font_small;       // anka 12: MMR under the names in the lobby
@@ -71,6 +72,12 @@ static bool raw_mouse_button(LPARAM l) {
     return ri.header.dwType == RIM_TYPEMOUSE && (ri.data.mouse.usButtonFlags != 0);
 }
 
+static bool raw_keyboard(LPARAM l) {
+    RAWINPUTHEADER hd;
+    UINT size = sizeof hd;
+    return GetRawInputData((HRAWINPUT)l, RID_HEADER, &hd, &size, sizeof hd) != (UINT)-1 && hd.dwType == RIM_TYPEKEYBOARD;
+}
+
 // F6 / F7 / F8 / F9 / F10, read once per frame: F10 is a system key (WM_SYSKEYDOWN) and the game may take
 // the keyboard through raw input, so window messages cannot be relied on
 static void hotkeys() {
@@ -97,8 +104,11 @@ static void hotkeys() {
 static LRESULT CALLBACK wndproc(HWND h, UINT m, WPARAM w, LPARAM l) {
     if (g_ready) {
         if (panel_shown() || charts_shown() || music_shown() || prep_shown() || balance_shown() || online_shown() ||
-            consent_shown() || g_pvp_drawn) {
+            consent_shown() || g_pvp_drawn || g_chat_drawn) {
             ImGui_ImplWin32_WndProcHandler(h, m, w, l);
+            // typing into our chat line: the keys are not the game's
+            if (ImGui::GetIO().WantTextInput && ((m >= WM_KEYFIRST && m <= WM_KEYLAST) || (m == WM_INPUT && raw_keyboard(l))))
+                return m == WM_INPUT ? DefWindowProcW(h, m, w, l) : 0;
             if (ImGui::GetIO().WantCaptureMouse) {
                 bool button = (m >= WM_LBUTTONDOWN && m <= WM_MOUSELAST && m != WM_MOUSEMOVE);
                 if (button) return 0;
@@ -975,14 +985,230 @@ static void lobby_overlay() {
         const char *m = n == 2 ? (m1 ? m1 : mt) : (mt ? mt : m1);
         char text[32];
         snprintf(text, sizeof text, "MMR %s", m ? m : d.state == 1 ? "-" : "...");
-        // on the name's own line, there is no room under it: right after the name when its place is fitted to it,
-        // else at the right end of that place
-        float tw = font->CalcTextSizeA(size, FLT_MAX, 0, text).x, end = (r.x + r.w) * sx, line_r = r.line_r * sx;
-        float x = end + 6 * sx + tw <= line_r && r.w < 0.75f * (r.line_r - r.x) ? end + 6 * sx : end - tw - 4 * sx;
-        ImVec2 at(floorf(x + 0.5f), floorf((r.y + r.h * 0.5f) * sy - size * 0.5f + 0.5f));
+        // under the name, in the room pvp.c makes there (r is the name's own place)
+        ImVec2 at(floorf(r.x * sx + 0.5f), floorf((r.y + r.h) * sy + 0.5f));
         dl->AddText(font, size, ImVec2(at.x + 1, at.y + 1), IM_COL32(0, 0, 0, 200), text);
         dl->AddText(font, size, at, VAN_ITEM, text);
     }
+}
+
+// ---- global chat: in the frame our layout puts over the friends on the Internet / LAN page (pvp.c) --------
+// Tabs RU / ENG on top, the messages left, who is online with the mod right; a moderator gets a menu on any
+// name (right click) and the list of punishments in force.
+static int g_chat_ch;                  // 0 RU, 1 EN
+
+static void chat_mod_menu(const char *id, const char *name, bool mod) {
+    if (!mod || !ImGui::BeginPopup("##chatmod")) return;
+    ImGui::TextDisabled("%s", name);
+    ImGui::Separator();
+    static const int DAYS[4] = {1, 3, 7, 30};
+    for (int d : DAYS) {
+        char t[48];
+        snprintf(t, sizeof t, "Замутить на %d дн.", d);
+        if (ImGui::Selectable(t)) chat_mod("mute", id, d);
+    }
+    if (ImGui::Selectable("Удалить его сообщения")) chat_mod("del", id, 0);
+    if (ImGui::Selectable("Забанить в чате")) chat_mod("ban", id, 0);
+    if (ImGui::Selectable("Разбанить")) chat_mod("unban", id, 0);
+    ImGui::EndPopup();
+}
+
+// a name: left click the Steam profile, right click (moderators) the menu
+static void chat_name(const char *id, const char *name, ImU32 col, bool mod, char *menu_id, char *menu_name) {
+    ImGui::PushStyleColor(ImGuiCol_Text, col);
+    ImGui::TextUnformatted(name);
+    ImGui::PopStyleColor();
+    if (ImGui::IsItemHovered()) ImGui::SetMouseCursor(ImGuiMouseCursor_Hand);
+    if (ImGui::IsItemClicked(ImGuiMouseButton_Left)) open_profile(id);
+    if (mod && ImGui::IsItemClicked(ImGuiMouseButton_Right)) {
+        snprintf(menu_id, 18, "%s", id);
+        snprintf(menu_name, ONLINE_NAME, "%s", name);
+        ImGui::OpenPopup("##chatmod");
+    }
+}
+
+static void chat_block() {
+    float x, y, w, h, rw, rh;
+    g_chat_drawn = false;
+    if (!chat_rect(&x, &y, &w, &h, &rw, &rh)) return;
+    chat_want(g_chat_ch);
+    static ChatMsg msgs[CHAT_MAX];
+    static ChatStatus st;
+    static OnlinePlayer online[ONLINE_MAX];
+    int n = chat_copy(g_chat_ch, msgs, CHAT_MAX, &st), ostate = 0, on = online_copy(online, ONLINE_MAX, &ostate);
+    const char *my = online_my_id();
+    ImGuiIO &io = ImGui::GetIO();
+    float sx = io.DisplaySize.x / rw, sy = io.DisplaySize.y / rh, pad = 12 * sy;
+    ImVec2 p0(x * sx, y * sy), size(w * sx, h * sy);
+    ImGui::SetNextWindowPos(p0, ImGuiCond_Always);
+    ImGui::SetNextWindowSize(size, ImGuiCond_Always);
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0, 0));
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowBorderSize, 0);
+    ImGui::PushStyleVar(ImGuiStyleVar_ScrollbarSize, 8 * sy);
+    ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(5 * sx, 3 * sy));
+    ImGui::PushStyleColor(ImGuiCol_ScrollbarBg, IM_COL32(0, 0, 0, 0));
+    ImGui::PushStyleColor(ImGuiCol_ScrollbarGrab, IM_COL32(70, 66, 60, 255));
+    ImGui::PushStyleColor(ImGuiCol_ScrollbarGrabHovered, IM_COL32(110, 98, 80, 255));
+    ImGui::PushStyleColor(ImGuiCol_ScrollbarGrabActive, IM_COL32(178, 135, 84, 255));
+    ImGui::PushStyleColor(ImGuiCol_FrameBg, IM_COL32(16, 16, 15, 230));
+    ImGui::PushStyleColor(ImGuiCol_FrameBgHovered, IM_COL32(22, 22, 20, 230));
+    ImGui::PushStyleColor(ImGuiCol_FrameBgActive, IM_COL32(22, 22, 20, 230));
+    ImGui::PushStyleColor(ImGuiCol_Border, IM_COL32(70, 66, 60, 255));
+    ImGui::PushStyleColor(ImGuiCol_PopupBg, IM_COL32(24, 23, 21, 245));
+    ImGui::PushStyleColor(ImGuiCol_HeaderHovered, VAN_HOVER_BG);
+    ImGui::PushStyleColor(ImGuiCol_Text, VAN_TEXT);
+    ImGui::Begin("##goh_chat", nullptr, ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoMove |
+                                          ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoBackground |
+                                          ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse);
+    if (g_game_font) ImGui::PushFont(g_game_font);
+    ImGui::SetWindowFontScale(sy);
+    ImDrawList *dl = ImGui::GetWindowDrawList();
+    float lh = ImGui::GetTextLineHeight(), row = 32 * sy;
+    static char menu_id[18], menu_name[ONLINE_NAME];
+    bool mod = st.moderator != 0;
+
+    // the tabs, as the page's own (ДРУЗЬЯ | ПОСЛЕДНЯЯ ИГРА)
+    static const char *TABS[2] = {"ЧАТ RU", "CHAT ENG"};
+    float tx = p0.x + pad, ty = p0.y + (row - lh) * 0.5f;
+    for (int i = 0; i < 2; i++) {
+        float tw = ImGui::CalcTextSize(TABS[i]).x;
+        ImGui::SetCursorScreenPos(ImVec2(tx, ty));
+        ImGui::PushID(300 + i);
+        if (ImGui::InvisibleButton("##ctab", ImVec2(tw, lh))) g_chat_ch = i;
+        bool hot = ImGui::IsItemHovered();
+        ImGui::PopID();
+        van_text(dl, tx, ty, g_chat_ch == i ? VAN_TAB : hot ? VAN_HOVER : VAN_TAB_OFF, TABS[i]);
+        tx += tw + 18 * sx;
+        if (!i) van_text(dl, tx - 11 * sx, ty, VAN_TAB_OFF, "|");
+    }
+    if (mod) {          // the punishments in force, for the moderator
+        char t[48];
+        snprintf(t, sizeof t, "Наказания: %d", st.bans);
+        float tw = ImGui::CalcTextSize(t).x, bx = p0.x + size.x - pad - tw;
+        ImGui::SetCursorScreenPos(ImVec2(bx, ty));
+        if (ImGui::InvisibleButton("##bans", ImVec2(tw, lh))) ImGui::OpenPopup("##chatbans");
+        van_text(dl, bx, ty, ImGui::IsItemHovered() ? VAN_HOVER : VAN_TAB_OFF, t);
+        if (ImGui::BeginPopup("##chatbans")) {
+            if (!st.bans) ImGui::TextDisabled("никого");
+            for (int i = 0; i < st.bans; i++) {
+                const ChatBan &b = st.ban[i];
+                char when[48] = "навсегда";
+                if (!b.ban) {
+                    time_t u = (time_t)b.until;
+                    struct tm tmv;
+                    localtime_s(&tmv, &u);
+                    strftime(when, sizeof when, "мут до %d.%m %H:%M", &tmv);
+                }
+                ImGui::PushID(i);
+                ImGui::Text("%s  ·  %s", b.name, b.ban ? "бан" : when);
+                ImGui::SameLine();
+                if (ImGui::SmallButton("Разбанить")) chat_mod("unban", b.sid, 0);
+                ImGui::PopID();
+            }
+            ImGui::EndPopup();
+        }
+    }
+    dl->AddLine(ImVec2(p0.x + pad, p0.y + row), ImVec2(p0.x + size.x - pad, p0.y + row), IM_COL32(70, 66, 60, 255));
+
+    // who is online, right
+    float list_w = floorf(size.x * 0.3f), split = p0.x + size.x - list_w, top = p0.y + row + 6 * sy;
+    float input_h = lh + 12 * sy, foot = input_h + lh + 14 * sy, bottom = p0.y + size.y - pad;
+    dl->AddLine(ImVec2(split, top), ImVec2(split, bottom), IM_COL32(70, 66, 60, 255));
+    ImGui::SetCursorScreenPos(ImVec2(split + 8 * sx, top));
+    ImGui::BeginChild("##chat_online", ImVec2(list_w - 8 * sx - pad * 0.5f, bottom - top), ImGuiChildFlags_None, ImGuiWindowFlags_NoBackground);
+    ImGui::SetWindowFontScale(sy);
+    {
+        ImGui::PushStyleColor(ImGuiCol_Text, VAN_TITLE);
+        ImGui::Text("Онлайн: %d", on);
+        ImGui::PopStyleColor();
+        float av = lh + 2 * sy;
+        for (int i = 0; i < on; i++) {
+            ImGui::PushID(i);
+            ImVec2 c = ImGui::GetCursorScreenPos();
+            if (ID3D11ShaderResourceView *img = steam_avatar(online[i].id))
+                ImGui::GetWindowDrawList()->AddImage((ImTextureID)(intptr_t)img, c, ImVec2(c.x + av, c.y + av));
+            ImGui::SetCursorScreenPos(ImVec2(c.x + av + 6 * sx, c.y + 1 * sy));
+            chat_name(online[i].id, online[i].name, !strcmp(online[i].id, my) ? ACCENT : VAN_TEXT, mod, menu_id, menu_name);
+            ImGui::SetCursorScreenPos(ImVec2(c.x, c.y + av + 4 * sy));
+            ImGui::Dummy(ImVec2(1, 0));
+            ImGui::PopID();
+        }
+        chat_mod_menu(menu_id, menu_name, mod);
+    }
+    ImGui::EndChild();
+
+    // the messages
+    float mx = p0.x + pad, mw = split - mx - 8 * sx;
+    ImGui::SetCursorScreenPos(ImVec2(mx, top));
+    ImGui::BeginChild("##chat_msgs", ImVec2(mw, bottom - foot - top), ImGuiChildFlags_None, ImGuiWindowFlags_NoBackground);
+    ImGui::SetWindowFontScale(sy);
+    {
+        static long long last_id[2];
+        bool at_end = ImGui::GetScrollY() >= ImGui::GetScrollMaxY() - 4;
+        if (st.banned) ImGui::TextColored(ImColor(VAN_WARN), "Вы забанены в глобальном чате.");
+        else if (st.state == 0 && !n) ImGui::TextColored(ImColor(VAN_TITLE), "Загрузка...");
+        else if (st.state == 2 && !n) ImGui::TextColored(ImColor(VAN_WARN), "Сервер мода не отвечает");
+        else if (!n) ImGui::TextColored(ImColor(VAN_TITLE), "Пока тихо. Сообщения стираются каждые два часа.");
+        for (int i = 0; i < n; i++) {
+            const ChatMsg &m = msgs[i];
+            ImGui::PushID((int)m.id);
+            time_t t = (time_t)(m.at_ms / 1000);
+            struct tm tmv;
+            localtime_s(&tmv, &t);
+            char hm[8];
+            strftime(hm, sizeof hm, "%H:%M", &tmv);
+            ImGui::TextColored(ImColor(VAN_TAB_OFF), "%s", hm);
+            ImGui::SameLine();
+            char nm[ONLINE_NAME + 2];
+            snprintf(nm, sizeof nm, "%s:", m.name);
+            chat_name(m.sid, nm, !strcmp(m.sid, my) ? ACCENT : VAN_HOVER, mod, menu_id, menu_name);
+            if (mod && !strcmp(menu_id, m.sid)) snprintf(menu_name, sizeof menu_name, "%s", m.name);
+            ImGui::SameLine();
+            ImGui::TextWrapped("%s", m.text);
+            ImGui::PopID();
+        }
+        chat_mod_menu(menu_id, menu_name, mod);
+        long long newest = n ? msgs[n - 1].id : 0;
+        if (newest != last_id[g_chat_ch] && (at_end || !last_id[g_chat_ch])) ImGui::SetScrollHereY(1.0f);
+        last_id[g_chat_ch] = newest;
+    }
+    ImGui::EndChild();
+
+    // writing
+    static char text[CHAT_TEXT];
+    float iy = bottom - foot + 6 * sy;
+    ImGui::SetCursorScreenPos(ImVec2(mx, iy));
+    ImGui::SetNextItemWidth(mw);
+    ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(6 * sx, 6 * sy));
+    ImGui::PushStyleVar(ImGuiStyleVar_FrameBorderSize, 1);
+    bool can = !st.banned && !st.muted_until && g_online_consent == 1;
+    ImGui::BeginDisabled(!can);
+    bool enter = ImGui::InputTextWithHint("##chat_in", can ? "Сообщение, Enter - отправить" : "", text, 300 * 3 + 1,
+                                          ImGuiInputTextFlags_EnterReturnsTrue);
+    ImGui::EndDisabled();
+    ImGui::PopStyleVar(2);
+    if (enter) {
+        if (text[0]) chat_send(g_chat_ch, text);
+        text[0] = 0;
+        ImGui::SetKeyboardFocusHere(-1);         // stay in the line for the next one
+    }
+    char note[128] = "";
+    if (g_online_consent != 1) snprintf(note, sizeof note, "Чтобы писать, включите \"Показывать меня\" во вкладке PVP");
+    else if (st.banned) snprintf(note, sizeof note, "Вы забанены в чате");
+    else if (st.muted_until) {
+        time_t u = (time_t)st.muted_until;
+        struct tm tmv;
+        localtime_s(&tmv, &u);
+        strftime(note, sizeof note, "Вам запрещено писать до %d.%m %H:%M", &tmv);
+    } else if (st.sent[0]) snprintf(note, sizeof note, "%s", st.sent);
+    if (note[0]) van_text(dl, mx, iy + input_h + 4 * sy, VAN_WARN, note);
+
+    ImGui::SetWindowFontScale(1);
+    if (g_game_font) ImGui::PopFont();
+    ImGui::End();
+    ImGui::PopStyleColor(11);
+    ImGui::PopStyleVar(4);
+    g_chat_drawn = true;
 }
 
 static void pvp_block() {
@@ -1249,8 +1475,9 @@ static void draw(IDXGISwapChain *sc) {
     if (music_shown()) music_window();
     if (balance_shown()) balance_window();
     pvp_block();
+    chat_block();
     lobby_overlay();
-    g_online_want = online_shown() || g_pvp_drawn;
+    g_online_want = online_shown() || g_pvp_drawn || g_chat_drawn;
     if (online_shown()) online_window();
     if (consent_shown()) consent_window();
     if (prep_shown()) {

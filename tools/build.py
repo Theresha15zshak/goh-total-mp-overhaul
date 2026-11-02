@@ -105,7 +105,8 @@ def balance_header():
     return text
 
 
-# Our layout of the Internet / LAN game list (dll/pvp.c): the game's own with a PVP button after JOIN.
+# Our layout of the Internet / LAN game list (dll/pvp.c): the game's own with a PVP button after JOIN and a frame
+# for the global chat over the friends.
 # Same length as the game's file, so it is swapped in the stream the game opened, like the balance files:
 # a commented-out debug block makes the room, the rest is padded with spaces.
 PVP_BUTTON = b'''
@@ -120,6 +121,13 @@ PVP_BUTTON = b'''
                                                                                 </BackgroundPanel>'''
 
 
+GLOBAL_CHAT = b'''<PercentPanel percent="0.5" gap="2" direction="vertical">
+                                                    <Children>
+                                                        <FrameView id="gchat_frame" resource="/interface/skin/game/frame/window" placement="center" />
+                                                    </Children>
+                                                </PercentPanel>'''
+
+
 def pvp_layout(t):
     """the game list with a PVP button after JOIN; a commented-out debug block makes the room"""
     a = t.index(b'<!--<StackPanel percent="0.4">')
@@ -130,6 +138,15 @@ def pvp_layout(t):
     u = u[:k] + PVP_BUTTON + u[k:]
     assert u.count(b'gap="55"') == 1
     u = u.replace(b'gap="55"', b'gap="40"')     # room for a fifth button in the row
+    # the right column: an empty frame for our global chat (ui.cpp draws in it) where the game has its chat
+    # commented out, and the friends below it in the rest
+    a = u.index(b'<!--<PercentPanel percent="0.5" gap="2" direction="vertical">')
+    b = u.index(b'</PercentPanel>-->', a) + len(b'</PercentPanel>-->')
+    assert b'MenuChat.xml' in u[a:b]
+    u = u[:a] + GLOBAL_CHAT + u[b:]
+    friends = b'<PercentPanel percent="0.9" gap="2" direction="vertical" enableif="!session.debug">'
+    assert u.count(friends) == 1
+    u = u.replace(friends, friends.replace(b'0.9', b'0.4'))
     end = u.rindex(b'</Layout>')
     assert len(u) <= len(t)
     return u[:end] + b' ' * (len(t) - len(u)) + u[end:]

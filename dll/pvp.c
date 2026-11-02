@@ -48,7 +48,7 @@ static uint8_t *g_ui_copy[NUI];
 static void (*g_bind[2])(void *page);
 static void (*g_cmd[2])(void *self, void *msg);
 static void *(*g_dtor[2])(void *page, unsigned flags);
-static void *volatile g_page, *volatile g_btn, *volatile g_list, *volatile g_head;
+static void *volatile g_page, *volatile g_btn, *volatile g_list, *volatile g_head, *volatile g_chat_frame;
 static volatile long g_cmds_logged;
 
 static uint32_t crc32(const uint8_t *p, size_t n) {
@@ -159,6 +159,7 @@ static void bind_page(int k, void *page) {
     if (hidden) peek((uint8_t *)hidden + 0x48, &hidden_flags, 4);
     rc_log("pvp: %s page %p bound: button %p, list %p, header %p, target %p (page%+lld), hidden button flags %x", PAGES[k].name,
            page, btn, list, head, target, (long long)((uint8_t *)target - (uint8_t *)page), hidden_flags);
+    g_chat_frame = find(layout, "gchat_frame");
     if (!btn || !target) return;
     void *(*cast)(void *, long, void *, void *, int) = (void *(*)(void *, long, void *, void *, int))(g_base + FN_DYNCAST);
     void *button = cast(btn, 0, g_base + TD_DIALOG, g_base + TD_BUTTON, 0);
@@ -193,7 +194,7 @@ static void cmd_lan(void *self, void *msg) { if (!command(msg)) g_cmd[1](self, m
 
 static void forget(void *page) {
     if (page != g_page) return;
-    g_page = g_btn = g_list = g_head = NULL;
+    g_page = g_btn = g_list = g_head = g_chat_frame = NULL;
     g_pvp_on = 0;
 }
 static void *dtor_online(void *page, unsigned flags) { forget(page); return g_dtor[0](page, flags); }
@@ -261,6 +262,14 @@ int pvp_rect(float *x, float *y, float *w, float *h, float *head_h, float *root_
     if (lw <= 0 || lh <= 0 || rw <= 0 || rh <= 0) return 0;
     *x = (float)lx; *y = (float)ly; *w = (float)lw; *h = (float)lh; *head_h = (float)top;
     *root_w = (float)rw; *root_h = (float)rh;
+    return 1;
+}
+
+int chat_rect(float *x, float *y, float *w, float *h, float *root_w, float *root_h) {
+    void *f = g_chat_frame;
+    int32_t fx, fy, fw, fh, rw, rh;
+    if (!f || covered(f) || !place(f, 1, &fx, &fy, &fw, &fh, &rw, &rh) || fw <= 0 || fh <= 0 || rw <= 0 || rh <= 0) return 0;
+    *x = (float)fx; *y = (float)fy; *w = (float)fw; *h = (float)fh; *root_w = (float)rw; *root_h = (float)rh;
     return 1;
 }
 
@@ -362,6 +371,45 @@ static void scan_names(void) {
     if (n != last_n) { rc_log("pvp: lobby names on screen: %d (%d dialogs looked at)", n, 20000 - budget); last_n = n; }
 }
 
+// The lines are taller for the MMR under each name: each eListboxItem (eTypedListboxItem<shared_ptr<eChatUser>>,
+// three parents up from the name) gets LINE_EXTRA more height and the ones below move down, every frame, since
+// the listbox puts them back whenever it lays itself out again.
+#define VT_CHAT_USER_ITEM 0x10440d8
+#define LINE_EXTRA 12
+
+static void poke(void *p, const void *v, size_t n) {
+    SIZE_T put = 0;
+    WriteProcessMemory(GetCurrentProcess(), p, v, n, &put);
+}
+
+static void taller_lines(void **names, int count) {
+    uint8_t *items[MAX_NAMES];
+    int32_t ys[MAX_NAMES];
+    int n = 0;
+    for (int i = 0; i < count; i++) {
+        uint64_t d = (uintptr_t)names[i], vt = 0;
+        for (int up = 0; up < 3 && d; up++) d = pq(d + 0xf0);
+        if (!d || !peek((void *)d, &vt, 8) || vt != (uintptr_t)(g_base + VT_CHAT_USER_ITEM)) continue;
+        int32_t pos[2];
+        if (!peek((void *)(d + 0x98), pos, 8)) continue;
+        int k = n++;
+        while (k > 0 && ys[k - 1] > pos[1]) { items[k] = items[k - 1]; ys[k] = ys[k - 1]; k--; }
+        items[k] = (uint8_t *)d; ys[k] = pos[1];
+    }
+    static int logged;
+    if (n && !logged++) log_chain("lobby line", items[0]);
+    for (int k = 0; k < n; k++) {
+        int32_t size[2];
+        if (!peek(items[k] + 0xa0, size, 8)) continue;
+        int32_t base = size[1] > 22 + LINE_EXTRA / 2 ? size[1] - LINE_EXTRA : size[1];   // the game's own height
+        int32_t h = base + LINE_EXTRA, y = ys[0] + k * h;
+        uint64_t vt = 0;
+        if (!peek(items[k], &vt, 8) || vt != (uintptr_t)(g_base + VT_CHAT_USER_ITEM)) continue;   // gone meanwhile
+        if (size[1] != h) poke(items[k] + 0xa4, &h, 4);
+        if (ys[k] != y) poke(items[k] + 0x9c, &y, 4);
+    }
+}
+
 int lobby_rows(LobbyRow *out, int max) {
     scan_names();
     void *names[MAX_NAMES];
@@ -369,6 +417,7 @@ int lobby_rows(LobbyRow *out, int max) {
     int count = g_name_count;
     memcpy(names, g_names, count * sizeof names[0]);
     ReleaseSRWLockShared(&g_names_lock);
+    taller_lines(names, count);
     int n = 0;
     for (int i = 0; i < count && n < max; i++) {
         int32_t x, y, w, h, rw, rh;
@@ -377,10 +426,6 @@ int lobby_rows(LobbyRow *out, int max) {
         if (!peek((uint8_t *)names[i] + 0x178, &id, 8) || id < 76561190000000000ull || id > 76561199999999999ull) continue;
         LobbyRow *r = &out[n++];
         r->x = (float)x; r->y = (float)y; r->w = (float)w; r->h = (float)h; r->root_w = (float)rw; r->root_h = (float)rh;
-        uint64_t parent = 0;
-        int32_t px, py, pw, ph;
-        r->line_r = peek((uint8_t *)names[i] + 0xf0, &parent, 8) && parent && place((void *)parent, 1, &px, &py, &pw, &ph, &rw, &rh)
-                    ? (float)(px + pw) : r->x + r->w;
         snprintf(r->id, sizeof r->id, "%llu", (unsigned long long)id);
     }
     return n;

@@ -4,12 +4,14 @@
 //   GET  /online  plain text for the DLL: "count\n" then "steam_id\tname\tversion\tseconds_ago\n" per player
 //   GET  /        the same list as a page
 //   rated matches: POST /report, GET /ratings, /player, /leaderboard (src/matches.js)
+//   global chat: GET /chat, POST /chat, /chatmod; wiped by the cron trigger (src/chat.js)
 // The SteamID comes from the game and cannot be verified here (that takes Steam). The key can: the DLL makes
 // a random one at its first start, the first heartbeat with it claims the SteamID, and from then on nothing
 // is taken for that SteamID without it. Only its SHA-256 is kept. DLLs from before keys send none: taken
 // for a SteamID no key holds yet, refused once one does.
 
 import { report, ratings, player, leaderboard } from './matches.js';
+import * as chat from './chat.js';
 
 const ONLINE_S = 300;          // seen within the last 5 minutes = online
 const MAX_LIST = 200;
@@ -91,6 +93,14 @@ export default {
       return out === null ? text('bad', 400) : text(out);
     }
     if (url.pathname === '/leaderboard' && req.method === 'GET') return text(await leaderboard(url, env));
+    if (url.pathname === '/chat' && req.method === 'GET') {
+      const out = await chat.read(url, env);
+      return out === null ? text('bad', 400) : text(out);
+    }
+    if ((url.pathname === '/chat' || url.pathname === '/chatmod') && req.method === 'POST') {
+      const [status, msg] = await (url.pathname === '/chat' ? chat.write : chat.moderate)(req, env);
+      return text(msg, status);
+    }
     if (url.pathname === '/online' && req.method === 'GET') {
       const list = await online(env);
       return text(list.length + '\n' + list.map(p => `${p.steam_id}\t${p.name}\t${p.version}\t${p.ago}\n`).join(''));
@@ -99,5 +109,8 @@ export default {
       return new Response(page(await online(env)), { headers: { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' } });
     }
     return text('not found', 404);
+  },
+  async scheduled(event, env) {
+    await chat.wipe(env);
   },
 };

@@ -3,6 +3,8 @@
   "main": "src/index.js",
   "compatibility_date": "2026-10-01",
   "workers_dev": true,
+  "triggers": { "crons": ["0 */2 * * *"] },
+  "vars": { "MODERATORS": "76561198957790948" },
   "d1_databases": [
     {
       "binding": "DB",

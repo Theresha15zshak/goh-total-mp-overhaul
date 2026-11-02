@@ -2,6 +2,7 @@
 // Only with the player's yes (asked once, kept in goh_online.ini): every 2 minutes the SteamID, the Steam
 // name and the balance version go to the server. The list is fetched while the F6 window is open.
 // The SteamID and name come from the game's own steam_api64.dll; the server cannot verify them.
+// The global chat (server/src/chat.js) goes through here too: read while it is on screen, written with the key.
 // Everything here runs on a thread of ours with short timeouts: no server, no effect on the game.
 // The player's key (Documents\My Games\gates of hell\goh_mod_key.txt, made at the first start): the server
 // gives the SteamID to the first key it sees and takes nothing for it without that key afterwards. It is
@@ -212,6 +213,142 @@ static void fetch_docs(HINTERNET s, char *buf) {
     }
 }
 
+// ---- global chat: the channel on screen is fetched every CHAT_MS, only what is new unless the server took
+// messages away (its epoch changed); what the player writes goes out from this thread too -------------------
+#define CHAT_MS 3000
+static const char *const CHAT_CH[2] = {"ru", "en"};
+static volatile DWORD g_chat_want[2];
+static ChatMsg g_chat[2][CHAT_MAX];
+static int g_chat_n[2];
+static long long g_chat_epoch[2] = {-1, -1};
+static DWORD g_chat_at[2];
+static ChatStatus g_chat_st;
+static char g_chat_out[2][CHAT_TEXT], g_mod_out[128];      // waiting to be sent
+static SRWLOCK g_chat_lock = SRWLOCK_INIT;
+
+void chat_want(int ch) { g_chat_want[ch & 1] = GetTickCount() | 1; }
+
+int chat_copy(int ch, ChatMsg *out, int max, ChatStatus *st) {
+    AcquireSRWLockShared(&g_chat_lock);
+    int n = g_chat_n[ch & 1] < max ? g_chat_n[ch & 1] : max;
+    memcpy(out, g_chat[ch & 1] + g_chat_n[ch & 1] - n, n * sizeof *out);
+    *st = g_chat_st;
+    ReleaseSRWLockShared(&g_chat_lock);
+    return n;
+}
+
+void chat_send(int ch, const char *text) {
+    AcquireSRWLockExclusive(&g_chat_lock);
+    snprintf(g_chat_out[ch & 1], sizeof g_chat_out[0], "%s", text);
+    for (char *p = g_chat_out[ch & 1]; *p; p++) if (*p == '\n' || *p == '\r') *p = ' ';
+    g_chat_st.sent[0] = 0;
+    ReleaseSRWLockExclusive(&g_chat_lock);
+}
+
+void chat_mod(const char *action, const char *target, int days) {
+    AcquireSRWLockExclusive(&g_chat_lock);
+    snprintf(g_mod_out, sizeof g_mod_out, "%s\n%s\n%d", action, target, days);
+    ReleaseSRWLockExclusive(&g_chat_lock);
+}
+
+// the server's lines (server/src/chat.js) into the channel and the status
+static void chat_parse(int ch, char *t) {
+    static ChatMsg add[CHAT_MAX];
+    static ChatStatus st;
+    int n = 0;
+    long long epoch = -1;
+    memset(&st, 0, sizeof st);
+    st.state = 1;
+    for (char *line = t, *next; line && *line; line = next) {
+        next = strchr(line, '\n');
+        if (next) *next++ = 0;
+        char *f[6];
+        int k = 0;
+        f[k++] = line;
+        for (char *q = line; *q && k < 6; q++) if (*q == '\t') { *q = 0; f[k++] = q + 1; }
+        if (!strcmp(f[0], "E") && k >= 2) epoch = _atoi64(f[1]);
+        else if (!strcmp(f[0], "S") && k >= 2) { if (!strcmp(f[1], "ban")) st.banned = 1; else if (k >= 3) st.muted_until = _atoi64(f[2]); }
+        else if (!strcmp(f[0], "A")) st.moderator = 1;
+        else if (!strcmp(f[0], "B") && k >= 5 && st.bans < 50 && strlen(f[1]) == 17) {
+            ChatBan *b = &st.ban[st.bans++];
+            strcpy(b->sid, f[1]);
+            snprintf(b->name, sizeof b->name, "%s", f[2]);
+            b->ban = !strcmp(f[3], "ban");
+            b->until = _atoi64(f[4]);
+        } else if (!strcmp(f[0], "M") && k == 6 && n < CHAT_MAX && strlen(f[3]) == 17) {
+            ChatMsg *m = &add[n++];
+            m->id = _atoi64(f[1]);
+            m->at_ms = _atoi64(f[2]);
+            strcpy(m->sid, f[3]);
+            snprintf(m->name, sizeof m->name, "%s", f[4]);
+            snprintf(m->text, sizeof m->text, "%s", f[5]);
+        }
+    }
+    if (epoch < 0) return;
+    AcquireSRWLockExclusive(&g_chat_lock);
+    if (epoch != g_chat_epoch[ch]) g_chat_n[ch] = 0;      // the whole channel came: start over
+    g_chat_epoch[ch] = epoch;
+    int have = g_chat_n[ch], drop = have + n - CHAT_MAX;
+    if (drop > 0) { memmove(g_chat[ch], g_chat[ch] + drop, (have - drop) * sizeof add[0]); have -= drop; }
+    memcpy(g_chat[ch] + have, add, n * sizeof add[0]);
+    g_chat_n[ch] = have + n;
+    memcpy(st.sent, g_chat_st.sent, sizeof st.sent);
+    g_chat_st = st;
+    ReleaseSRWLockExclusive(&g_chat_lock);
+}
+
+static int chat_busy(void) { return g_chat_out[0][0] || g_chat_out[1][0] || g_mod_out[0]; }
+
+static void chat_tick(HINTERNET s, char *buf) {
+    DWORD now = GetTickCount();
+    char out[CHAT_TEXT] = "", mod[128] = "";
+    int out_ch = 0;
+    AcquireSRWLockExclusive(&g_chat_lock);
+    for (int c = 0; c < 2 && !out[0]; c++)
+        if (g_chat_out[c][0]) { memcpy(out, g_chat_out[c], sizeof out); g_chat_out[c][0] = 0; out_ch = c; }
+    memcpy(mod, g_mod_out, sizeof mod);
+    g_mod_out[0] = 0;
+    ReleaseSRWLockExclusive(&g_chat_lock);
+    if ((out[0] || mod[0]) && (g_online_consent != 1 || !g_key[0])) {
+        AcquireSRWLockExclusive(&g_chat_lock);
+        snprintf(g_chat_st.sent, sizeof g_chat_st.sent, "нужно согласие на онлайн (F6)");
+        ReleaseSRWLockExclusive(&g_chat_lock);
+        out[0] = mod[0] = 0;
+    }
+    static char body[CHAT_TEXT + 256];
+    if (out[0]) {
+        snprintf(body, sizeof body, "%s\n%s\n%s\n%s", g_id, g_key, CHAT_CH[out_ch], out);
+        int st = http(s, L"POST", L"/chat", body, buf);
+        const char *why = st == 200 ? "" : st == 429 ? "не так часто" : !strncmp(buf, "muted", 5) ? "вам запрещено писать" :
+                          !strcmp(buf, "banned") ? "вы забанены в чате" : st == 403 ? "сервер не знает ваш ключ" : "не отправлено";
+        AcquireSRWLockExclusive(&g_chat_lock);
+        snprintf(g_chat_st.sent, sizeof g_chat_st.sent, "%s", why);
+        ReleaseSRWLockExclusive(&g_chat_lock);
+        g_chat_at[out_ch] = 0;                                  // and the channel at once
+    }
+    if (mod[0]) {
+        snprintf(body, sizeof body, "%s\n%s\n%s", g_id, g_key, mod);
+        int st = http(s, L"POST", L"/chatmod", body, buf);
+        rc_log("chat: moderation %.10s: %d %.40s", mod, st, buf);
+        g_chat_at[0] = g_chat_at[1] = 0;
+    }
+    for (int c = 0; c < 2; c++) {
+        DWORD want = g_chat_want[c];
+        if (!want || now - want > 2000 || (g_chat_at[c] && now - g_chat_at[c] < CHAT_MS)) continue;
+        AcquireSRWLockShared(&g_chat_lock);
+        long long after = g_chat_n[c] ? g_chat[c][g_chat_n[c] - 1].id : 0, epoch = g_chat_epoch[c];
+        ReleaseSRWLockShared(&g_chat_lock);
+        wchar_t path[200];
+        // our SteamID only with the player's yes: it tells the server whose mute / moderator rights to show
+        swprintf(path, 200, L"/chat?ch=%hs&after=%lld&epoch=%lld&id=%hs", CHAT_CH[c], after, epoch,
+                 g_online_consent == 1 ? g_id : "");
+        int st = http(s, L"GET", path, NULL, buf);
+        g_chat_at[c] = now | 1;
+        if (st == 200) chat_parse(c, buf);
+        else { AcquireSRWLockExclusive(&g_chat_lock); g_chat_st.state = 2; ReleaseSRWLockExclusive(&g_chat_lock); }
+    }
+}
+
 static DWORD WINAPI online_thread(LPVOID unused) {
     load_key();
     while (!steam_me()) Sleep(2000);
@@ -260,7 +397,8 @@ static DWORD WINAPI online_thread(LPVOID unused) {
             }
         }
         fetch_docs(s, buf);
-        Sleep(500);
+        chat_tick(s, buf);
+        Sleep(chat_busy() ? 100 : 500);
     }
 }
 

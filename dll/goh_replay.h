@@ -130,6 +130,24 @@ void online_want(int doc);                  // on screen this frame
 void online_doc_ids(int doc, const char *ids);   // DOC_RATINGS / DOC_LOBBY: whose (comma separated SteamIDs, at most 16)
 int online_doc(int doc, char *out, size_t n, int *state);   // the last text; state 0 none yet, 1 ok, 2 unreachable
 
+// ---- global chat (online.c, server/src/chat.js): channels RU and EN, wiped by the server every two hours ----
+#define CHAT_MAX 200
+#define CHAT_TEXT 904               // 300 characters of UTF-8
+typedef struct { long long id, at_ms; char sid[18]; char name[ONLINE_NAME]; char text[CHAT_TEXT]; } ChatMsg;
+typedef struct { char sid[18]; char name[ONLINE_NAME]; int ban; long long until; } ChatBan;
+typedef struct {
+    int state;                      // 0 nothing yet, 1 ok, 2 server unreachable
+    int banned, moderator;
+    long long muted_until;          // unix seconds, 0 = may write
+    char sent[64];                  // how the last message went: "" ok, else why not (UTF-8)
+    int bans;                       // moderators: punishments in force
+    ChatBan ban[50];
+} ChatStatus;
+void chat_want(int ch);                      // on screen this frame: 0 RU, 1 EN
+int chat_copy(int ch, ChatMsg *out, int max, ChatStatus *st);
+void chat_send(int ch, const char *text);    // queued, the online thread sends it
+void chat_mod(const char *action, const char *target, int days);   // mute (days) / ban / unban / del
+
 // ---- match reports out of the game's own replays (report.c), sent by online.c ----
 void report_init(const char *dir);
 int report_next(const char *me, const char *key, char *body, size_t n, long long *end_time);   // 1 = body to send
@@ -145,10 +163,11 @@ int pvp_install(uint8_t *exe, const char *dir, uint8_t *(*alloc)(size_t), void (
 // the list's place on the game's screen with its column titles head_h high on top (game units, the screen
 // being root_w x root_h); 0 = the page is not up
 int pvp_rect(float *x, float *y, float *w, float *h, float *head_h, float *root_w, float *root_h);
+// the empty frame our layout puts over the friends for the global chat, as pvp_rect; 0 = not on screen
+int chat_rect(float *x, float *y, float *w, float *h, float *root_w, float *root_h);
 unsigned char *pvp_pak_file(const char *name, size_t *n);   // an unpacked file of interface.pak, malloc'd
-// the lobby's player list lines on screen (game units, as pvp_rect) and whose they are: the name's own place and
-// the right edge of the line it is on
-typedef struct { float x, y, w, h, root_w, root_h, line_r; char id[18]; } LobbyRow;
+// the lobby's player list lines on screen (game units, as pvp_rect) and whose they are, with room under each name
+typedef struct { float x, y, w, h, root_w, root_h; char id[18]; } LobbyRow;
 int lobby_rows(LobbyRow *out, int max);
 void pvp_page_shown(void *page);             // the game shows a page: the way to the screen's root
 
