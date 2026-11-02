@@ -423,8 +423,9 @@ static void scan_names(void) {
 // The lines are taller for the MMR under each name: each line of the list (an eListboxItem, a few parents up
 // from the name) gets LINE_EXTRA more height and the ones below move down, every frame, since the listbox puts
 // them back whenever it lays itself out again. Which class the line is was a guess first (eTypedListboxItem<
-// shared_ptr<eChatUser>>, and nothing was found, 2026-11-02): any of the listbox item classes is taken now.
-static const uint32_t VT_LINE_ITEMS[] = {0x10440d8, 0x103f598, 0x103f850};
+// shared_ptr<eChatUser>>, and nothing was found, 2026-11-02). Seen in a lobby then: three parents up from the
+// name, 187x22, eListboxItem (vtable 1019228), in the eMenuListbox (1053370); the other listbox item classes are taken too.
+static const uint32_t VT_LINE_ITEMS[] = {0x1019228, 0x10440d8, 0x103f598, 0x103f850};
 #define LINE_EXTRA 12
 
 static int line_item(uint64_t d) {
