@@ -8,7 +8,7 @@ if not defined BIN (echo Не нашёл папку игры. Запусти uni
 echo Папка игры / Game folder: %BIN%
 
 powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0old_mod.ps1" "%BIN%"
-for %%F in (iphlpapi.dll iphlpapi.old.dll iphlpapi.old2.dll goh_snapshots.ini goh_online.ini goh_music.ini) do if exist "%BIN%\%%F" del /f "%BIN%\%%F" || goto :fail
+for %%F in (iphlpapi.dll iphlpapi.old.dll iphlpapi.old2.dll iphlpapi.update.dll goh_snapshots.ini goh_online.ini goh_music.ini) do if exist "%BIN%\%%F" del /f "%BIN%\%%F" || goto :fail
 for %%F in ("%BIN%\goh_balance_profile_*.bin") do del /f "%%F" 2>nul
 if exist "%BIN%\xvidcore_orig.dll" (
     rem after a game update its own (newer, about 1 MB) DLL is already in place: only the old copy goes

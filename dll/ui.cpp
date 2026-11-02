@@ -37,6 +37,7 @@ static volatile bool g_online_win;      // who is online with the mod: F6
 static bool g_chat_tab;                 // the lobby's chat panel shows our GLOBAL CHAT tab (lobby_chat_tab)
 static float g_integrity_top;           // where the version box starts on the screen (pixels): the "about" window sits above
 static bool about_shown();
+static bool g_integrity_click;          // the version box has a button this frame (an update): the mouse over it is ours
 static volatile bool g_chat_drawn;      // the global chat was drawn this frame: mouse and keyboard over it are ours
 static volatile bool g_pvp_drawn;       // the PVP block over the game list was drawn this frame: the mouse over it is ours
 static ImFont *g_game_font;             // the game's anka 15 (the game list's rows), loaded from interface.pak
@@ -115,7 +116,7 @@ static void hotkeys() {
 static LRESULT CALLBACK wndproc(HWND h, UINT m, WPARAM w, LPARAM l) {
     if (g_ready) {
         if (panel_shown() || charts_shown() || music_shown() || prep_shown() || balance_shown() || online_shown() ||
-            consent_shown() || login_shown() || about_shown() || g_pvp_drawn || g_chat_drawn) {
+            consent_shown() || login_shown() || about_shown() || g_integrity_click || g_pvp_drawn || g_chat_drawn) {
             ImGui_ImplWin32_WndProcHandler(h, m, w, l);
             // typing into our chat line: the keys are not the game's
             if (ImGui::GetIO().WantTextInput && ((m >= WM_KEYFIRST && m <= WM_KEYLAST) || (m == WM_INPUT && raw_keyboard(l))))
@@ -666,6 +667,7 @@ static void login_window() {
 // ---- bottom left, in the menus: is this DLL an official build (online.c integrity_check) ------------------
 static void integrity_window() {
     g_integrity_top = 0;
+    g_integrity_click = false;
     if (g_live_match || g_ctl.state != ST_IDLE) return;
     long st = g_integrity;
     if (st == INTEGRITY_CHECKING) return;
@@ -686,6 +688,32 @@ static void integrity_window() {
         bg = IM_COL32(110, 10, 8, (int)(90 + 140 * a));
         snprintf(line2, sizeof line2, "%s", TR("На вашем компьютере НЕ официальная DLL мода. Используйте на свой страх и риск.",
                                                "This is NOT an official DLL of the mod. Use it at your own risk."));
+    }
+    if (st == INTEGRITY_OLD || g_update_state != UPDATE_IDLE) {     // an old build: a box to click, with the update
+        g_integrity_click = true;
+        ImGui::SetNextWindowPos(ImVec2(12 * k, io.DisplaySize.y - 12 * k), ImGuiCond_Always, ImVec2(0, 1));
+        ImGui::SetNextWindowBgAlpha(0.85f);
+        ImGui::Begin("##goh_version", nullptr, ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoMove |
+                                                 ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoFocusOnAppearing);
+        ImGui::TextDisabled("%s", line1);
+        long us = g_update_state;
+        if (us == UPDATE_DONE) ImGui::TextColored(ImColor(120, 200, 100), "%s", g_update_msg);
+        else {
+            ImGui::TextColored(ImColor(col), "%s", line2);
+            if (us == UPDATE_WORKING) ImGui::TextDisabled(TR("Скачиваю обновление... %ld%%", "Downloading the update... %ld%%"), g_update_pct);
+            else {
+                if (us == UPDATE_FAILED) ImGui::TextColored(ImColor(255, 90, 70), "%s", g_update_msg);
+                if (ImGui::Button(TR("Обновить", "Update"))) update_start();
+                if (ImGui::IsItemHovered())
+                    ImGui::SetTooltip("%s", TR("Скачает новую официальную версию с GitHub, проверит её подпись и поставит к следующему запуску игры.",
+                                               "Downloads the new official build from GitHub, checks its signature and puts it in place for the next start of the game."));
+                ImGui::SameLine();
+                if (ImGui::SmallButton(TR("Скачать вручную", "Download by hand"))) update_open_release_page();
+            }
+        }
+        g_integrity_top = ImGui::GetWindowPos().y;
+        ImGui::End();
+        return;
     }
     ImDrawList *dl = ImGui::GetForegroundDrawList();
     ImVec2 t1 = ImGui::CalcTextSize(line1), t2 = ImGui::CalcTextSize(line2);
@@ -718,6 +746,7 @@ static const char *ABOUT_EN[] = {
     "Sign in through Steam: the mod gets only your SteamID, no password",
 };
 static const char *NEWS_RU[] = {
+    "Автообновление: кнопка «Обновить» у версии слева внизу (файл проверяется по подписи автора)",
     "Английский язык (по языку игры в Steam)",
     "Колонка Ping в списке игр: быстрее и без скачков",
     "Чат: правый клик по нику (упомянуть, профиль Steam), звук при упоминании",
@@ -726,6 +755,7 @@ static const char *NEWS_RU[] = {
     "Исправлено: курсор игры, вкладка PVP больше не закрывается сама",
 };
 static const char *NEWS_EN[] = {
+    "Auto-update: an \"Update\" button by the version, bottom left (the file is checked against the author's signature)",
     "English (follows the game's language in Steam)",
     "Ping column in the list of games: faster and steady",
     "Chat: right click on a name (mention, Steam profile), a sound when you are mentioned",

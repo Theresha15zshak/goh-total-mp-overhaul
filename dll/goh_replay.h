@@ -138,6 +138,15 @@ void online_set_remind(int on);
 enum { INTEGRITY_CHECKING, INTEGRITY_CURRENT, INTEGRITY_OLD, INTEGRITY_UNKNOWN, INTEGRITY_UNREACHABLE };
 extern volatile long g_integrity;
 extern char g_integrity_newest[32];         // INTEGRITY_OLD: the version to update to
+extern char g_integrity_newest_sha[65];     // ... its SHA-256 as the server lists it
+extern char g_integrity_kind[16];           // this build's kind on the list: "full" / "competitive"
+// ---- the updater (update.c): the newest signed official build in place of this DLL, for the next start
+enum { UPDATE_IDLE, UPDATE_WORKING, UPDATE_DONE, UPDATE_FAILED };
+extern volatile long g_update_state, g_update_pct;
+extern char g_update_msg[160];
+void update_start(void);
+void update_open_release_page(void);
+int update_signature_ok(const unsigned char *file, size_t n, const unsigned char *sig, size_t sig_n);
 extern const char g_mod_version[];
 void online_start(const char *dir);
 void online_set_consent(int yes);

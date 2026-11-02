@@ -20,7 +20,7 @@ if VARIANT == 'competitive':
     CFLAGS.append('-DCOMPETITIVE_ONLY')
 
 C_SRC = ['dll/goh_replay.c', 'dll/proxy_iphlpapi.c', 'dll/snap.c', 'dll/keep.c', 'dll/lz.c', 'dll/prof.c', 'dll/balance.c',
-         'dll/online.c', 'dll/pvp.c', 'dll/census.c', 'dll/report.c', 'dll/steamlobby.c']
+         'dll/online.c', 'dll/pvp.c', 'dll/census.c', 'dll/report.c', 'dll/steamlobby.c', 'dll/update.c']
 CPP_SRC = ['dll/ui.cpp', 'dll/music.cpp'] + [os.path.join(IMGUI, f) for f in
                             ('imgui.cpp', 'imgui_draw.cpp', 'imgui_tables.cpp', 'imgui_widgets.cpp',
                              'backends/imgui_impl_dx11.cpp', 'backends/imgui_impl_win32.cpp')]
@@ -190,6 +190,17 @@ UI_EDITS = [
 ]
 
 
+def update_key_header():
+    """the public half of the release key (tools/sign.py) for dll/update.c; none: the updater refuses everything"""
+    p = os.path.join(ROOT, 'tools', 'update_pubkey.txt')
+    key = bytes.fromhex(open(p).read().strip()) if os.path.exists(p) else b''
+    text = chr(10).join(['// made by tools/build.py from tools/update_pubkey.txt: do not edit',
+                         'static const unsigned char UPDATE_PUBKEY[] = {%s};' % (','.join(str(b) for b in key) or '0'), ''])
+    h = os.path.join(OBJ, 'update_key.h')
+    if not os.path.exists(h) or open(h).read() != text:
+        open(h, 'w').write(text)
+
+
 def ui_header():
     import zipfile
     out = ['// made by tools/build.py from the game files: do not edit',
@@ -236,6 +247,7 @@ def main():
     os.makedirs(os.path.dirname(OUT), exist_ok=True)
     tag = balance_tag(balance_header())
     ui_header()
+    update_key_header()
     CFLAGS.append('-DBALANCE_TAG="%s"' % tag)
     version = mod_version()
     CFLAGS.append('-DMOD_VERSION="%s"' % version)

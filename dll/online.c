@@ -463,6 +463,8 @@ static void login_tick(HINTERNET s, char *buf) {
 // without bothering, not a determined forger (that check is the server's page /versions.html, by hand).
 volatile long g_integrity;
 char g_integrity_newest[32];
+char g_integrity_newest_sha[65];
+char g_integrity_kind[16];
 const char g_mod_version[] = MOD_VERSION;
 
 static int own_sha256(char out[65]) {
@@ -492,7 +494,7 @@ static void integrity_check(HINTERNET s, char *buf) {
     char mine[65];
     if (!own_sha256(mine)) { g_integrity = INTEGRITY_UNKNOWN; rc_log("integrity: own file not readable"); return; }
     if (http(s, L"GET", L"/versions", NULL, buf) != 200) { g_integrity = INTEGRITY_UNREACHABLE; return; }
-    char kind[16] = "", newest[32] = "";
+    char kind[16] = "", newest[32] = "", newest_sha[65] = "";
     int found = 0, current = 0;
     for (char *line = buf, *next; line && *line; line = next) {       // first: which build this is
         next = strchr(line, '\n');
@@ -513,11 +515,15 @@ static void integrity_check(HINTERNET s, char *buf) {
         int k = 0;
         f[k++] = line;
         for (char *q = line; *q && *q != '\n' && k < 5; q++) if (*q == '\t') f[k++] = q + 1;
-        if (k == 5 && f[4][0] == '1' && (size_t)(f[3] - f[2] - 1) == strlen(kind) && !strncmp(f[2], kind, strlen(kind)) && !newest[0])
+        if (k == 5 && f[4][0] == '1' && (size_t)(f[3] - f[2] - 1) == strlen(kind) && !strncmp(f[2], kind, strlen(kind)) && !newest[0]) {
             snprintf(newest, sizeof newest, "%.*s", (int)(f[2] - f[1] - 1), f[1]);
+            if (f[1] - f[0] - 1 == 64) snprintf(newest_sha, sizeof newest_sha, "%.64s", f[0]);
+        }
         if (next) next++;
     }
     memcpy(g_integrity_newest, newest, sizeof newest);
+    memcpy(g_integrity_newest_sha, newest_sha, sizeof newest_sha);
+    memcpy(g_integrity_kind, kind, sizeof kind);
     g_integrity = !found ? INTEGRITY_UNKNOWN : current ? INTEGRITY_CURRENT : INTEGRITY_OLD;
     rc_log("integrity: %s, version %s, sha256 %.16s...", !found ? "not an official build" : current ? "official, current" : "official, old",
            g_mod_version, mine);
