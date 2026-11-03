@@ -29,8 +29,21 @@ LIBS = ['-ld3d11', '-ldxgi', '-ld3dcompiler_47', '-ldwmapi', '-limm32', '-lgdi32
 
 
 def zig(*args):
-    env = dict(os.environ, PYTHONPATH=os.path.join(ROOT, '.tools', 'zig'))
-    r = subprocess.run([sys.executable, '-m', 'ziglang'] + list(args), cwd=ROOT, env=env)
+    # Optional portable LLVM/MinGW: its prebuilt CRT also works in environments
+    # where Zig cannot create/rename its generated runtime cache files.
+    llvm = os.environ.get('GOH_LLVM_MINGW')
+    if llvm:
+        compiler = 'clang++.exe' if args[0] == 'c++' else 'clang.exe'
+        flags = ['x86_64-w64-windows-gnu' if a == 'x86_64-windows-gnu' else a for a in args[1:]]
+        flags.append('-D_WIN32_WINNT=0x0a00')
+        if '-shared' in flags:
+            flags.append('-static')  # keep libc++/libunwind inside the one proxy DLL
+        command = [os.path.join(llvm, 'bin', compiler)] + flags
+        env = dict(os.environ)
+    else:
+        env = dict(os.environ, PYTHONPATH=os.path.join(ROOT, '.tools', 'zig'))
+        command = [sys.executable, '-m', 'ziglang'] + list(args)
+    r = subprocess.run(command, cwd=ROOT, env=env)
     if r.returncode:
         sys.exit(r.returncode)
 
@@ -44,7 +57,7 @@ def obj(src):
     return o
 
 
-GAME = r'C:\Program Files (x86)\Steam\steamapps\common\Call to Arms - Gates of Hell'
+GAME = os.environ.get('GOH_GAME_DIR', r'C:\Program Files (x86)\Steam\steamapps\common\Call to Arms - Gates of Hell')
 
 # Competitive balance (dll/balance.c): our copy of each file, made from the game's own copy here.
 # Every change is (block it sits in, text in that block, replacement of the same length).
