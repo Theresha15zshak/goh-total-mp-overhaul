@@ -2,6 +2,7 @@
 // The game's swapchain Present/ResizeBuffers are taken over through the vtable of a throwaway
 // swapchain of the same class (works with or without ReShade in front of DXGI).
 // Mouse clicks over the panel are kept from the game; movement passes so its cursor keeps moving.
+#include <algorithm>
 #include <windows.h>
 #include <d3d11.h>
 #include <dxgi.h>
@@ -14,6 +15,7 @@
 #include "imgui_impl_win32.h"
 #include "imgui_impl_dx11.h"
 #include "goh_replay.h"
+#include "camo.h"
 
 extern IMGUI_IMPL_API LRESULT ImGui_ImplWin32_WndProcHandler(HWND, UINT, WPARAM, LPARAM);
 
@@ -34,7 +36,8 @@ static volatile bool g_balance_win = true;   // the test build opens with its sw
 static volatile bool g_balance_win;     // balance switch: Shift+F7
 #endif
 static volatile bool g_online_win;      // who is online with the mod: Shift+F6
-static bool g_chat_tab;                 // the lobby's chat panel shows our GLOBAL CHAT tab (lobby_chat_tab)
+static bool g_chat_tab;                 // the lobby's chat panel shows a tab of ours (lobby_chat_tab)
+static bool g_lobby_list;               // ... and it is LOBBY LIST, not GLOBAL CHAT
 static float g_integrity_top;           // where the version box starts on the screen (pixels): the "about" window sits above
 static bool about_shown();
 static bool g_integrity_click;          // the version box has a button this frame (an update): the mouse over it is ours
@@ -116,7 +119,7 @@ static void hotkeys() {
 static LRESULT CALLBACK wndproc(HWND h, UINT m, WPARAM w, LPARAM l) {
     if (g_ready) {
         if (panel_shown() || charts_shown() || music_shown() || prep_shown() || balance_shown() || online_shown() ||
-            consent_shown() || login_shown() || about_shown() || g_integrity_click || g_pvp_drawn || g_chat_drawn) {
+            consent_shown() || login_shown() || about_shown() || g_integrity_click || g_pvp_drawn || g_chat_drawn || camo_shown()) {
             ImGui_ImplWin32_WndProcHandler(h, m, w, l);
             // typing into our chat line: the keys are not the game's
             if (ImGui::GetIO().WantTextInput && ((m >= WM_KEYFIRST && m <= WM_KEYLAST) || (m == WM_INPUT && raw_keyboard(l))))
@@ -1275,7 +1278,9 @@ static char g_chat_text[CHAT_TEXT];
 static bool g_chat_focus;               // put the keyboard in the line, the cursor at its end
 
 // the menu on a name (right click): mention them; their Steam profile; and for a moderator, the punishments
+static bool g_name_menu;                // asked for on a name or a player's cell: opened where the menu is drawn
 static void chat_mod_menu(const char *id, const char *name, bool mod) {
+    if (g_name_menu) { g_name_menu = false; ImGui::OpenPopup("##chatmod"); }
     if (!ImGui::BeginPopup("##chatmod")) return;
     ImGui::TextDisabled("%s", name);
     ImGui::Separator();
@@ -1310,7 +1315,7 @@ static void chat_name(const char *id, const char *name, ImU32 col, bool verified
     if (ImGui::IsItemClicked(ImGuiMouseButton_Right)) {
         snprintf(menu_id, 18, "%s", id);
         snprintf(menu_name, ONLINE_NAME, "%s", name);
-        ImGui::OpenPopup("##chatmod");
+        g_name_menu = true;
     }
 }
 
@@ -1367,6 +1372,40 @@ static bool mentions(const char *text, const char *name) {
                                             p[1 + n] == '?' || p[1 + n] == ':'))
             return true;
     return false;
+}
+
+// Messages naming the player, in both channels, also while the chat isn't what's open: the sound at once, and the count
+// on the GLOBAL CHAT tab until the chat is opened. What was there when the watch began is not counted.
+static int g_mentions;
+static void mention_watch() {
+    static DWORD next, began;
+    static long long heard[2];
+    DWORD now = GetTickCount();
+    if (next && (LONG)(now - next) < 0) return;
+    next = now + 500;
+    if (!began) began = now;
+    static OnlinePlayer online[ONLINE_MAX];
+    static ChatMsg msgs[CHAT_MAX];
+    static ChatStatus st;
+    int state = 0, on = online_copy(online, ONLINE_MAX, &state);
+    const char *my = online_my_id();
+    const char *name = "";
+    for (int i = 0; i < on; i++) if (!strcmp(online[i].id, my)) name = online[i].name;
+    bool sound = false;
+    for (int ch = 0; ch < 2; ch++) {
+        int n = chat_copy(ch, msgs, CHAT_MAX, &st);
+        long long newest = n ? msgs[n - 1].id : 0;
+        if (!heard[ch]) {
+            if (n) heard[ch] = newest;
+            else if (now - began > 6000) heard[ch] = 1;      // the channel is empty
+            continue;
+        }
+        if (newest <= heard[ch]) continue;
+        for (int i = 0; i < n; i++)
+            if (msgs[i].id > heard[ch] && mentions(msgs[i].text, name)) { g_mentions++; sound = true; }
+        heard[ch] = newest;
+    }
+    if (sound) mention_sound();
 }
 
 static const char *CHAT_RULES_RU[] = {
@@ -1439,25 +1478,26 @@ static void sunken_box(ImDrawList *dl, ImVec2 a, ImVec2 b) {
 
 static bool lobby_chat_tab(float *x, float *y, float *w, float *h, float *rw, float *rh) {
     ChatPanel cp;
-    if (g_live_match || !chat_panel(&cp)) { g_chat_tab = false; return false; }
+    if (g_live_match || !chat_panel(&cp)) { g_chat_tab = g_lobby_list = false; return false; }
     ImGuiIO &io = ImGui::GetIO();
     float sx = io.DisplaySize.x / cp.root_w, sy = io.DisplaySize.y / cp.root_h;
     for (int i = 0; i < cp.ntabs; i++) {
         const float *t = cp.tab[i];
         if (ImGui::IsMouseClicked(0) && ImGui::IsMouseHoveringRect(ImVec2(t[0] * sx, t[1] * sy), ImVec2((t[0] + t[2]) * sx, (t[1] + t[3]) * sy), false))
-            g_chat_tab = false;
+            g_chat_tab = g_lobby_list = false;
     }
     if (g_game_font) ImGui::PushFont(g_game_font);
-    const char *label = "GLOBAL CHAT";
+    const char *label = "GLOBAL CHAT", *label2 = "LOBBY LIST";
     float size = (g_game_font ? g_game_font->FontSize : ImGui::GetFontSize()) * sy;
     ImFont *font = ImGui::GetFont();
     float tab_y = cp.y, tab_h = cp.body_y - cp.y;           // the game's tabs' own strip, when they were found
     for (int i = 0; i < cp.ntabs; i++) if (cp.tab[i][3] > 0) { tab_y = cp.tab[i][1]; tab_h = cp.tab[i][3]; break; }
-    float tw = font->CalcTextSizeA(size, FLT_MAX, 0, label).x, gap = 12 * sx;
+    float tw = font->CalcTextSizeA(size, FLT_MAX, 0, label).x, tw2 = font->CalcTextSizeA(size, FLT_MAX, 0, label2).x, gap = 12 * sx;
+    float dot = 8 * sy, dot_w = g_mentions ? 2 * dot + 4 * sx : 0;      // the red circle after GLOBAL CHAT
     float lx = cp.tabs_r * sx + gap, ly = floorf((tab_y + tab_h * 0.5f) * sy - size * 0.5f + 1 * sy);
     g_panel_rect = ImVec4(cp.x * sx, cp.y * sy, (cp.x + cp.w) * sx, (cp.y + cp.h) * sy);
     ImGui::SetNextWindowPos(ImVec2(lx - gap, cp.y * sy), ImGuiCond_Always);
-    ImGui::SetNextWindowSize(ImVec2(tw + 2 * gap, (cp.body_y - cp.y) * sy), ImGuiCond_Always);
+    ImGui::SetNextWindowSize(ImVec2(tw + tw2 + 4 * gap + dot_w, (cp.body_y - cp.y) * sy), ImGuiCond_Always);
     ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0, 0));
     ImGui::PushStyleVar(ImGuiStyleVar_WindowBorderSize, 0);
     ImGui::Begin("##goh_chat_tab", nullptr, ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoMove |
@@ -1465,25 +1505,232 @@ static bool lobby_chat_tab(float *x, float *y, float *w, float *h, float *rw, fl
                                               ImGuiWindowFlags_NoScrollbar);
     ImDrawList *dl = ImGui::GetWindowDrawList();
     ImGui::SetCursorScreenPos(ImVec2(lx, ly));
-    if (ImGui::InvisibleButton("##gtab", ImVec2(tw, size))) g_chat_tab = true;
+    if (ImGui::InvisibleButton("##gtab", ImVec2(tw, size))) { g_chat_tab = true; g_lobby_list = false; }
     bool hot = ImGui::IsItemHovered();
     float mid = (tab_y + tab_h * 0.5f) * sy, sep = floorf(lx - gap * 0.5f);
     dl->AddLine(ImVec2(sep, mid - 6 * sy), ImVec2(sep, mid + 6 * sy), IM_COL32(120, 120, 120, 255));
-    dl->AddText(font, size, ImVec2(floorf(lx), ly), g_chat_tab ? IM_COL32(255, 255, 255, 255) : hot ? VAN_HOVER : IM_COL32(200, 200, 200, 255), label);
+    dl->AddText(font, size, ImVec2(floorf(lx), ly), g_chat_tab && !g_lobby_list ? IM_COL32(255, 255, 255, 255) : hot ? VAN_HOVER : IM_COL32(200, 200, 200, 255), label);
+    if (g_mentions) {
+        ImVec2 at(floorf(lx + tw + 4 * sx + dot), floorf(mid));
+        dl->AddCircleFilled(at, dot, IM_COL32(205, 38, 38, 255), 20);
+        if (g_mentions <= 9) {              // more than nine: the circle alone
+            char count[2] = {(char)('0' + g_mentions), 0};
+            float ds = size * .8f;
+            ImVec2 cs = font->CalcTextSizeA(ds, FLT_MAX, 0, count);
+            dl->AddText(font, ds, ImVec2(floorf(at.x - cs.x * .5f), floorf(at.y - cs.y * .5f)), IM_COL32(255, 255, 255, 255), count);
+        }
+    }
+    float lx2 = lx + tw + 2 * gap + dot_w, sep2 = floorf(lx2 - gap);
+    ImGui::SetCursorScreenPos(ImVec2(lx2, ly));
+    if (ImGui::InvisibleButton("##ltab", ImVec2(tw2, size))) g_chat_tab = g_lobby_list = true;
+    hot = ImGui::IsItemHovered();
+    dl->AddLine(ImVec2(sep2, mid - 6 * sy), ImVec2(sep2, mid + 6 * sy), IM_COL32(120, 120, 120, 255));
+    dl->AddText(font, size, ImVec2(floorf(lx2), ly), g_lobby_list ? IM_COL32(255, 255, 255, 255) : hot ? VAN_HOVER : IM_COL32(200, 200, 200, 255), label2);
     ImGui::End();
     ImGui::PopStyleVar(2);
     if (g_game_font) ImGui::PopFont();
     g_chat_drawn = true;            // the tab takes its clicks
     if (!g_chat_tab) return false;
-    *x = cp.x; *y = cp.body_y; *w = cp.w; *h = cp.y + cp.h - cp.body_y; *rw = cp.root_w; *rh = cp.root_h;
+    const float rim = 4;                    // the panel's own frame: the tabs' strip starts this far in, so do we
+    *x = cp.x + rim; *y = cp.body_y; *w = cp.w - 2 * rim; *h = cp.y + cp.h - cp.body_y - rim; *rw = cp.root_w; *rh = cp.root_h;
     return true;
+}
+
+// the game's marks in a name: <c(7e5be4)>[Jubilee]</c> is a colour, any other <...> is left out
+static void tagged_text(ImDrawList *dl, float x, float y, ImU32 base, bool keep_base, const char *s) {
+    ImU32 col = base;
+    y = floorf(y + 0.5f);
+    while (*s) {
+        const char *e = s;
+        while (*e && *e != '<') e++;
+        if (e > s) {
+            dl->AddText(ImVec2(floorf(x + 0.5f), y), col, s, e);
+            x += ImGui::CalcTextSize(s, e).x;
+        }
+        if (!*e) return;
+        const char *close = strchr(e, '>');
+        if (!close) { dl->AddText(ImVec2(floorf(x + 0.5f), y), col, e); return; }
+        unsigned c;
+        if (sscanf(e, "<c(%6x)>", &c) == 1) { if (!keep_base) col = IM_COL32(c >> 16 & 255, c >> 8 & 255, c & 255, 255); }
+        else if (e[1] == '/' || !strncmp(e, "<c>", 3)) col = base;
+        s = close + 1;
+    }
+}
+static bool in_list(const char *csv, const char *key) {
+    size_t n = strlen(key);
+    for (const char *c = csv; (c = strstr(c, key)); c += n)
+        if ((c == csv || c[-1] == ',') && (c[n] == 0 || c[n] == ',')) return true;
+    return false;
+}
+// a mode on or off in the comma list
+static void toggle_mode(char *csv, size_t size, const char *key) {
+    char out[400] = "", copy[400];
+    snprintf(copy, sizeof copy, "%s", csv);
+    bool was = false;
+    for (char *m = strtok(copy, ","); m; m = strtok(nullptr, ",")) {
+        if (!strcmp(m, key)) { was = true; continue; }
+        snprintf(out + strlen(out), sizeof out - strlen(out), "%s%s", out[0] ? "," : "", m);
+    }
+    if (!was) snprintf(out + strlen(out), sizeof out - strlen(out), "%s%s", out[0] ? "," : "", key);
+    snprintf(csv, size, "%s", out);
+}
+// LOBBY LIST: the game's list of lobbies, as on its Internet page, for a player already in a session
+static void lobby_list_block(float x, float y, float w, float h, float rw, float rh) {
+    lobby_list_want();
+    static LobbyLine lines[LOBBY_LINES];
+    static bool read_filters, no_password, no_full, by_mode;
+    static char mode[400];                  // the modes wanted, a comma between; "" all
+    if (!read_filters) {
+        read_filters = true;
+        no_password = online_list_opt("no_password"); no_full = online_list_opt("no_full"); by_mode = online_list_opt("by_mode");
+        online_list_mode(mode, sizeof mode);
+    }
+    lobby_list_filter(no_password, mode);
+    int state = 0, all = lobby_list_copy(lines, LOBBY_LINES, &state), n = 0;
+    static LobbyMode modes[48];
+    int mode_n = lobby_modes_copy(modes, 48);
+    for (int i = 0; i < all; i++) {
+        // the filter just changed: the old answer stays on screen for a moment, without what is no longer wanted
+        if ((no_full && lines[i].max > 0 && lines[i].players >= lines[i].max) || (no_password && lines[i].locked) ||
+            (mode[0] && !in_list(mode, lines[i].mode_key))) continue;
+        lines[n++] = lines[i];
+    }
+    if (by_mode) std::stable_sort(lines, lines + n, [](const LobbyLine &a, const LobbyLine &b) { return strcmp(a.mode, b.mode) < 0; });
+    ImGuiIO &io = ImGui::GetIO();
+    float sx = io.DisplaySize.x / rw, sy = io.DisplaySize.y / rh;
+    ImVec2 p0(x * sx, y * sy), size(w * sx, h * sy);
+    ImGui::SetNextWindowPos(p0, ImGuiCond_Always);
+    ImGui::SetNextWindowSize(size, ImGuiCond_Always);
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0, 0));
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowBorderSize, 0);
+    ImGui::PushStyleVar(ImGuiStyleVar_ScrollbarSize, 8 * sy);
+    ImGui::PushStyleColor(ImGuiCol_ScrollbarBg, IM_COL32(0, 0, 0, 0));
+    ImGui::PushStyleColor(ImGuiCol_ScrollbarGrab, IM_COL32(70, 66, 60, 255));
+    ImGui::PushStyleColor(ImGuiCol_ScrollbarGrabHovered, IM_COL32(110, 98, 80, 255));
+    ImGui::PushStyleColor(ImGuiCol_ScrollbarGrabActive, IM_COL32(178, 135, 84, 255));
+    ImGui::PushStyleColor(ImGuiCol_ChildBg, IM_COL32(0, 0, 0, 0));
+    ImGui::Begin("##goh_lobby_list", nullptr, ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoMove |
+                                              ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoBackground |
+                                              ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse);
+    if (g_game_font) ImGui::PushFont(g_game_font);
+    ImGui::SetWindowFontScale(sy);
+    ImDrawList *dl = ImGui::GetWindowDrawList();
+    dl->AddRectFilled(p0, ImVec2(p0.x + size.x, p0.y + size.y), IM_COL32(19, 19, 18, 255));
+    float lh = ImGui::GetTextLineHeight(), row = lh * 1.45f, head = lh * 1.7f;
+    static const float COL[5] = {0.04f, 0.33f, 0.51f, 0.71f, 1};
+    const char *TITLES[4] = {TR("Хост", "Host"), TR("Игра", "Game"), TR("Карта", "Map"), TR("Игроки", "Players")};
+    dl->AddRectFilled(p0, ImVec2(p0.x + size.x, p0.y + head), IM_COL32(12, 12, 11, 255));
+    for (int i = 0; i < 4; i++) van_text(dl, p0.x + COL[i] * size.x, p0.y + (head - lh) * .5f, VAN_TITLE, TITLES[i]);
+    // the filters: a word at the right of the titles, a small window under it
+    bool filtered = no_password || no_full || by_mode || mode[0];
+    const char *word = TR("ФИЛЬТРЫ", "FILTERS");
+    float fw = ImGui::CalcTextSize(word).x, fx = p0.x + size.x - fw - 12 * sx;
+    ImGui::SetCursorScreenPos(ImVec2(fx - 6 * sx, p0.y));
+    if (ImGui::InvisibleButton("##filters", ImVec2(fw + 12 * sx, head))) ImGui::OpenPopup("##lobbyfilters");
+    bool fhot = ImGui::IsItemHovered();
+    dl->AddRectFilled(ImVec2(fx - 6 * sx, p0.y), ImVec2(fx + fw + 6 * sx, p0.y + head), fhot ? VAN_HOVER_BG : IM_COL32(12, 12, 11, 255));
+    van_text(dl, fx, p0.y + (head - lh) * .5f, fhot ? VAN_HOVER : filtered ? ACCENT : VAN_TITLE, word);
+    // and the list at once, beside it
+    const char *again = TR("ОБНОВИТЬ", "REFRESH");
+    static DWORD pressed;                   // the word answers the press; the list's own turns don't show on it
+    bool busy = pressed && GetTickCount() - pressed < 1000;
+    float rw2 = ImGui::CalcTextSize(again).x, rx = fx - rw2 - 18 * sx;
+    ImGui::SetCursorScreenPos(ImVec2(rx - 6 * sx, p0.y));
+    if (ImGui::InvisibleButton("##refresh", ImVec2(rw2 + 12 * sx, head)) && !busy) { lobby_list_refresh(); pressed = GetTickCount(); }
+    bool rhot = ImGui::IsItemHovered();
+    if (rhot) dl->AddRectFilled(ImVec2(rx - 6 * sx, p0.y), ImVec2(rx + rw2 + 6 * sx, p0.y + head), VAN_HOVER_BG);
+    van_text(dl, rx, p0.y + (head - lh) * .5f, busy ? VAN_TAB_OFF : rhot ? VAN_HOVER : VAN_TITLE, again);
+    ImGui::SetNextWindowPos(ImVec2(p0.x + size.x, p0.y + head), ImGuiCond_Appearing, ImVec2(1, 0));
+    ImGui::PushStyleColor(ImGuiCol_PopupBg, IM_COL32(24, 23, 21, 250));
+    ImGui::PushStyleColor(ImGuiCol_Border, IM_COL32(70, 66, 60, 255));
+    ImGui::PushStyleColor(ImGuiCol_FrameBg, IM_COL32(16, 16, 15, 255));
+    ImGui::PushStyleColor(ImGuiCol_FrameBgHovered, IM_COL32(44, 37, 30, 255));
+    ImGui::PushStyleColor(ImGuiCol_FrameBgActive, IM_COL32(44, 37, 30, 255));
+    ImGui::PushStyleColor(ImGuiCol_CheckMark, ACCENT);
+    ImGui::PushStyleColor(ImGuiCol_Header, VAN_HOVER_BG);
+    ImGui::PushStyleColor(ImGuiCol_HeaderHovered, VAN_HOVER_BG);
+    ImGui::PushStyleColor(ImGuiCol_HeaderActive, VAN_HOVER_BG);
+    ImGui::PushStyleColor(ImGuiCol_Text, VAN_TEXT);
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(10 * sx, 8 * sy));
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowBorderSize, 1);
+    if (ImGui::BeginPopup("##lobbyfilters")) {
+        ImGui::SetWindowFontScale(sy);
+        if (ImGui::Checkbox(TR("Скрыть игры с паролем", "Hide games with a password"), &no_password)) online_set_list_opt("no_password", no_password);
+        if (ImGui::Checkbox(TR("Скрыть заполненные игры", "Hide full games"), &no_full)) online_set_list_opt("no_full", no_full);
+        if (ImGui::Checkbox(TR("Сортировать по режиму", "Sort by mode"), &by_mode)) online_set_list_opt("by_mode", by_mode);
+        ImGui::Spacing();
+        ImGui::Separator();
+        ImGui::TextUnformatted(TR("Режимы (ничего не выбрано: все)", "Modes (none chosen: all)"));
+        for (int k = 0; k < mode_n; k++) {
+            bool on = in_list(mode, modes[k].key);
+            ImGui::PushID(k);
+            if (ImGui::Checkbox(modes[k].name, &on)) { toggle_mode(mode, sizeof mode, modes[k].key); online_set_list_mode(mode); }
+            ImGui::PopID();
+        }
+        ImGui::EndPopup();
+    }
+    ImGui::PopStyleVar(2);
+    ImGui::PopStyleColor(10);
+    ImGui::SetCursorScreenPos(ImVec2(p0.x, p0.y + head));
+    ImGui::BeginChild("##rows", ImVec2(size.x, size.y - head), false, 0);
+    ImGui::SetWindowFontScale(sy);
+    ImDrawList *rl = ImGui::GetWindowDrawList();
+    if (!n) {
+        ImVec2 at = ImGui::GetCursorScreenPos();
+        van_text(rl, at.x + COL[0] * size.x, at.y + lh * .5f, VAN_TITLE, state == 2 ? TR("Steam не ответил, пробую ещё", "Steam did not answer, trying again") :
+                 state == 1 ? (filtered ? TR("С такими фильтрами лобби нет", "No lobbies with these filters") : TR("Лобби не найдено", "No lobbies found")) : TR("Загружаю список...", "Loading the list..."));
+    }
+    for (int i = 0; i < n; i++) {
+        const LobbyLine &l = lines[i];
+        ImVec2 at = ImGui::GetCursorScreenPos();
+        ImGui::PushID(i);
+        ImGui::InvisibleButton("##row", ImVec2(size.x - 10 * sx, row));
+        bool hot = ImGui::IsItemHovered();
+        ImGui::PopID();
+        if (hot && ImGui::IsMouseDoubleClicked(0) && l.id != steam_lobby_now()) join_lobby(l.id, l.owner);
+        if (!ImGui::IsItemVisible()) continue;
+        if (hot) rl->AddRectFilled(at, ImVec2(at.x + size.x, at.y + row), VAN_HOVER_BG);
+        char players[48];
+        if (l.max_spectators > 0) snprintf(players, sizeof players, "%d/%d [%d/%d]", l.players, l.max, l.spectators, l.max_spectators);
+        else snprintf(players, sizeof players, "%d/%d", l.players, l.max);
+        char host[80];
+        snprintf(host, sizeof host, "%s%s", l.locked ? "[P] " : "", l.host);
+        const char *text[4] = {host, l.mode, l.map, players};
+        ImU32 color = hot ? VAN_HOVER : VAN_TEXT;
+        if (l.mods) {                       // a modded lobby: a small plate in the margin
+            float b = lh * .78f, bx = at.x + (COL[0] * size.x - b) * .5f, by = at.y + (row - b) * .5f;
+            rl->AddRectFilled(ImVec2(bx, by), ImVec2(bx + b, by + b), IM_COL32(178, 118, 50, 255), 2 * sy);
+            ImVec2 ms = ImGui::CalcTextSize("M");
+            float k = b * .8f / ms.y;
+            rl->AddText(ImGui::GetFont(), ImGui::GetFontSize() * k, ImVec2(floorf(bx + (b - ms.x * k) * .5f), floorf(by + (b - ms.y * k) * .5f)), IM_COL32(20, 18, 15, 255), "M");
+            if (hot) ImGui::SetTooltip(TR("Модовое лобби, модов: %d", "Modded lobby, mods: %d"), l.mods);
+        }
+        for (int c = 0; c < 4; c++) {
+            float left = at.x + COL[c] * size.x, right = at.x + COL[c + 1] * size.x - 6 * sx;
+            rl->PushClipRect(ImVec2(left, at.y), ImVec2(right, at.y + row), true);
+            tagged_text(rl, left, at.y + (row - lh) * .5f, color, hot, text[c]);
+            rl->PopClipRect();
+        }
+    }
+    ImGui::EndChild();
+    ImGui::SetWindowFontScale(1);
+    if (g_game_font) ImGui::PopFont();
+    ImGui::End();
+    ImGui::PopStyleColor(5);
+    ImGui::PopStyleVar(3);
+    g_chat_drawn = true;
 }
 
 static void chat_block() {
     float x, y, w, h, rw, rh;
     g_chat_drawn = false;
-    bool own_frame = chat_rect(&x, &y, &w, &h, &rw, &rh);       // the Internet page: our empty frame
+    ChatPanel lobby_panel;                                      // the lobby's panel on screen wins: the page under it can look shown
+    bool panel_up = chat_panel(&lobby_panel);
+    bool own_frame = !panel_up && chat_rect(&x, &y, &w, &h, &rw, &rh);   // the Internet page: our empty frame
+    if ((panel_up && !g_live_match) || own_frame) { chat_want(0); chat_want(1); mention_watch(); }
     if (!own_frame && !lobby_chat_tab(&x, &y, &w, &h, &rw, &rh)) return;   // the lobby: its GLOBAL CHAT tab
+    if (!own_frame && g_lobby_list) { lobby_list_block(x, y, w, h, rw, rh); return; }
+    g_mentions = 0;                         // the chat is open
     chat_want(g_chat_ch);
     static ChatMsg msgs[CHAT_MAX];
     static ChatStatus st;
@@ -1493,14 +1740,6 @@ static void chat_block() {
     // my name in the chat (Anonymous#### until signed in): as the online list has it
     static char my_name[ONLINE_NAME];
     for (int i = 0; i < on; i++) if (!strcmp(online[i].id, my)) snprintf(my_name, sizeof my_name, "%s", online[i].name);
-    {   // new messages naming me: the sound, once (not for what was there when the chat opened)
-        static long long heard[2];
-        long long newest = n ? msgs[n - 1].id : 0;
-        if (heard[g_chat_ch] && newest > heard[g_chat_ch])
-            for (int i = 0; i < n; i++)
-                if (msgs[i].id > heard[g_chat_ch] && strcmp(msgs[i].sid, my) && mentions(msgs[i].text, my_name)) { mention_sound(); break; }
-        if (newest > heard[g_chat_ch] || (!heard[g_chat_ch] && st.state == 1)) heard[g_chat_ch] = newest ? newest : 1;
-    }
     ImGuiIO &io = ImGui::GetIO();
     float sx = io.DisplaySize.x / rw, sy = io.DisplaySize.y / rh, pad = 12 * sy;
     ImVec2 p0(x * sx, y * sy), size(w * sx, h * sy);
@@ -1636,6 +1875,12 @@ static void chat_block() {
                 ImGui::GetWindowDrawList()->AddText(small, small_size, at, VAN_ITEM, mm);
                 if (ImGui::IsMouseHoveringRect(at, ImVec2(at.x + small->CalcTextSizeA(small_size, FLT_MAX, 0, mm).x, at.y + small_size)))
                     ImGui::SetTooltip("%s", TR("MMR: 1×1 / команды", "MMR: 1×1 / teams"));
+            }
+            if (ImGui::IsWindowHovered() && ImGui::IsMouseClicked(ImGuiMouseButton_Right) &&
+                ImGui::IsMouseHoveringRect(c, ImVec2(c.x + ImGui::GetContentRegionAvail().x, c.y + av + 4 * sy))) {
+                snprintf(menu_id, 18, "%s", online[i].id);
+                snprintf(menu_name, ONLINE_NAME, "%s", online[i].name);
+                g_name_menu = true;
             }
             ImGui::SetCursorScreenPos(ImVec2(c.x, c.y + av + 4 * sy));
             ImGui::Dummy(ImVec2(1, 0));
@@ -2014,6 +2259,7 @@ static void draw(IDXGISwapChain *sc) {
     ImGui_ImplWin32_NewFrame();
     ImGui::NewFrame();
     hotkeys();
+    camo_draw(g_dev, g_hwnd);
     static long results_was;
     if (g_ms_results != results_was) {         // the results page opens the charts and takes them along when it goes
         results_was = g_ms_results;

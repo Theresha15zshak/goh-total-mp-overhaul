@@ -13,6 +13,7 @@
 #include <math.h>
 #include <time.h>
 #include "goh_replay.h"
+#include "camo.h"
 
 #define STBI_NO_STDIO
 #define STBI_ONLY_PNG          // keeps the zlib decoder, which is all we use
@@ -424,6 +425,7 @@ static void __cdecl watch_hit(uint32_t id, void *a1, void *a2) {
         uintptr_t page = (uintptr_t)a2;
         rc_log("page shown %p, vtable rva %llx", a2, (unsigned long long)(rdq(page) - (uintptr_t)g_base));
         pvp_page_shown(a2);
+        camo_page(a2);
         if (is_result_page(page)) {
             g_result_page = page; g_ms_results = 1; g_census_page = page;
             rc_log("results page shown");
@@ -823,6 +825,8 @@ static void __cdecl main_tick(void) {
     if (g_pov_on && g_rw == RW_NONE) apply_pov();
     if (g_media_ok && InterlockedExchange(&g_music_stop_vanilla, 0)) stop_game_music();
     pvp_gui_tick();
+    lobby_list_tick();
+    camo_tick();
     switch (g_rw) {
     case RW_EXIT: {
         struct { void *vt; uint32_t id, pad; uint64_t rest[5]; } ev;
@@ -1512,6 +1516,7 @@ static void startup(HMODULE self) {
     char ini[MAX_PATH];
     snprintf(ini, sizeof ini, "%sgoh_snapshots.ini", g_dir);
     census_init(g_base, g_dir, GetPrivateProfileIntA("debug", "census_after", 0, ini));
+    camo_init(g_dir);
     g_census_auto = GetPrivateProfileIntA("debug", "census", 0, ini);
 #ifdef COMPETITIVE_ONLY
     if (0) {

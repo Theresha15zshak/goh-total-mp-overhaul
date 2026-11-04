@@ -416,6 +416,11 @@ int online_login_url(char *out, size_t n) {
     return ok;
 }
 
+// the lobby list's filters, kept in goh_online.ini [lobby_list]
+int online_list_opt(const char *key) { return GetPrivateProfileIntA("lobby_list", key, 0, g_ini); }
+void online_set_list_opt(const char *key, int on) { WritePrivateProfileStringA("lobby_list", key, on ? "1" : "0", g_ini); }
+void online_list_mode(char *out, int n) { GetPrivateProfileStringA("lobby_list", "mode", "", out, n, g_ini); }
+void online_set_list_mode(const char *mode) { WritePrivateProfileStringA("lobby_list", "mode", mode, g_ini); }
 int online_remind(void) { return GetPrivateProfileIntA("online", "steam_remind", 1, g_ini); }
 void online_set_remind(int on) { WritePrivateProfileStringA("online", "steam_remind", on ? "1" : "0", g_ini); }
 

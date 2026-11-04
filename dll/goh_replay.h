@@ -203,6 +203,21 @@ int chat_rect(float *x, float *y, float *w, float *h, float *root_w, float *root
 // its channel starts below the tabs, the right end of the tabs and each tab's place (game units, as pvp_rect)
 typedef struct { float x, y, w, h, body_y, tabs_r, root_w, root_h; int ntabs; float tab[8][4]; } ChatPanel;
 int chat_panel(ChatPanel *p);
+// the lobbies of the game as Steam has them (steamlobby.c): kept fresh while the tab keeps asking
+#define LOBBY_LINES 200
+typedef struct { uint64_t id; char owner[24], host[64], mode[64], mode_key[48], map[160]; int players, max, spectators, max_spectators, locked, mods; } LobbyLine;
+typedef struct { char key[48], name[64]; } LobbyMode;
+int lobby_modes_copy(LobbyMode *out, int max);              // the modes known so far, with their names
+void lobby_list_want(void);
+void lobby_list_refresh(void);                              // now, not at the next turn
+// asked of Steam, which gives 50 at most: modes (GameType, comma between; "" all) are one request each, put together
+void lobby_list_filter(int no_password, const char *modes);
+int online_list_opt(const char *key);
+void online_set_list_opt(const char *key, int on);
+void online_list_mode(char *out, int n);
+void online_set_list_mode(const char *mode);
+int lobby_list_copy(LobbyLine *out, int max, int *state);   // state: 0 not yet, 1 answered, 2 no answer
+void lobby_list_tick(void);
 unsigned char *pvp_pak_file(const char *name, size_t *n);   // an unpacked file of interface.pak, malloc'd
 unsigned char *pvp_sound_file(const char *name, size_t *n); // ... of sound\sound.pak
 // the lobby's player list lines on screen (game units, as pvp_rect) and whose they are: the name's own place,

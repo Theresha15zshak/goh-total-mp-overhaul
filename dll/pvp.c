@@ -16,6 +16,7 @@
 #include <string.h>
 #include <math.h>
 #include "goh_replay.h"
+#include "camo.h"
 #include "ui_files.h"
 
 #define NUI (sizeof UI_FILES / sizeof UI_FILES[0])
@@ -87,7 +88,9 @@ static int ends_with(const void *str, const char *ours) {
 }
 
 static void *open_hook(void *path, uint32_t mode) {
-    void *r = g_prev_open(path, mode);
+    void *r;
+    if (camo_open(path, mode, g_prev_open, &r)) return r;
+    r = g_prev_open(path, mode);
     if (!r) return r;
     for (size_t i = 0; i < NUI; i++) {
         if (!ends_with(path, UI_FILES[i].path)) continue;
@@ -261,6 +264,7 @@ static int covered(void *d) {
     }
     return 0;
 }
+int dialog_covered(void *d) { return covered(d); }
 
 // The chat's frame is drawn over only while its page is the one on the screen. Seen 2026-11-02: with the
 // "host game" page up, the list page's frame still had all its parents shown up to a root of its own, and the
@@ -281,7 +285,7 @@ int chat_rect(float *x, float *y, float *w, float *h, float *root_w, float *root
     static int why_logged = -1;
     int why = !f ? 1 : covered(f) ? 2 : !place(f, 1, &fx, &fy, &fw, &fh, &rw, &rh) ? 3 :
               root_of((uintptr_t)f) != pq((uintptr_t)(g_base + G_DESKTOP)) ? 4 :
-              fw <= 0 || fh <= 0 || rw <= 0 || rh <= 0 || fx < rw / 2 || fw > rw / 2 || fy + fh > rh ? 5 : 0;
+              fw <= 0 || fh < rh / 6 || rw <= 0 || rh <= 0 || fx < rw / 2 || fw > rw / 2 || fy < rh / 8 || fy + fh > rh ? 5 : 0;   // laid out small under another page: not it
     if (why != why_logged && why != 1) {
         rc_log("pvp: chat frame %s", why == 0 ? "on screen" : why == 2 ? "covered" : why == 3 ? "not shown" :
                                                  why == 4 ? "under another root (page put away)" : "not where the layout puts it");
@@ -662,6 +666,85 @@ void pvp_lobby_pings(void) {
     rc_log("pvp: the game's lobby pings on (Ping column in the list of games)");
 }
 
+// The list of games' filter by game type (Battle Zones, Domination...). The game keeps it as a profile option,
+// mp/lobby_search_game_type, read into a new eLobbyFilter (+0x20, std::string) each time the page is made
+// (slot 10, 2dfd70; slot 13 destroys it) and into the filter window's options (eSessionSearchOptionsServer, at
+// popup+0x140, +0x10 std::string). The other filter options come back from settings.set; this one does not. So
+// what the player applies (options slot 2, 468730) is also kept in goh_online.ini [lobby] game_type, and put back
+// into a new page's filter and a new filter window. "Reset" and "all" apply an empty text, which clears it.
+#define VT_SEARCH_OPTS 0x104ea98
+#define FN_SEARCH_APPLY 0x468730
+#define VT_SEARCH_POPUP 0x104eac0
+#define FN_POPUP_BUILD 0x303cc0
+#define FN_PAGE_CREATE 0x2dfd70
+#define FN_STR_ASSIGN 0xa50b0           // std::string::assign(this, const char *, size)
+#define PAGE_FILTER 0x140
+#define FILTER_GAME_TYPE 0x20
+#define POPUP_OPTS 0x140
+#define OPTS_GAME_TYPE 0x10
+#define GAME_TYPE_MAX 128
+
+static char g_filter_ini[MAX_PATH], g_game_type[GAME_TYPE_MAX];
+static uint64_t (*g_search_apply)(void *opts, void *a, void *b);
+static uint64_t (*g_popup_build)(void *popup);
+static uint64_t (*g_page_create)(void *page);
+
+// a std::string of the game: the text in place up to 15 characters, else behind a pointer
+static int game_str(uint64_t s, char *out, size_t n) {
+    uint64_t size = pq(s + 0x10), cap = pq(s + 0x18);
+    if (size >= n) return 0;
+    if (!peek(cap > 15 ? (void *)pq(s) : (void *)s, out, size)) return 0;
+    out[size] = 0;
+    return 1;
+}
+
+static void put_game_type(uint64_t s, const char *what) {
+    char now[GAME_TYPE_MAX];
+    if (!g_game_type[0] || !game_str(s, now, sizeof now) || !strcmp(now, g_game_type)) return;
+    ((void *(*)(void *, const char *, size_t))(g_base + FN_STR_ASSIGN))((void *)s, g_game_type, strlen(g_game_type));
+    rc_log("pvp: lobby filter: %s had game type \"%s\", \"%s\" put back", what, now, g_game_type);
+}
+
+static uint64_t search_apply(void *opts, void *a, void *b) {
+    uint64_t r = g_search_apply(opts, a, b);
+    char now[GAME_TYPE_MAX];
+    if (!game_str((uintptr_t)opts + OPTS_GAME_TYPE, now, sizeof now)) return r;
+    rc_log("pvp: lobby filter applied: game type \"%s\"", now);
+    snprintf(g_game_type, sizeof g_game_type, "%s", now);
+    WritePrivateProfileStringA("lobby", "game_type", now, g_filter_ini);
+    return r;
+}
+
+static uint64_t popup_build(void *popup) {
+    put_game_type((uintptr_t)popup + POPUP_OPTS + OPTS_GAME_TYPE, "the filter window");
+    return g_popup_build(popup);
+}
+
+static uint64_t page_create(void *page) {
+    uint64_t r = g_page_create(page);
+    uint64_t filter = pq((uintptr_t)page + PAGE_FILTER);
+    if (filter) put_game_type(filter + FILTER_GAME_TYPE, "the list's filter");
+    return r;
+}
+
+static void filter_install(const char *dir, void (*patch)(void *, const void *, size_t)) {
+    if (!vt_slot(VT_SEARCH_OPTS, 2, FN_SEARCH_APPLY) || !vt_slot(VT_SEARCH_POPUP, 26, FN_POPUP_BUILD) ||
+        !vt_slot(PAGES[0].vt, 10, FN_PAGE_CREATE)) {
+        rc_log("pvp: the lobby filter is not as expected, its game type is not kept");
+        return;
+    }
+    snprintf(g_filter_ini, sizeof g_filter_ini, "%sgoh_online.ini", dir);
+    GetPrivateProfileStringA("lobby", "game_type", "", g_game_type, sizeof g_game_type, g_filter_ini);
+    g_search_apply = (uint64_t (*)(void *, void *, void *))(g_base + FN_SEARCH_APPLY);
+    g_popup_build = (uint64_t (*)(void *))(g_base + FN_POPUP_BUILD);
+    g_page_create = (uint64_t (*)(void *))(g_base + FN_PAGE_CREATE);
+    void *apply = (void *)search_apply, *build = (void *)popup_build, *create = (void *)page_create;
+    patch(g_base + VT_SEARCH_OPTS + 8 * 2, &apply, 8);
+    patch(g_base + VT_SEARCH_POPUP + 8 * 26, &build, 8);
+    patch(g_base + PAGES[0].vt + 8 * 10, &create, 8);
+    rc_log("pvp: lobby filter: kept game type \"%s\"", g_game_type);
+}
+
 int pvp_install(uint8_t *exe, const char *dir, uint8_t *(*alloc)(size_t), void (*patch)(void *, const void *, size_t)) {
     g_base = exe;
     snprintf(g_pak, sizeof g_pak, "%s..\\..\\resource\\interface\\interface.pak", dir);
@@ -715,6 +798,8 @@ int pvp_install(uint8_t *exe, const char *dir, uint8_t *(*alloc)(size_t), void (
     else
         rc_log("pvp: the lobby ping average is not as expected, left as it is");
     lb_apply_install(patch);
+    filter_install(dir, patch);
+    camo_install(exe, alloc, patch);
     // the pages: their vtable slots point at ours, which call the game's
     void *binds[2] = {(void *)bind_online, (void *)bind_lan}, *cmds[2] = {(void *)cmd_online, (void *)cmd_lan};
     void *dtors[2] = {(void *)dtor_online, (void *)dtor_lan};
