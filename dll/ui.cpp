@@ -749,22 +749,18 @@ static const char *ABOUT_EN[] = {
     "Sign in through Steam: the mod gets only your SteamID, no password",
 };
 static const char *NEWS_RU[] = {
-    "Горячие клавиши мода теперь с Shift: Shift+F6 … Shift+F10 (F-клавиши без Shift свободны)",
-    "Автообновление: кнопка «Обновить» у версии слева внизу (файл проверяется по подписи автора)",
-    "Английский язык (по языку игры в Steam)",
-    "Чат: правый клик по нику (упомянуть, профиль Steam), звук при упоминании",
-    "/invite: кнопка «Войти в лобби» прямо в чате",
-    "Аватарки Steam в списке онлайн",
-    "Исправлено: курсор игры, вкладка PVP больше не закрывается сама",
+    "Камуфляж: вкладка Extras > Camouflage, свой PNG на любую технику с 3D-предпросмотром",
+    "Камуфляж ложится сам на твою технику в бою и виден только тебе",
+    "LOBBY LIST: список лобби прямо из сессии, фильтры, значок модов, вход двойным кликом",
+    "Чат: упоминание по правому клику на игроке, красный счётчик упоминаний у GLOBAL CHAT",
+    "Исправлено: фильтр лобби больше не сбрасывает режимы, поправлены рамки чата в сессии",
 };
 static const char *NEWS_EN[] = {
-    "The mod's keys now go with Shift: Shift+F6 ... Shift+F10 (the F keys alone are free)",
-    "Auto-update: an \"Update\" button by the version, bottom left (the file is checked against the author's signature)",
-    "English (follows the game's language in Steam)",
-    "Chat: right click on a name (mention, Steam profile), a sound when you are mentioned",
-    "/invite: a \"Join lobby\" button right in the chat",
-    "Steam avatars in the online list",
-    "Fixed: the game's cursor, the PVP tab no longer closes by itself",
+    "Camouflage: Extras > Camouflage, your own PNG on any vehicle with a 3D preview",
+    "Camouflage goes on your own vehicles in a battle by itself, only you see it",
+    "LOBBY LIST: the lobbies from inside a session, filters, a modded mark, join with a double click",
+    "Chat: mention by right click on a player, a red count of mentions by GLOBAL CHAT",
+    "Fixed: the lobby filter keeps its modes, the chat lines up with its frame in a session",
 };
 
 static bool about_shown() { return g_about_win && !g_live_match && g_ctl.state == ST_IDLE && g_integrity_top > 0; }

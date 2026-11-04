@@ -26,6 +26,9 @@ CPP_SRC = ['dll/ui.cpp', 'dll/music.cpp'] + [os.path.join(IMGUI, f) for f in
                              'backends/imgui_impl_dx11.cpp', 'backends/imgui_impl_win32.cpp')]
 LIBS = ['-ld3d11', '-ldxgi', '-ld3dcompiler_47', '-ldwmapi', '-limm32', '-lgdi32', '-luser32', '-lshell32', '-lwinmm',
         '-lmfplat', '-lmfreadwrite', '-lole32', '-lwinhttp', '-lbcrypt']
+CFLAGS.append('-DGOH_CAMO')
+CPP_SRC.append('dll/camo.cpp')
+LIBS.append('-lcomdlg32')
 
 
 def zig(*args):
@@ -184,6 +187,15 @@ def replays_tab(t):
         out.append(b'    ' + s[4:-3] + b'   ' + l[len(s):])
     head = b'\n'.join(out)
     u = t[:a] + head + t[a + len(head):]
+    import re
+    u = re.sub(rb'<!--.*?-->', b'', u, flags=re.S)
+    marker = b'<Tab id="leaderboard"'
+    tab = (b'<Tab id="camouflage" titleValue="CAMOUFLAGE">'
+           b'<StackPanel id="camo_root"><Children><DialogRef refid="gui_library"/>'
+           b'</Children></StackPanel></Tab>')
+    u = u.replace(marker, tab + marker)
+    assert len(u) <= len(t), 'Camouflage tab exceeds the original stream'
+    u += b' ' * (len(t) - len(u))
     assert len(u) == len(t)
     return u
 
