@@ -21,17 +21,20 @@ constexpr uintptr_t G_DESKTOP = 0x159ca68;
 uintptr_t base;
 wchar_t folder[MAX_PATH], ini[MAX_PATH];
 SRWLOCK lock = SRWLOCK_INIT;
-struct Panel { bool shown; float x, y, w, h; } panel;
+struct Panel { bool shown; float x, y, w, h; } panel, replays_list, lobby_info, day_row;
 bool floating, drawn;
+volatile bool lobby_open, from_lobby_close;           // the lobby is on screen; a battle began
+bool from_lobby;                                       // the window was opened from the lobby
 volatile LONG importing;
 HWND owner;
 struct Import { std::vector<unsigned char> png; std::string name, error; } pending;
 struct Preset { CamoSettings settings; std::string name; int id; };
 std::vector<Preset> presets;
+int next_picture;                                      // a deleted picture's number is not given again: textures are named by it
 // A vehicle's camouflage: its picture (a preset's file) and how it lies, with the vehicle's textures, as found in its
 // model: all of them take the picture, the main ones tell the vehicle in a battle.
 // A sticker: one picture at one place on the vehicle, a projector from outside onto the surface around that point.
-struct Sticker { int picture; float c[3], n[3], size, rotation, opacity, soft, wear; };
+struct Sticker { int picture; float c[3], n[3], size, rotation, opacity, soft, wear; int flip_x, flip_y; };
 struct Assign { std::string model; int picture; CamoSettings s; std::vector<std::string> all, main; std::vector<Sticker> stickers; };
 std::vector<Assign> assigns;
 wchar_t vehicles_ini[MAX_PATH];
@@ -88,6 +91,12 @@ std::string undamaged(std::string s) {
     else if (n > 2 && !s.compare(n - 2, 2, "_x")) s.resize(n - 2);
     return s;
 }
+// Tracks are not painted. A half-track's hull is: m3a1_halftrack is the vehicle, not its tracks.
+bool is_track(std::string s) {
+    for (auto &c : s) c = (char)tolower((unsigned char)c);
+    for (size_t at; (at = s.find("halftrack")) != std::string::npos; ) s.erase(at, 9);
+    return s.find("track") != std::string::npos;
+}
 bool is_camo_texture(const char *s, size_t n) {
     std::string k(s, n);
     for (auto &c : k) c = (char)tolower((unsigned char)c);
@@ -139,6 +148,7 @@ struct Pattern;
 struct StickerImage {
     std::shared_ptr<Pattern> pic;
     float c[3], n[3], e1[3], e2[3], half_w, half_h, opacity, wear;
+    bool flip_x = false, flip_y = false;
     int gx = 0, gy = 0;
     float cell = 1;
     std::vector<float> chosen, levels, stretch;
@@ -370,6 +380,7 @@ StickerImage sticker_image(const Sticker &s, std::shared_ptr<Pattern> pic) {
     r.half_h = pic && pic->w ? s.size / 2 * pic->h / pic->w : s.size / 2;
     r.opacity = s.opacity;
     r.wear = s.wear;
+    r.flip_x = s.flip_x; r.flip_y = s.flip_y;
     return r;
 }
 Pattern pattern_of(const std::string &token) {
@@ -401,7 +412,7 @@ Painted *painted_of(const std::string &name, const std::string &token, const uns
         if (last != token) { p = pattern_of(token); last = token; }
         r = new Painted{key, std::vector<unsigned char>(f, f + n)};
         VehicleMap *pr = nullptr;
-        bool tracks = !p.s.mode && name.find("track") != std::string::npos;     // nobody paints those
+        bool tracks = !p.s.mode && is_track(name);     // nobody paints those
         if (!p.s.mode && !tracks) make_projection(name, f, n, p.model, p.stickers, pr);
         bool ok = tracks || paint_dds(r->data.data(), n, p, pr);
         free_projection(pr);
@@ -461,6 +472,8 @@ void *actor_quant(void *self) {
     camouflage((unsigned char *)self);
     return actor_quant_real(self);
 }
+volatile LONG always_day;                              // the box in the lobby; always_day.c does the rest
+bool day_host;                                         // the last lobby was our own
 void filename(int id, wchar_t *out) { swprintf(out, MAX_PATH, L"%s\\%03d.png", folder, id); }
 bool readfile(const wchar_t *path, std::vector<unsigned char> &out) {
     FILE *f = _wfopen(path, L"rb"); if (!f) return false;
@@ -537,8 +550,8 @@ void save_vehicles() {
         fprintf(f, "%d %.9g %.9g %.9g %.9g %d %d %.9g %d %d %d\t%s\t%s\t%s\n", a.picture,
             a.s.offset[0], a.s.offset[1], a.s.rotation, a.s.opacity, a.s.blend, a.s.repeat, a.s.size, a.s.through, a.s.flip_x, a.s.flip_y,
             a.model.c_str(), joined(a.all).c_str(), joined(a.main).c_str());
-        for (const auto &s : a.stickers) fprintf(f, "S %d %.9g %.9g %.9g %.9g %.9g %.9g %.9g %.9g %.9g %.9g %.9g\n", s.picture,
-            s.c[0], s.c[1], s.c[2], s.n[0], s.n[1], s.n[2], s.size, s.rotation, s.opacity, s.soft, s.wear);
+        for (const auto &s : a.stickers) fprintf(f, "S %d %.9g %.9g %.9g %.9g %.9g %.9g %.9g %.9g %.9g %.9g %.9g %d %d\n", s.picture,
+            s.c[0], s.c[1], s.c[2], s.n[0], s.n[1], s.n[2], s.size, s.rotation, s.opacity, s.soft, s.wear, s.flip_x, s.flip_y);
     }
     bool ok = !ferror(f); if (fclose(f)) ok = false;
     if (!ok || !MoveFileExW(tmp, vehicles_ini, MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)) status = TR("Не удалось сохранить настройки техники", "Cannot save vehicles");
@@ -550,8 +563,8 @@ void load_vehicles() {
     if (fgets(line, sizeof line, f) && (!strcmp(line, "GOH_CAMO_V1\n") || !strcmp(line, "GOH_CAMO_V2\n"))) while (assigns.size() < 2000 && fgets(line, sizeof line, f)) {
         if (line[0] == 'S' && line[1] == ' ') {
             Sticker k = {};
-            if (!assigns.empty() && assigns.back().stickers.size() < 64 && sscanf(line + 2, "%d %f %f %f %f %f %f %f %f %f %f %f", &k.picture, &k.c[0], &k.c[1], &k.c[2],
-                       &k.n[0], &k.n[1], &k.n[2], &k.size, &k.rotation, &k.opacity, &k.soft, &k.wear) >= 10 && isfinite(k.size) && k.size > 0 && isfinite(k.c[0]) &&
+            if (!assigns.empty() && assigns.back().stickers.size() < 64 && sscanf(line + 2, "%d %f %f %f %f %f %f %f %f %f %f %f %d %d", &k.picture, &k.c[0], &k.c[1], &k.c[2],
+                       &k.n[0], &k.n[1], &k.n[2], &k.size, &k.rotation, &k.opacity, &k.soft, &k.wear, &k.flip_x, &k.flip_y) >= 10 && isfinite(k.size) && k.size > 0 && isfinite(k.c[0]) &&
                 isfinite(k.c[1]) && isfinite(k.c[2]) && isfinite(k.n[0]) && isfinite(k.n[1]) && isfinite(k.n[2]) && isfinite(k.opacity) && isfinite(k.soft) && isfinite(k.wear))
                 assigns.back().stickers.push_back(k);
             continue;
@@ -608,7 +621,7 @@ void accept_import() {
     InterlockedExchange(&importing, 0);
     if (!r.error.empty()) { status = r.error; return; }
     if (r.png.empty()) return;
-    int id = 0; for (const auto &p : presets) if (p.id >= id) id = p.id + 1;
+    int id = next_picture; for (const auto &p : presets) if (p.id >= id) id = p.id + 1;
     wchar_t path[MAX_PATH]; filename(id, path);
     FILE *f = _wfopen(path, L"wb"); if (!f) { status = TR("Не удалось сохранить загруженный PNG", "Cannot store the imported PNG"); return; }
     bool ok = fwrite(r.png.data(), 1, r.png.size(), f) == r.png.size(); if (fclose(f)) ok = false;
@@ -652,6 +665,17 @@ extern "C" void camo_page(void *) {}
 extern "C" void camo_selftest_tick(const char *);
 extern "C" void lobby_dump_tick(const char *);
 extern "C" int dialog_covered(void *dialog);
+void lowest_row(uintptr_t d, const Panel &area, Panel &last, int depth, int &budget) {
+    if (!d || depth > 24 || --budget < 0) return;
+    unsigned flags = 0;
+    if (!read(d + 0x48, &flags, 4) || !(flags & 2)) return;
+    Panel here = {};
+    if (depth && bounds(d, here) && here.h >= 20 && here.h <= 60 && here.w > area.w * .6f && here.y + here.h <= area.y + area.h + 1 &&
+        (!last.shown || here.y + here.h > last.y + last.h)) last = here;
+    uintptr_t b = q(d + 0xd8), e = q(d + 0xe0);
+    if (!b || e < b || e - b > 8 * 4096) return;
+    for (uintptr_t k = b; k < e; k += 8) lowest_row(q(k), area, last, depth + 1, budget);
+}
 void warm_start();
 extern "C" void camo_tick() {
     static bool in_game;
@@ -662,7 +686,7 @@ extern "C" void camo_tick() {
     { char path[MAX_PATH]; snprintf(path, sizeof path, "%ls\\..\\goh_snapshots.ini", folder); camo_selftest_tick(path); lobby_dump_tick(path); }
     // our tab, wherever the page is: looked for a few times a second, it is a walk through the screen's dialogs
     static DWORD next;
-    static Panel p;
+    static Panel p, list, info, day;
     DWORD now = GetTickCount();
     if ((LONG)(now - next) >= 0) {
         next = now + 200;
@@ -670,11 +694,37 @@ extern "C" void camo_tick() {
         void *root = (void *)q(base + G_DESKTOP), *tab = root ? find(root, "camo_root") : nullptr;
         if (tab) bounds((uintptr_t)tab, p);
         if (tab && dialog_covered(tab)) p = {};       // the game's own window over it: exit, ESC
+        list = {};
+        void *replays = root ? find(root, "lb_replays") : nullptr;
+        if (replays) bounds((uintptr_t)replays, list);
+        if (replays && dialog_covered(replays)) list = {};
+        info = {};
+        void *lobby = root ? find(root, "btn_game_info") : nullptr;   // only the lobby has it
+        if (lobby) bounds((uintptr_t)lobby, info);
+        if (lobby && dialog_covered(lobby)) info = {};
+        day = {};
+        void *start = root ? find(root, "btn_start") : nullptr, *settings = root ? find(root, "panel_settings") : nullptr;
+        Panel button = {}, area = {};
+        if (start) bounds((uintptr_t)start, button);
+        if (button.shown) day_host = true;
+        else if (info.shown) day_host = false;
+        day_publish(always_day && day_host);
+        if (button.shown && settings && !dialog_covered(settings) && bounds((uintptr_t)settings, area)) {
+            // under the last of the settings' rows; they are made by the game, as many as the mode has
+            Panel last = {};
+            int budget = 600;
+            lowest_row((uintptr_t)settings, area, last, 0, budget);
+            float h = last.shown ? last.h : 33;
+            day = {true, last.shown ? last.x : area.x, last.shown ? last.y + last.h + 1 : area.y + area.h - h - 8, last.shown ? last.w : area.w, h};
+            if (day.y + day.h > area.y + area.h) day.y = area.y + area.h - day.h;
+        }
     }
-    AcquireSRWLockExclusive(&lock); panel = p; ReleaseSRWLockExclusive(&lock);
+    AcquireSRWLockExclusive(&lock); panel = p; replays_list = list; lobby_info = info; day_row = day; ReleaseSRWLockExclusive(&lock);
+    lobby_open = info.shown;
+    from_lobby_close = from_lobby_close || in_game;
     if (warm_needed && !in_game && !drawn) warm_start();   // not while sliders move: each new setting is a new texture
 }
-extern "C" int camo_shown() { return drawn || floating; }
+extern "C" int camo_shown() { return drawn || floating || replays_list.shown || lobby_open; }
 namespace {
 // A name of ours has to be a file of the game's repository: textures are found (62f990), kept and opened by their
 // entry there, and a name without one gives the checker dummy or "Resource not found". So the first time the game
@@ -823,6 +873,8 @@ struct VehicleMap {
     std::vector<float> owner;                         // the size of the triangle whose place a texel holds
     std::vector<unsigned char> both;                  // 1: no sticker here: the texel is on both sides of the vehicle, or on a barrel
     std::vector<signed char> normal;                  // which way the surface looks there
+    std::vector<float> twin;                          // x, y, z of the second place of a texel that two parts on top of the vehicle share
+    std::vector<unsigned char> twinned;               // two hatches of one texture: 1 where twin holds a place
     float lo[3] = {1e9f, 1e9f, 1e9f}, hi[3] = {-1e9f, -1e9f, -1e9f};
 };
 struct Model {
@@ -907,7 +959,15 @@ void fill_triangle(VehicleMap &pr, const Triangle &t, bool gap_only) {
             continue;
         }
         if (gap_only || a < 0 || b < 0 || c < 0) continue;      // the rim around a triangle, for the filtering
-        if ((q[1] - cy) * (o[1] - cy) < 0 && fabsf(q[1] - o[1]) > apart * .5f) pr.both[at] = 1;
+        // Copies of a part on top of the vehicle, hatches mostly: they keep the camouflage and can take a sticker, see stick()
+        float nz = a * t.n[0][2] + b * t.n[1][2] + c * t.n[2][2];
+        const float middle = (pr.lo[2] + pr.hi[2]) / 2;      // not the tops of road wheels
+        const bool on_top = !t.gun && nz > .5f && pr.normal[at * 3 + 2] > 64 && q[2] > middle && o[2] > middle;
+        auto second_place = [&] { if (!pr.twinned[at]) { memcpy(&pr.twin[at * 3], q, sizeof q); pr.twinned[at] = 1; } };
+        if ((q[1] - cy) * (o[1] - cy) < 0 && fabsf(q[1] - o[1]) > apart * .5f) {
+            pr.both[at] = 1;
+            if (on_top) second_place();
+        }
         if (fabsf(q[0] - o[0]) > apart || fabsf(q[2] - o[2]) > apart || fabsf(fabsf(q[1] - cy) - fabsf(o[1] - cy)) > apart) {
             // Two places want the texel. Exact copies of one part (road wheels) can't hold a drawing; otherwise the bigger
             // surface keeps it: a detail reusing a bit of the hull's texture leaves no hole in the hull.
@@ -918,7 +978,10 @@ void fill_triangle(VehicleMap &pr, const Triangle &t, bool gap_only) {
                     float n = a * t.n[0][i] + b * t.n[1][i] + c * t.n[2][i];
                     pr.normal[at * 3 + i] = (signed char)(n < -1 ? -127 : n > 1 ? 127 : n * 127);
                 }
-            } else if (area > was * .95f) pr.kind[at] = 2;
+            } else if (area > was * .95f) {
+                if (on_top) second_place();
+                else pr.kind[at] = 2;
+            }
         }
     }
 }
@@ -985,6 +1048,8 @@ void bake_layer(VehicleMap &pr, const Model &m, const std::vector<unsigned char>
     pr.pos.assign((size_t)pr.w * pr.h * 3, 0);
     pr.kind.assign((size_t)pr.w * pr.h, 0);
     pr.both.assign((size_t)pr.w * pr.h, 0);
+    pr.twin.assign((size_t)pr.w * pr.h * 3, 0);
+    pr.twinned.assign((size_t)pr.w * pr.h, 0);
     pr.normal.assign((size_t)pr.w * pr.h * 3, 0);
     pr.owner.assign((size_t)pr.w * pr.h, 0);
     for (size_t i = 0; i < m.all.size(); i++) if (m.all[i].layer == layer && seen[i] == 1 && !m.all[i].skin) fill_triangle(pr, m.all[i], false);
@@ -1008,6 +1073,8 @@ void bake_layer(VehicleMap &pr, const Model &m, const std::vector<unsigned char>
             memcpy(&pr.pos[to * 3], &pr.pos[from * 3], 12);
             memcpy(&pr.normal[to * 3], &pr.normal[from * 3], 3);
             pr.both[to] = pr.both[from];
+            pr.twinned[to] = pr.twinned[from];
+            memcpy(&pr.twin[to * 3], &pr.twin[from * 3], 3 * sizeof(float));
             pr.kind[to] = 1;
         }
     }
@@ -1373,16 +1440,20 @@ void sticker_pixel(const StickerImage &s, float u, float v, uint8_t io[4]) {
         blend.opacity *= k * k * (3 - 2 * k);
     }
     uint8_t base[4] = {io[0], io[1], io[2], io[3]};
-    camo_blend(s.pic->px.data(), s.pic->w, s.pic->h, u, v, base, blend, io);
+    camo_blend(s.pic->px.data(), s.pic->w, s.pic->h, s.flip_x ? 1 - u : u, s.flip_y ? 1 - v : v, base, blend, io);
 }
-// Stickers over a texel, only those in one place of the vehicle: what both sides share would show it twice.
+// Stickers over a texel, only those in one place of the vehicle: what both sides share would show it twice. A texel two
+// hatches share shows on both, so a sticker takes it only when it lies over both: a sticker on one hatch would appear on the other.
 void stick(const VehicleMap &pr, size_t at, const std::vector<StickerImage> &list, uint8_t io[4]) {
-    if (list.empty() || pr.both[at]) return;
+    if (list.empty() || (pr.both[at] && !pr.twinned[at])) return;
     const float *P = &pr.pos[at * 3];
     const signed char *N = &pr.normal[at * 3];
     for (const StickerImage &s : list) {
         float u, v, look = (N[0] * s.n[0] + N[1] * s.n[1] + N[2] * s.n[2]) / 127.f;
-        if (on_sticker(s, P, look, u, v)) sticker_pixel(s, u, v, io);
+        if (!on_sticker(s, P, look, u, v)) continue;
+        float u2, v2;
+        if (pr.twinned[at] && !on_sticker(s, &pr.twin[at * 3], look, u2, v2)) continue;
+        sticker_pixel(s, u, v, io);
     }
 }
 Placement place_on(const VehicleMap &pr, const Pattern &p) { return place_picture(pr.lo, pr.hi, p.w ? p.w : 1, p.h ? p.h : 1, p.s); }
@@ -1625,7 +1696,7 @@ DWORD WINAPI warm_thread(LPVOID) {
     DWORD t0 = GetTickCount();
     int done = 0;
     for (const Published &e : list) for (const std::string &stem : e.all) {
-        if (stem.find("track") != std::string::npos) continue;
+        if (is_track(stem)) continue;
         for (const char *end : {"", "_x", "_xx"}) {
             std::string file = texture_file("/texture/common/" + stem + end);
             std::vector<unsigned char> bytes;
@@ -1823,7 +1894,7 @@ std::shared_ptr<Preview> load_preview(const std::string &mdl) {
     std::vector<int> count(p->m.stems.size());
     for (const Triangle &t : p->m.all) if (t.layer >= 0) count[t.layer]++;
     int most = 0;
-    for (size_t i = 0; i < count.size(); i++) if (p->m.stems[i].find("track") == std::string::npos && count[i] > most) most = count[i];
+    for (size_t i = 0; i < count.size(); i++) if (!is_track(p->m.stems[i]) && count[i] > most) most = count[i];
     for (size_t i = 0; i < p->m.stems.size(); i++) {
         auto l = std::make_shared<Layer>();
         l->stem = p->m.stems[i];
@@ -1832,7 +1903,7 @@ std::shared_ptr<Preview> load_preview(const std::string &mdl) {
         std::vector<unsigned char> bytes;
         bool got = !file.empty() && read_game_file(file, bytes);
         if (!got || !decode_dds(bytes, *l)) { rc_log("camo: %s not shown: file \"%s\", read %d, %d bytes", l->stem.c_str(), file.c_str(), got, (int)bytes.size()); continue; }
-        if (l->stem.find("track") != std::string::npos || !is_camo_texture(("_vehicle/" + l->stem).c_str(), l->stem.size() + 9)) continue;
+        if (is_track(l->stem) || !is_camo_texture(("_vehicle/" + l->stem).c_str(), l->stem.size() + 9)) continue;
         p->all.push_back(l->stem);
         if (count[i] * 10 >= most * 3) p->main.push_back(l->stem);
         l->map.w = l->w > 1024 ? 1024 : l->w;
@@ -1941,7 +2012,8 @@ DWORD WINAPI draw_band(LPVOID arg) {
                         flat[3] = 255;
                         memcpy(out, flat, 4);
                         if (pic && on_picture(B.place, texel_place(l->map, m), pu, pv)) camo_blend(pic->px.data(), pic->w, pic->h, pu, pv, flat, *B.s, out);
-                        if (!l->map.both[m] && !t.gun) for (const StickerImage &k : *B.stickers) {      // exact: per pixel, not per texel
+                        if (l->map.twinned[m]) stick(l->map, m, *B.stickers, out);
+                        else if (!l->map.both[m] && !t.gun) for (const StickerImage &k : *B.stickers) {      // exact: per pixel, not per texel
                             float place[3], su, sv, look = (nx * k.n[0] + ny * k.n[1] + nz * k.n[2]) / nl;
                             for (int i = 0; i < 3; i++) place[i] = a * t.p[0][i] + b * t.p[1][i] + c * t.p[2][i];
                             if (on_sticker(k, place, look, su, sv)) sticker_pixel(k, su, sv, out);
@@ -2137,6 +2209,7 @@ bool unsaved;
 int sticker_at = -1;                                   // the sticker chosen in the list
 bool import_sticker;                                   // the picture being imported is for a new sticker
 bool add_soft;                                         // new stickers start soft
+int ask_delete = -1;                                   // the picture whose deletion waits for a yes
 struct StickerPicture { int id, soft; std::shared_ptr<Pattern> pic; };
 std::vector<StickerPicture> sticker_pictures;
 std::shared_ptr<Pattern> sticker_picture(int id, float soft) {
@@ -2159,6 +2232,63 @@ Assign *assign_of(const std::string &m) {
 int preset_of(int id) {
     for (int i = 0; i < (int)presets.size(); i++) if (presets[i].id == id) return i;
     return -1;
+}
+int picture_uses(int id) {                             // on how many vehicles
+    int n = 0;
+    for (const Assign &a : assigns) {
+        bool used = a.picture == id;
+        for (const Sticker &k : a.stickers) used |= k.picture == id;
+        n += used;
+    }
+    return n;
+}
+// A picture out of the list and off the disk, and off every vehicle it is on
+void delete_picture(int id) {
+    int at = preset_of(id);
+    if (at < 0) return;
+    for (size_t i = assigns.size(); i-- > 0; ) {
+        Assign &a = assigns[i];
+        a.stickers.erase(std::remove_if(a.stickers.begin(), a.stickers.end(), [&](const Sticker &k) { return k.picture == id; }), a.stickers.end());
+        if (a.picture == id) a.picture = -1;
+        if (a.picture < 0 && a.stickers.empty()) assigns.erase(assigns.begin() + i);
+    }
+    presets.erase(presets.begin() + at);
+    if (next_picture <= id) next_picture = id + 1;
+    sticker_pictures.erase(std::remove_if(sticker_pictures.begin(), sticker_pictures.end(), [&](const StickerPicture &e) { return e.id == id; }), sticker_pictures.end());
+    Assign *a = assign_of(current);
+    selected = a ? preset_of(a->picture) : -1;
+    sticker_at = -1;
+    load_image(selected);
+    save();
+    wchar_t path[MAX_PATH];
+    filename(id, path);
+    DeleteFileW(path);
+    dirty = true;
+}
+// The pictures in a menu, each with its X; pick(i) when one is chosen
+template <class F> void picture_rows(int chosen, F pick) {
+    int gone = -1;
+    for (int i = 0; i < (int)presets.size(); i++) {
+        const Preset &e = presets[i];
+        ImGui::PushID(i);
+        if (e.id == ask_delete) {
+            ImGui::TextWrapped(TR("%s: стоит на технике (%d), снимется с неё. Удалить?", "%s: on %d vehicle(s), it will come off them. Delete?"), e.name.c_str(), picture_uses(e.id));
+            if (ImGui::SmallButton(TR("Удалить", "Delete"))) gone = e.id;
+            ImGui::SameLine();
+            if (ImGui::SmallButton(TR("Отмена", "Cancel"))) ask_delete = -1;
+        } else {
+            float del = ImGui::CalcTextSize("X").x + 20, room = ImGui::GetContentRegionAvail().x - del, text = ImGui::CalcTextSize(e.name.c_str()).x;
+            int id = e.id;
+            if (ImGui::Selectable(e.name.c_str(), i == chosen, 0, ImVec2(room > text ? room : text, 0))) pick(i);
+            ImGui::SameLine();
+            if (ImGui::SmallButton("X")) {
+                if (picture_uses(id)) ask_delete = id;
+                else gone = id;
+            }
+        }
+        ImGui::PopID();
+    }
+    if (gone >= 0) { delete_picture(gone); ask_delete = -1; }
 }
 void open_vehicle(const std::string &m) {
     if (m == current) return;
@@ -2193,7 +2323,7 @@ void add_sticker(int picture) {
         int d = abs(x - view_w / 2) + abs(y - view_h / 2);
         if (d < best) if (const float *k = picked(x, y)) { best = d; at = k; }
     }
-    Sticker s;
+    Sticker s = {};
     s.picture = picture;
     for (int i = 0; i < 3; i++) {
         s.c[i] = at ? at[i] : (shown->m.lo[i] + shown->m.hi[i]) / 2;
@@ -2219,7 +2349,8 @@ const char *group_name(const std::string &k) {
     return k.c_str();
 }
 void vehicle_row(const Vehicle &v) {
-    bool has = assign_of(v.model) != nullptr;
+    const Assign *a = assign_of(v.model);
+    bool has = a && (a->picture >= 0 || !a->stickers.empty());
     std::string label = (has ? "* " : "") + v.name;
     ImGui::PushID(v.model.c_str());
     if (ImGui::Selectable(label.c_str(), v.model == current)) open_vehicle(v.model);
@@ -2271,7 +2402,12 @@ void vehicle_view(ID3D11Device *device, const CamoSettings &s) {
     std::shared_ptr<Preview> next = std::move(arrived);
     bool loading = wanted != shown_model || loader_running;
     ReleaseSRWLockExclusive(&lock);
-    if (next && next->model == current) { shown = next; dirty = true; }
+    if (next && next->model == current) {
+        shown = next; dirty = true;
+        // what was saved for this vehicle may be from a build that read fewer of its textures
+        Assign *a = assign_of(current);
+        if (a && (a->all != shown->all || a->main != shown->main)) { a->all = shown->all; a->main = shown->main; save(); }
+    }
     bool moving = ImGui::IsAnyItemActive();           // the mouse on the view or a slider
     static bool plain;                                // the last frame was the quick kind
     if (plain && !moving) dirty = true;
@@ -2340,13 +2476,11 @@ void vehicle_settings() {
     }
     if (!shown) ImGui::BeginDisabled();
     const char *none = TR("Без камуфляжа", "No camouflage");
+    bool menu_open = false;
     if (ImGui::BeginCombo(TR("Камуфляж", "Camouflage"), selected >= 0 ? presets[selected].name.c_str() : none)) {
         if (ImGui::Selectable(none, selected < 0)) put_picture(-1);
-        for (int i=0; i<(int)presets.size(); i++) {
-            ImGui::PushID(i);
-            if (ImGui::Selectable(presets[i].name.c_str(), i==selected)) put_picture(i);
-            ImGui::PopID();
-        }
+        picture_rows(selected, [](int i) { put_picture(i); });
+        menu_open = true;
         ImGui::EndCombo();
     }
     if (!shown) ImGui::EndDisabled();
@@ -2402,6 +2536,9 @@ void vehicle_settings() {
             changed |= ImGui::SliderFloat(TR("Непрозрачность наклейки", "Sticker opacity"), &k.opacity, 0, 1, "%.2f");
             changed |= ImGui::SliderFloat(TR("Мягкие края", "Soft edges"), &k.soft, 0, 1, "%.2f");
             changed |= ImGui::SliderFloat(TR("Потёртость", "Wear"), &k.wear, 0, 1, "%.2f");
+            bool fx = k.flip_x, fy = k.flip_y;
+            if (ImGui::Checkbox(TR("Отразить наклейку слева направо", "Flip the sticker left to right"), &fx)) { k.flip_x = fx; changed = true; }
+            if (ImGui::Checkbox(TR("Отразить наклейку сверху вниз", "Flip the sticker top to bottom"), &fy)) { k.flip_y = fy; changed = true; }
         }
         if (changed) { dirty = true; unsaved = true; }
     }
@@ -2419,19 +2556,88 @@ void vehicle_settings() {
             HANDLE thread = CreateThread(nullptr, 4<<20, pick, nullptr, STACK_SIZE_PARAM_IS_A_RESERVATION, nullptr);
             if (thread) CloseHandle(thread); else { InterlockedExchange(&importing,0); import_sticker = false; status = TR("Не удалось открыть окно выбора файла", "Cannot open file picker"); }
         }
-        for (int i = 0; i < (int)presets.size(); i++) {
-            ImGui::PushID(i);
-            if (ImGui::Selectable(presets[i].name.c_str())) add_sticker(presets[i].id);
-            ImGui::PopID();
-        }
+        picture_rows(-1, [](int i) { add_sticker(presets[i].id); });
+        menu_open = true;
         ImGui::EndPopup();
     }
+    if (!menu_open) ask_delete = -1;
     if (unsaved && !ImGui::IsAnyItemActive()) { unsaved = false; status.clear(); save(); }
     if (!status.empty()) ImGui::TextWrapped("%s", status.c_str());
 }
 }
+// The Replays tab: a button over the picture, just above the list, for the folder the replays are in
+void replays_button() {
+    Panel l; AcquireSRWLockShared(&lock); l = replays_list; ReleaseSRWLockShared(&lock);
+    if (!l.shown) return;
+    ImGui::SetNextWindowPos(ImVec2(l.x + 24, l.y - 76));
+    ImGui::SetNextWindowBgAlpha(0);
+    if (ImGui::Begin("###goh_replays_folder", nullptr, ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_AlwaysAutoResize |
+                     ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoFocusOnAppearing)) {
+        if (ImGui::Button(TR("Открыть папку реплеев", "Open replays folder"), ImVec2(0, 34))) replays_open_folder();
+    }
+    ImGui::End();
+}
+// The lobby: the camouflage in a window of its own over it, in the header left of the back button. A battle takes it away.
+void lobby_button() {
+    if (from_lobby_close) {
+        from_lobby_close = false;
+        if (from_lobby) { from_lobby = false; floating = false; }
+    }
+    Panel l; AcquireSRWLockShared(&lock); l = lobby_info; ReleaseSRWLockShared(&lock);
+    if (!l.shown) return;
+    ImGui::SetNextWindowPos(ImVec2(l.x + l.w - 64, l.y - 4), 0, ImVec2(1, 1));
+    ImGui::SetNextWindowBgAlpha(0);
+    if (ImGui::Begin("###goh_lobby_camo", nullptr, ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_AlwaysAutoResize |
+                     ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoFocusOnAppearing)) {
+        if (ImGui::Button(TR("Камуфляж", "Camouflage"))) {
+            floating = !floating;
+            from_lobby = floating;
+            if (floating) ImGui::SetWindowFocus("###goh_camo");
+        }
+    }
+    ImGui::End();
+}
+ImFont *ui_game_font();
+// The host's row under the session's settings, drawn as the game draws those: a name, and a box in the column of the values
+void day_setting() {
+    static int loaded;
+    if (!loaded) { loaded = 1; InterlockedExchange(&always_day, online_list_opt("always_day")); }
+    Panel r; AcquireSRWLockShared(&lock); r = day_row; ReleaseSRWLockShared(&lock);
+    if (!r.shown) return;
+    ImGui::SetNextWindowPos(ImVec2(r.x, r.y));
+    ImGui::SetNextWindowSize(ImVec2(r.w, r.h));
+    ImGui::SetNextWindowBgAlpha(0);
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0, 0));
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowBorderSize, 0);
+    if (ImGui::Begin("###goh_always_day", nullptr, ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoMove |
+                     ImGuiWindowFlags_NoFocusOnAppearing | ImGuiWindowFlags_NoBringToFrontOnFocus)) {
+        if (ImGui::InvisibleButton("##day", ImVec2(r.w, r.h))) {
+            InterlockedExchange(&always_day, !always_day);
+            online_set_list_opt("always_day", always_day);
+        }
+        const bool hot = ImGui::IsItemHovered();
+        ImDrawList *dl = ImGui::GetWindowDrawList();
+        const char *name = TR("Всегда день", "Always Day");
+        ImFont *font = ui_game_font();
+        if (font) ImGui::PushFont(font);
+        float size = ImGui::GetTextLineHeight(), mid = r.y + r.h / 2;
+        if (hot) dl->AddRectFilled(ImVec2(r.x, r.y), ImVec2(r.x + r.w, r.y + r.h - 1), IM_COL32(44, 42, 38, 200));
+        dl->AddLine(ImVec2(r.x, r.y + r.h - 1), ImVec2(r.x + r.w, r.y + r.h - 1), IM_COL32(70, 70, 66, 120));
+        dl->AddLine(ImVec2(r.x + 199, r.y), ImVec2(r.x + 199, r.y + r.h), IM_COL32(70, 70, 66, 120));
+        dl->AddText(ImVec2(floorf(r.x + 5), floorf(mid - size / 2)), hot ? IM_COL32(235, 178, 108, 255) : IM_COL32(190, 172, 140, 255), name);
+        if (font) ImGui::PopFont();
+        float s = 16, x = r.x + 202, y = r.y + 8;              // where the game has its boxes in a row
+        dl->AddRect(ImVec2(x, y), ImVec2(x + s, y + s), IM_COL32(215, 215, 210, 255));
+        if (always_day) dl->AddRectFilled(ImVec2(x + 3, y + 3), ImVec2(x + s - 3, y + s - 3), IM_COL32(190, 190, 185, 255));
+    }
+    ImGui::End();
+    ImGui::PopStyleVar(2);
+}
 extern "C" void camo_draw(ID3D11Device *device, void *window) {
     owner = (HWND)window;
+    replays_button();
+    lobby_button();
+    day_setting();
     static bool was;
     bool key = GetForegroundWindow() == owner && (GetAsyncKeyState(VK_SHIFT)&0x8000) && (GetAsyncKeyState(VK_F11)&0x8000);
     if (key && !was) floating = !floating; was = key;

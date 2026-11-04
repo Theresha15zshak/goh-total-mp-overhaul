@@ -189,6 +189,9 @@ void report_done(long long end_time);       // that match is dealt with (taken, 
 // player number (player#N) -> name, from a replay's card: rel is the game's profile-relative path
 // ("//replays/x.rep"), "" for the newest replay written in the last 10 minutes; 1 when found
 int replay_player_names(const char *rel, char names[][64], int max);
+void day_install(uint8_t *exe, void (*patch)(void *, const void *, size_t), int server);
+void day_publish(int on);                   // the host's Always Day, for the mission here and in the server
+void replays_open_folder(void);             // the Replays tab's button
 void replays_rename(const char *me);        // finished autoreplays get names of their own: mode_3v3_map_army_date
 
 // ---- PVP button in the game's Internet / LAN game list (pvp.c): our block over its list of games ----
@@ -214,6 +217,8 @@ void lobby_list_refresh(void);                              // now, not at the n
 // asked of Steam, which gives 50 at most: modes (GameType, comma between; "" all) are one request each, put together
 void lobby_list_filter(int no_password, const char *modes);
 int online_list_opt(const char *key);
+int online_news_seen(void);                 // the news closed with Got it, by their text
+void online_set_news_seen(int mark);
 void online_set_list_opt(const char *key, int on);
 void online_list_mode(char *out, int n);
 void online_set_list_mode(const char *mode);

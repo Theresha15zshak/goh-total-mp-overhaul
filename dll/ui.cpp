@@ -52,6 +52,7 @@ static volatile bool g_chat_drawn;      // the global chat was drawn this frame:
 static volatile bool g_pvp_drawn;       // the PVP block over the game list was drawn this frame: the mouse over it is ours
 static ImFont *g_game_font;             // the game's anka 15 (the game list's rows), loaded from interface.pak
 static ImFont *g_game_font_small;       // anka 12: MMR under the names in the lobby
+ImFont *ui_game_font() { return g_game_font; }   // for the rows set in the game's pages elsewhere
 static bool g_failed;
 
 static const float SPEEDS[] = {0.25f, 0.5f, 1, 2, 4, 8, 16};
@@ -730,13 +731,24 @@ static void integrity_window() {
     float pad = 8 * k, w = (t1.x > t2.x ? t1.x : t2.x) + 2 * pad, h = t1.y + t2.y + 2 * pad + 2 * k;
     ImVec2 p0(12 * k, io.DisplaySize.y - 12 * k - h);
     g_integrity_top = p0.y;
-    dl->AddRectFilled(p0, ImVec2(p0.x + w, p0.y + h), bg, 4 * k);
-    dl->AddText(ImVec2(p0.x + pad, p0.y + pad), IM_COL32(120, 120, 120, 255), line1);
-    dl->AddText(ImVec2(p0.x + pad, p0.y + pad + t1.y + 2 * k), col, line2);
+    // all is well: 15 seconds, the last of them fading, and it goes; anything else stays. Its place stays for the "about" window.
+    static double good_since;
+    float fade = 1;
+    if (st == INTEGRITY_CURRENT) {
+        double now = ImGui::GetTime();
+        if (good_since == 0) good_since = now;
+        double left = 15 - (now - good_since);
+        if (left <= 0) return;
+        if (left < 1) fade = (float)left;
+    } else good_since = 0;
+    auto faded = [fade](ImU32 c) { return (c & 0x00ffffffu) | ((ImU32)((c >> 24) * fade) << 24); };
+    dl->AddRectFilled(p0, ImVec2(p0.x + w, p0.y + h), faded(bg), 4 * k);
+    dl->AddText(ImVec2(p0.x + pad, p0.y + pad), faded(IM_COL32(120, 120, 120, 255)), line1);
+    dl->AddText(ImVec2(p0.x + pad, p0.y + pad + t1.y + 2 * k), faded(col), line2);
 }
 
 // ---- bottom left, above the version: what the mod does and what the latest update changed -----------------
-// Shown in the menus at every start of the game until closed. ABOUT_* below: kept up to date with each release.
+// Shown in the menus until "Got it", and again when NEWS_* below change. ABOUT_* and NEWS_*: kept up to date with each release.
 static bool g_about_win = true;
 
 static const char *ABOUT_RU[] = {
@@ -756,23 +768,39 @@ static const char *ABOUT_EN[] = {
     "Sign in through Steam: the mod gets only your SteamID, no password",
 };
 static const char *NEWS_RU[] = {
-    "Наклейки: свой PNG в любое место техники, двигаются мышью, мягкие края и потёртость",
-    "Камуфляж: новая покраска без дыр, работает на всей технике и на повреждённых частях",
-    "Карточка игрока: клик по нику в чате или лобби, MMR, винрейт, нации, последние матчи",
-    "Список лобби: кнопка обновления, вход двойным кликом, несколько режимов в фильтре",
-    "Чат: своё сообщение появляется сразу, счётчик упоминаний у вкладки чата",
-    "Реплеи: панель прячется под меню ESC, кнопка графиков больше не пропадает",
+    "Всегда день: галочка у хоста в лобби, ночных боёв больше нет",
+    "Кнопка «Камуфляж» в лобби: красить технику, не выходя из него",
+    "Наклейки: отражение, удаление картинок из меню наклеек и камуфляжа",
+    "Камуфляж: полугусеничные машины красятся, люки тоже берут рисунок",
+    "Реплеи: кнопка «Открыть папку реплеев»",
+    "Упоминание в чате вдвое тише, плашка версии прячется через 15 секунд",
+    "Это окно больше не появляется после «Понятно» до следующих новостей",
 };
 static const char *NEWS_EN[] = {
-    "Stickers: your own PNG anywhere on a vehicle, moved with the mouse, soft edges and wear",
-    "Camouflage: painted anew with no holes, on all vehicles and on damaged parts too",
-    "Player card: click a name in the chat or lobby for MMR, win rate, nations, last matches",
-    "Lobby list: a refresh button, join with a double click, several modes in the filter",
-    "Chat: your message shows at once, a count of mentions by the chat tab",
-    "Replays: the panel hides under the ESC menu, the charts button no longer disappears",
+    "Always Day: a box for the host in the lobby, no more night battles",
+    "A Camouflage button in the lobby: paint vehicles without leaving it",
+    "Stickers: flipping, and pictures can be deleted from the sticker and camouflage menus",
+    "Camouflage: half-tracks take it, and so do hatches",
+    "Replays: an Open replays folder button",
+    "Chat mentions are half as loud, the version box hides after 15 seconds",
+    "This window stays away after Got it, until the next news",
 };
 
-static bool about_shown() { return g_about_win && !g_live_match && g_ctl.state == ST_IDLE && g_integrity_top > 0; }
+// which news the player has read: by their text, so a build with the same news stays quiet
+static int news_mark() {
+    unsigned h = 2166136261u;
+    for (const char *s : NEWS_EN) for (; *s; s++) h = (h ^ (unsigned char)*s) * 16777619u;
+    return (int)(h & 0x7fffffff);
+}
+static bool about_shown() {
+    static bool asked;
+    if (!g_about_win || g_live_match || g_ctl.state != ST_IDLE || g_integrity_top <= 0) return false;
+    if (!asked) {
+        asked = true;
+        if (online_news_seen() == news_mark()) g_about_win = false;
+    }
+    return g_about_win;
+}
 
 static void about_window() {
     ImGuiIO &io = ImGui::GetIO();
@@ -791,7 +819,10 @@ static void about_window() {
     for (const char *s : en ? NEWS_EN : NEWS_RU) ImGui::BulletText("%s", s);
     ImGui::PopTextWrapPos();
     ImGui::Spacing();
-    if (ImGui::Button(TR("Понятно", "Got it"))) g_about_win = false;
+    if (ImGui::Button(TR("Понятно", "Got it"))) {
+        g_about_win = false;
+        online_set_news_seen(news_mark());
+    }
     ImGui::End();
     (void)io;
 }
@@ -1375,14 +1406,17 @@ static void join_lobby(uint64_t lobby, const char *inviter) {
 }
 
 // ---- mentions: "@name" in a message; the one named hears the game's own chat sound ---------------------------
+#include "wav_quiet.h"
 static void mention_sound() {
     static unsigned char *wav;
     static bool tried;
     if (!tried) {
         tried = true;
         size_t n = 0;
-        wav = pvp_sound_file("gui/multi/chat.wav", &n);       // IMA ADPCM, Windows plays it as it is
+        wav = pvp_sound_file("gui/multi/chat.wav", &n);       // IMA ADPCM
         if (!wav) rc_log("chat: the game's chat sound not found");
+        else if (unsigned char *quiet = wav_quiet(wav, n, .5f)) { free(wav); wav = quiet; }
+        else rc_log("chat: the chat sound stays as loud as it is");
     }
     if (wav) PlaySoundA((LPCSTR)wav, nullptr, SND_MEMORY | SND_ASYNC | SND_NODEFAULT);
 }

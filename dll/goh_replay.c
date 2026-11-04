@@ -1505,6 +1505,7 @@ static void startup(HMODULE self) {
         AddVectoredExceptionHandler(1, fault_log);
         if (!near_page()) { rc_log("server: no memory near its code, nothing patched"); return; }
         balance_install(g_base, g_dir, page_alloc, patch, 1);
+        day_install(g_base, patch, 1);
         rc_log("server: loaded at %p", self);
         return;
     }

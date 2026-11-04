@@ -826,6 +826,7 @@ int pvp_install(uint8_t *exe, const char *dir, uint8_t *(*alloc)(size_t), void (
     lb_apply_install(patch);
     filter_install(dir, patch);
     camo_install(exe, alloc, patch);
+    day_install(exe, patch, 0);
     // the pages: their vtable slots point at ours, which call the game's
     void *binds[2] = {(void *)bind_online, (void *)bind_lan}, *cmds[2] = {(void *)cmd_online, (void *)cmd_lan};
     void *dtors[2] = {(void *)dtor_online, (void *)dtor_lan};

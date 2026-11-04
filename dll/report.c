@@ -7,6 +7,7 @@
 // it) becomes a report; online.c sends it. Only replay.ss is read, not the whole replay.
 #include <windows.h>
 #include <shlobj.h>
+#include <shellapi.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -315,6 +316,15 @@ static int replay_name(const char *ss, const char *me, wchar_t *out, size_t n) {
 
 // every finished autoreplay in our replays folder gets its name; the game is left alone while it may still use
 // the file (a match, a replay or the results page on screen)
+// the replays folder in Explorer
+void replays_open_folder(void) {
+    const char *me = online_my_id();
+    wchar_t docs[MAX_PATH], dir[MAX_PATH];
+    if (!me[0] || FAILED(SHGetFolderPathW(NULL, CSIDL_PERSONAL, NULL, 0, docs))) return;
+    swprintf(dir, MAX_PATH, L"%ls\\My Games\\gates of hell\\profiles\\%llu\\replays", docs, _strtoui64(me, NULL, 10) - 76561197960265728ULL);
+    INT_PTR r = (INT_PTR)ShellExecuteW(NULL, L"open", dir, NULL, NULL, SW_SHOWNORMAL);
+    rc_log("replays: folder %ls: %d", dir, (int)r);     // above 32 is opened
+}
 void replays_rename(const char *me) {
     if (!me[0] || g_live_match || g_ms_results || (g_ctl.state != ST_IDLE && g_ctl.state != ST_OFF)) return;
     wchar_t docs[MAX_PATH], dir[MAX_PATH], pattern[MAX_PATH];

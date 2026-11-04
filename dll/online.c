@@ -428,6 +428,8 @@ int online_list_opt(const char *key) { return GetPrivateProfileIntA("lobby_list"
 void online_set_list_opt(const char *key, int on) { WritePrivateProfileStringA("lobby_list", key, on ? "1" : "0", g_ini); }
 void online_list_mode(char *out, int n) { GetPrivateProfileStringA("lobby_list", "mode", "", out, n, g_ini); }
 void online_set_list_mode(const char *mode) { WritePrivateProfileStringA("lobby_list", "mode", mode, g_ini); }
+int online_news_seen(void) { return GetPrivateProfileIntA("ui", "news_seen", 0, g_ini); }
+void online_set_news_seen(int mark) { char v[16]; snprintf(v, sizeof v, "%d", mark); WritePrivateProfileStringA("ui", "news_seen", v, g_ini); }
 int online_remind(void) { return GetPrivateProfileIntA("online", "steam_remind", 1, g_ini); }
 void online_set_remind(int on) { WritePrivateProfileStringA("online", "steam_remind", on ? "1" : "0", g_ini); }
 
