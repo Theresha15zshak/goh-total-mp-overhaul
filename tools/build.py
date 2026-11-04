@@ -194,7 +194,7 @@ def replays_tab(t):
            b'<StackPanel id="camo_root"><Children><DialogRef refid="gui_library"/>'
            b'</Children></StackPanel></Tab>')
     u = u.replace(marker, tab + marker)
-    assert len(u) <= len(t), 'Camouflage tab exceeds the original stream'
+    assert len(u) + 6 <= len(t), 'Camouflage tab exceeds the original stream, with room for its Russian title'
     u += b' ' * (len(t) - len(u))
     assert len(u) == len(t)
     return u

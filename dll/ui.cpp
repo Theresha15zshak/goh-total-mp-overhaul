@@ -38,6 +38,13 @@ static volatile bool g_balance_win;     // balance switch: Shift+F7
 static volatile bool g_online_win;      // who is online with the mod: Shift+F6
 static bool g_chat_tab;                 // the lobby's chat panel shows a tab of ours (lobby_chat_tab)
 static bool g_lobby_list;               // ... and it is LOBBY LIST, not GLOBAL CHAT
+static bool g_card_open;                // a player's card is on screen
+static char g_card_id[18], g_card_name[64];
+static void card_open(const char *id, const char *name) {
+    snprintf(g_card_id, sizeof g_card_id, "%s", id);
+    snprintf(g_card_name, sizeof g_card_name, "%s", name);
+    g_card_open = true;
+}
 static float g_integrity_top;           // where the version box starts on the screen (pixels): the "about" window sits above
 static bool about_shown();
 static bool g_integrity_click;          // the version box has a button this frame (an update): the mouse over it is ours
@@ -59,7 +66,7 @@ static bool music_shown() { return false; }
 static bool prep_shown() { return false; }
 #else
 static bool panel_shown() {
-    return g_visible && (g_ctl.state == ST_REPLAY || g_ctl.state == ST_SEEKING || g_ctl.state == ST_REWIND);
+    return g_visible && (g_ctl.state == ST_REPLAY || g_ctl.state == ST_SEEKING || g_ctl.state == ST_REWIND) && !pvp_game_menu();
 }
 
 // never in a battle being played: the charts show every player's points and army, the enemy's too
@@ -119,7 +126,7 @@ static void hotkeys() {
 static LRESULT CALLBACK wndproc(HWND h, UINT m, WPARAM w, LPARAM l) {
     if (g_ready) {
         if (panel_shown() || charts_shown() || music_shown() || prep_shown() || balance_shown() || online_shown() ||
-            consent_shown() || login_shown() || about_shown() || g_integrity_click || g_pvp_drawn || g_chat_drawn || camo_shown()) {
+            consent_shown() || login_shown() || about_shown() || g_integrity_click || g_pvp_drawn || g_chat_drawn || camo_shown() || g_card_open) {
             ImGui_ImplWin32_WndProcHandler(h, m, w, l);
             // typing into our chat line: the keys are not the game's
             if (ImGui::GetIO().WantTextInput && ((m >= WM_KEYFIRST && m <= WM_KEYLAST) || (m == WM_INPUT && raw_keyboard(l))))
@@ -276,10 +283,10 @@ static void panel() {
     }
     ImGui::SameLine(ImGui::GetWindowWidth() - 345 * k);
     if (ImGui::SmallButton(TR("Музыка (Shift+F10)", "Music (Shift+F10)"))) g_music_win = !g_music_win;
-    if (g_ms.n > 1) {
-        ImGui::SameLine(ImGui::GetWindowWidth() - 230 * k);
-        if (ImGui::SmallButton(TR("Графики (Shift+F9)", "Charts (Shift+F9)"))) g_charts = !g_charts;
-    }
+    ImGui::SameLine(ImGui::GetWindowWidth() - 230 * k);
+    if (ImGui::SmallButton(TR("Графики (Shift+F9)", "Charts (Shift+F9)"))) g_charts = !g_charts;
+    if (g_ms.n <= 1 && ImGui::IsItemHovered())      // they start over with the replay: the button stays, the window comes with the data
+        ImGui::SetTooltip("%s", TR("Данные появятся, когда реплей дойдёт до первых покупок", "The data comes once the replay reaches the first purchases"));
     ImGui::SameLine(ImGui::GetWindowWidth() - 120 * k);
     ImGui::TextDisabled("%s", TR("Shift+F8 — скрыть", "Shift+F8 — hide"));
     ImGui::End();
@@ -749,18 +756,20 @@ static const char *ABOUT_EN[] = {
     "Sign in through Steam: the mod gets only your SteamID, no password",
 };
 static const char *NEWS_RU[] = {
-    "Камуфляж: вкладка Extras > Camouflage, свой PNG на любую технику с 3D-предпросмотром",
-    "Камуфляж ложится сам на твою технику в бою и виден только тебе",
-    "LOBBY LIST: список лобби прямо из сессии, фильтры, значок модов, вход двойным кликом",
-    "Чат: упоминание по правому клику на игроке, красный счётчик упоминаний у GLOBAL CHAT",
-    "Исправлено: фильтр лобби больше не сбрасывает режимы, поправлены рамки чата в сессии",
+    "Наклейки: свой PNG в любое место техники, двигаются мышью, мягкие края и потёртость",
+    "Камуфляж: новая покраска без дыр, работает на всей технике и на повреждённых частях",
+    "Карточка игрока: клик по нику в чате или лобби, MMR, винрейт, нации, последние матчи",
+    "Список лобби: кнопка обновления, вход двойным кликом, несколько режимов в фильтре",
+    "Чат: своё сообщение появляется сразу, счётчик упоминаний у вкладки чата",
+    "Реплеи: панель прячется под меню ESC, кнопка графиков больше не пропадает",
 };
 static const char *NEWS_EN[] = {
-    "Camouflage: Extras > Camouflage, your own PNG on any vehicle with a 3D preview",
-    "Camouflage goes on your own vehicles in a battle by itself, only you see it",
-    "LOBBY LIST: the lobbies from inside a session, filters, a modded mark, join with a double click",
-    "Chat: mention by right click on a player, a red count of mentions by GLOBAL CHAT",
-    "Fixed: the lobby filter keeps its modes, the chat lines up with its frame in a session",
+    "Stickers: your own PNG anywhere on a vehicle, moved with the mouse, soft edges and wear",
+    "Camouflage: painted anew with no holes, on all vehicles and on damaged parts too",
+    "Player card: click a name in the chat or lobby for MMR, win rate, nations, last matches",
+    "Lobby list: a refresh button, join with a double click, several modes in the filter",
+    "Chat: your message shows at once, a count of mentions by the chat tab",
+    "Replays: the panel hides under the ESC menu, the charts button no longer disappears",
 };
 
 static bool about_shown() { return g_about_win && !g_live_match && g_ctl.state == ST_IDLE && g_integrity_top > 0; }
@@ -1259,6 +1268,8 @@ static void lobby_overlay() {
         snprintf(text, sizeof text, "MMR %s", m ? m : d.state == 1 ? "-" : "...");
         // right under the name, in the taller line (pvp.c makes the session list's lines taller)
         ImVec2 at(floorf(r.x * sx + 0.5f), floorf((r.y + r.h + 1) * sy + 0.5f));
+        if (!g_card_open && ImGui::IsMouseClicked(0) && ImGui::IsMouseHoveringRect(ImVec2(r.x * sx, r.y * sy), ImVec2((r.x + r.w) * sx, (r.y + r.h) * sy), false))
+            card_open(r.id, "");
         dl->AddText(font, size, ImVec2(at.x + 1, at.y + 1), IM_COL32(0, 0, 0, 200), text);
         dl->AddText(font, size, at, VAN_ITEM, text);
     }
@@ -1268,6 +1279,9 @@ static void lobby_overlay() {
 // Tabs RU / ENG on top, the messages left, who is online with the mod right; a moderator gets a menu on any
 // name (right click) and the list of punishments in force.
 static int g_chat_ch;                  // 0 RU, 1 EN
+
+struct ChatEcho { char text[CHAT_TEXT]; DWORD at; long long after; bool scroll; };
+static ChatEcho g_chat_echo[2];         // the message just sent, shown at once
 
 // the line being written, and asks for it from the menu on a name
 static char g_chat_text[CHAT_TEXT];
@@ -1280,6 +1294,14 @@ static void chat_mod_menu(const char *id, const char *name, bool mod) {
     if (!ImGui::BeginPopup("##chatmod")) return;
     ImGui::TextDisabled("%s", name);
     ImGui::Separator();
+    // an anonymous name stays anonymous: the card would show who it is
+    if (strncmp(name, "Anonymous", 9) && ImGui::Selectable(TR("Карточка игрока", "Player card"))) {
+        char clean[64];
+        snprintf(clean, sizeof clean, "%s", name);
+        size_t n = strlen(clean);
+        if (n && clean[n - 1] == ':') clean[n - 1] = 0;
+        card_open(id, clean);
+    }
     if (ImGui::Selectable(TR("Упомянуть", "Mention"))) {           // "@name " at the end of the line being written
         char at[ONLINE_NAME + 4];
         size_t len = strlen(g_chat_text);
@@ -1302,12 +1324,18 @@ static void chat_mod_menu(const char *id, const char *name, bool mod) {
     ImGui::EndPopup();
 }
 
-// a name: left click the Steam profile (players signed in with Steam), right click the menu
+// a name: left click the player's card (players signed in with Steam), right click the menu
 static void chat_name(const char *id, const char *name, ImU32 col, bool verified, bool mod, char *menu_id, char *menu_name) {
     ImGui::PushStyleColor(ImGuiCol_Text, verified ? col : VAN_TAB_OFF);
     ImGui::TextUnformatted(name);
     ImGui::PopStyleColor();
-    if (verified && ImGui::IsItemClicked(ImGuiMouseButton_Left)) open_profile(id);
+    if (verified && ImGui::IsItemClicked(ImGuiMouseButton_Left)) {
+        char clean[64];
+        snprintf(clean, sizeof clean, "%s", name);
+        size_t n = strlen(clean);
+        if (n && clean[n - 1] == ':') clean[n - 1] = 0;
+        card_open(id, clean);
+    }
     if (ImGui::IsItemClicked(ImGuiMouseButton_Right)) {
         snprintf(menu_id, 18, "%s", id);
         snprintf(menu_name, ONLINE_NAME, "%s", name);
@@ -1472,6 +1500,196 @@ static void sunken_box(ImDrawList *dl, ImVec2 a, ImVec2 b) {
     dl->AddRect(a, b, IM_COL32(58, 58, 56, 255));
 }
 
+// "multi/3v3_trenches:ammunition" as a name: "Trenches"
+static void map_title(const char *map, char *out, size_t n) {
+    const char *s = strrchr(map, '/');
+    s = s ? s + 1 : map;
+    if (s[0] >= '0' && s[0] <= '9' && s[1] == 'v' && s[3] == '_') s += 4;
+    snprintf(out, n, "%.*s", (int)strcspn(s, ":"), s);
+    for (char *c = out; *c; c++) if (*c == '_') *c = ' ';
+    if (out[0] >= 'a' && out[0] <= 'z') out[0] -= 32;
+}
+// ---- a player's card: what the server knows of them, on the game's own panel ---------------------------------------------
+static void card_tile(ImDrawList *dl, ImFont *font, float size, ImVec2 a, ImVec2 b, float s, const char *title, const char *big, const char *line, float bar) {
+    dl->AddRectFilled(a, b, IM_COL32(10, 11, 12, 150));
+    dl->AddRect(a, b, IM_COL32(58, 58, 56, 255));
+    dl->AddLine(ImVec2(a.x + 1, a.y + 1), ImVec2(b.x - 1, a.y + 1), IM_COL32(178, 135, 84, 200));
+    float x = a.x + 12 * s;
+    dl->AddText(font, size * .9f, ImVec2(x, a.y + 9 * s), VAN_TITLE, title);
+    dl->AddText(font, size * 1.9f, ImVec2(x, a.y + 27 * s), ACCENT, big);
+    dl->AddText(font, size * .9f, ImVec2(x, b.y - 36 * s), VAN_TEXT, line);
+    if (bar >= 0) {
+        float y = b.y - 13 * s, w = b.x - a.x - 24 * s;
+        dl->AddRectFilled(ImVec2(x, y), ImVec2(x + w, y + 4 * s), IM_COL32(50, 48, 44, 255));
+        dl->AddRectFilled(ImVec2(x, y), ImVec2(x + w * bar, y + 4 * s), bar >= .5f ? VAN_WIN : VAN_WARN);
+    }
+}
+static void card_window() {
+    static bool was_open;
+    if (!g_card_open) { was_open = false; return; }
+    if (g_live_match || g_ctl.state != ST_IDLE) { g_card_open = false; was_open = false; return; }
+    const bool opening = !was_open;                   // focus only now: taken every frame it cancels every press on a button
+    was_open = true;
+    online_doc_ids(DOC_CARD, g_card_id);
+    static Doc d;
+    doc_get(d, DOC_CARD);
+    ImGuiIO &io = ImGui::GetIO();
+    const float s = io.DisplaySize.y / 1080.f, W = 780 * s, H = 660 * s;
+    const ImGuiWindowFlags plain = ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoCollapse |
+                                   ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse;
+    // the page behind goes dark; a click there closes the card
+    ImGui::SetNextWindowPos(ImVec2(0, 0));
+    ImGui::SetNextWindowSize(io.DisplaySize);
+    ImGui::SetNextWindowBgAlpha(.6f);
+    if (opening) ImGui::SetNextWindowFocus();
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowBorderSize, 0);
+    ImGui::PushStyleColor(ImGuiCol_WindowBg, IM_COL32(0, 0, 0, 255));
+    ImGui::Begin("##goh_card_dim", nullptr, plain | ImGuiWindowFlags_NoBringToFrontOnFocus);
+    if ((ImGui::IsWindowHovered() && ImGui::IsMouseClicked(0)) || ImGui::IsKeyPressed(ImGuiKey_Escape)) g_card_open = false;
+    ImGui::End();
+    ImGui::PopStyleColor();
+    ImGui::PopStyleVar();
+    ImVec2 p0(floorf((io.DisplaySize.x - W) * .5f), floorf((io.DisplaySize.y - H) * .5f)), p1(p0.x + W, p0.y + H);
+    ImGui::SetNextWindowPos(p0);
+    ImGui::SetNextWindowSize(ImVec2(W, H));
+    if (opening) ImGui::SetNextWindowFocus();
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0, 0));
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowBorderSize, 0);
+    ImGui::PushStyleVar(ImGuiStyleVar_ScrollbarSize, 8 * s);
+    ImGui::PushStyleColor(ImGuiCol_ScrollbarBg, IM_COL32(0, 0, 0, 0));
+    ImGui::PushStyleColor(ImGuiCol_ScrollbarGrab, IM_COL32(70, 66, 60, 255));
+    ImGui::PushStyleColor(ImGuiCol_ScrollbarGrabHovered, IM_COL32(110, 98, 80, 255));
+    ImGui::PushStyleColor(ImGuiCol_ScrollbarGrabActive, IM_COL32(178, 135, 84, 255));
+    ImGui::Begin("##goh_card", nullptr, plain | ImGuiWindowFlags_NoBackground);
+    if (g_game_font) ImGui::PushFont(g_game_font);
+    ImGui::SetWindowFontScale(s);
+    ImDrawList *dl = ImGui::GetWindowDrawList();
+    ImFont *font = ImGui::GetFont();
+    const float size = ImGui::GetFontSize(), lh = ImGui::GetTextLineHeight();
+    g_panel_rect = ImVec4(p0.x, p0.y, p1.x, p1.y);
+    panel_background(dl, p0, p1, s);
+    dl->AddRect(ImVec2(p0.x - 1, p0.y - 1), ImVec2(p1.x + 1, p1.y + 1), IM_COL32(0, 0, 0, 255));
+    dl->AddRect(p0, p1, IM_COL32(88, 80, 66, 255));
+    // the head: who
+    const float head = 116 * s, pad = 22 * s, av = 80 * s;
+    dl->AddRectFilledMultiColor(ImVec2(p0.x + 1, p0.y + 1), ImVec2(p1.x - 1, p0.y + head), IM_COL32(44, 37, 30, 235), IM_COL32(14, 14, 13, 235), IM_COL32(14, 14, 13, 235), IM_COL32(44, 37, 30, 235));
+    dl->AddLine(ImVec2(p0.x + 1, p0.y + head), ImVec2(p1.x - 1, p0.y + head), IM_COL32(178, 135, 84, 255));
+    ImVec2 a0(p0.x + pad, p0.y + (head - av) * .5f), a1(a0.x + av, a0.y + av);
+    ID3D11ShaderResourceView *img = steam_avatar(g_card_id);
+    if (img) dl->AddImage((ImTextureID)(intptr_t)img, a0, a1);
+    else dl->AddRectFilled(a0, a1, IM_COL32(24, 24, 22, 255));
+    dl->AddRect(ImVec2(a0.x - 1, a0.y - 1), ImVec2(a1.x + 1, a1.y + 1), IM_COL32(178, 135, 84, 255));
+    const char *name = g_card_name;
+    for (int k = 0; k < d.n; k++) if (d.nf[k] >= 2 && !strcmp(d.f[k][0], "P") && d.f[k][1][0]) name = d.f[k][1];
+    float nx = a1.x + 18 * s;
+    dl->AddText(font, size * 1.7f, ImVec2(nx, a0.y + 4 * s), VAN_TEXT, name[0] ? name : "...");
+    int all_games = 0, all_wins = 0;
+    for (int k = 0; k < d.n; k++) if (d.nf[k] >= 5 && !strcmp(d.f[k][0], "L")) { all_games += atoi(d.f[k][3]); all_wins += atoi(d.f[k][4]); }
+    char line[128];
+    if (all_games) snprintf(line, sizeof line, TR("Рейтинговых матчей: %d  \xC2\xB7  побед %d%%", "Rated matches: %d  \xC2\xB7  won %d%%"), all_games, all_wins * 100 / all_games);
+    else snprintf(line, sizeof line, "%s", d.state == 2 ? TR("Сервер мода не отвечает", "The mod's server does not answer") : d.state == 0 ? TR("Загрузка...", "Loading...") : TR("Рейтинговых матчей ещё нет", "No rated matches yet"));
+    dl->AddText(font, size, ImVec2(nx, a0.y + 40 * s), VAN_TITLE, line);
+    const char *steam = TR("Профиль Steam", "Steam profile");
+    ImGui::SetCursorScreenPos(ImVec2(nx, a0.y + 60 * s));
+    float sw = ImGui::CalcTextSize(steam).x;
+    if (ImGui::InvisibleButton("##steam", ImVec2(sw, lh))) open_profile(g_card_id);
+    dl->AddText(font, size, ImVec2(nx, a0.y + 60 * s), ImGui::IsItemHovered() ? VAN_HOVER : ACCENT, steam);
+    ImGui::SetCursorScreenPos(ImVec2(p1.x - 34 * s, p0.y + 8 * s));
+    if (ImGui::InvisibleButton("##close", ImVec2(26 * s, 26 * s))) g_card_open = false;
+    bool hot = ImGui::IsItemHovered();
+    ImVec2 c(p1.x - 21 * s, p0.y + 21 * s);
+    dl->AddLine(ImVec2(c.x - 7 * s, c.y - 7 * s), ImVec2(c.x + 7 * s, c.y + 7 * s), hot ? VAN_HOVER : VAN_TITLE, 2 * s);
+    dl->AddLine(ImVec2(c.x + 7 * s, c.y - 7 * s), ImVec2(c.x - 7 * s, c.y + 7 * s), hot ? VAN_HOVER : VAN_TITLE, 2 * s);
+    // the tiles: the two ladders and the nation played most
+    float ty = p0.y + head + 16 * s, th = 112 * s, gap = 12 * s, tw = (W - 2 * pad - 2 * gap) / 3;
+    const char *lad[2] = {"1v1", "team"}, *lad_name[2] = {TR("1 НА 1", "1 VS 1"), TR("КОМАНДЫ", "TEAMS")};
+    for (int l = 0; l < 2; l++) {
+        char mm[32] = "-", sub[96];
+        int g = 0, w = 0;
+        for (int k = 0; k < d.n; k++)
+            if (d.nf[k] >= 5 && !strcmp(d.f[k][0], "L") && !strcmp(d.f[k][1], lad[l])) { g = atoi(d.f[k][3]); w = atoi(d.f[k][4]); mmr_text(mm, sizeof mm, d.f[k][2], g); }
+        if (g) snprintf(sub, sizeof sub, TR("Игр %d  \xC2\xB7  побед %d%%", "Games %d  \xC2\xB7  won %d%%"), g, w * 100 / g);
+        else snprintf(sub, sizeof sub, "%s", TR("Ещё не играл", "Not played yet"));
+        ImVec2 a(p0.x + pad + l * (tw + gap), ty);
+        card_tile(dl, font, size, a, ImVec2(a.x + tw, ty + th), s, lad_name[l], mm, sub, g ? (float)w / g : -1);
+    }
+    int per_games[5] = {}, per_wins[5] = {}, fav = -1;
+    for (int k = 0; k < d.n; k++)
+        if (d.nf[k] >= 6 && !strcmp(d.f[k][0], "N"))
+            for (int i = 0; i < 5; i++) if (!strcmp(d.f[k][2], NATIONS[i][0])) { per_games[i] += atoi(d.f[k][4]); per_wins[i] += atoi(d.f[k][5]); }
+    for (int i = 0; i < 5; i++) if (per_games[i] && (fav < 0 || per_games[i] > per_games[fav])) fav = i;
+    {
+        char sub[96];
+        if (fav >= 0) snprintf(sub, sizeof sub, TR("Игр %d  \xC2\xB7  побед %d%%", "Games %d  \xC2\xB7  won %d%%"), per_games[fav], per_wins[fav] * 100 / per_games[fav]);
+        else snprintf(sub, sizeof sub, "-");
+        ImVec2 a(p0.x + pad + 2 * (tw + gap), ty);
+        card_tile(dl, font, size, a, ImVec2(a.x + tw, ty + th), s, TR("ЛЮБИМАЯ НАЦИЯ", "FAVOURITE NATION"), fav >= 0 ? TR(NATIONS[fav][1], NATIONS[fav][2]) : "-", sub,
+                  fav >= 0 ? (float)per_wins[fav] / per_games[fav] : -1);
+    }
+    // the nations, by how much they were played
+    float ny = ty + th + 16 * s, cw = (W - 2 * pad) / 5;
+    int most = 1;
+    for (int i = 0; i < 5; i++) if (per_games[i] > most) most = per_games[i];
+    for (int i = 0; i < 5; i++) {
+        float x = p0.x + pad + i * cw, bw = cw - 12 * s;
+        char n[32];
+        snprintf(n, sizeof n, "%d", per_games[i]);
+        dl->AddText(font, size * .9f, ImVec2(x, ny), i == fav ? ACCENT : VAN_TITLE, TR(NATIONS[i][1], NATIONS[i][2]));
+        dl->AddText(font, size * .9f, ImVec2(x + bw - ImGui::CalcTextSize(n).x * .9f, ny), VAN_TEXT, n);
+        dl->AddRectFilled(ImVec2(x, ny + lh + 2 * s), ImVec2(x + bw, ny + lh + 6 * s), IM_COL32(50, 48, 44, 255));
+        dl->AddRectFilled(ImVec2(x, ny + lh + 2 * s), ImVec2(x + bw * per_games[i] / most, ny + lh + 6 * s), i == fav ? ACCENT : IM_COL32(150, 130, 100, 255));
+    }
+    // the last matches
+    float hy = ny + lh + 22 * s;
+    dl->AddText(font, size, ImVec2(p0.x + pad, hy), VAN_TAB, TR("ПОСЛЕДНИЕ МАТЧИ", "LAST MATCHES"));
+    float ly = hy + lh + 6 * s;
+    dl->AddLine(ImVec2(p0.x + pad, ly), ImVec2(p1.x - pad, ly), IM_COL32(70, 66, 60, 255));
+    static const float COL[6] = {0, .15f, .56f, .65f, .78f, 1};
+    float lw = W - 2 * pad;
+    ImGui::SetCursorScreenPos(ImVec2(p0.x + pad, ly + 4 * s));
+    ImGui::BeginChild("##card_matches", ImVec2(lw, p1.y - ly - 16 * s), ImGuiChildFlags_None, ImGuiWindowFlags_NoBackground);
+    ImGui::SetWindowFontScale(s);
+    ImDrawList *rl = ImGui::GetWindowDrawList();
+    int rows = 0;
+    for (int k = 0; k < d.n; k++) {
+        if (d.nf[k] < 10 || strcmp(d.f[k][0], "M")) continue;
+        char **f = d.f[k];
+        ImVec2 at = ImGui::GetCursorScreenPos();
+        float row = lh * 1.4f;
+        ImGui::PushID(k);
+        ImGui::InvisibleButton("##row", ImVec2(lw - 12 * s, row));
+        bool over = ImGui::IsItemHovered();
+        ImGui::PopID();
+        if (over) rl->AddRectFilled(at, ImVec2(at.x + lw, at.y + row), VAN_HOVER_BG);
+        else if (rows & 1) rl->AddRectFilled(at, ImVec2(at.x + lw, at.y + row), IM_COL32(0, 0, 0, 50));
+        char date[32] = "", what[160], fight[16], result[48];
+        time_t tt = (time_t)atoll(f[2]);
+        struct tm lt;
+        if (!localtime_s(&lt, &tt)) strftime(date, sizeof date, "%d.%m %H:%M", &lt);
+        char place[96];
+        map_title(f[4], place, sizeof place);
+        snprintf(what, sizeof what, "%s \xC2\xB7 %s", mode_name(f[3]), place);
+        snprintf(fight, sizeof fight, "%s\xC3\x97%s", f[5], f[5]);
+        bool won = atoi(f[7]) != 0, rated = !strcmp(f[9], "rated");
+        if (rated) snprintf(result, sizeof result, "%s %+d", won ? TR("Победа", "Win") : TR("Поражение", "Loss"), atoi(f[8]));
+        else snprintf(result, sizeof result, "%s", won ? TR("Победа", "Win") : TR("Поражение", "Loss"));
+        const char *cell[5] = {date, what, fight, nation_name(f[6]), result};
+        for (int i = 0; i < 5; i++) {
+            ImU32 col = i == 4 ? (!rated ? VAN_TITLE : won ? VAN_WIN : VAN_WARN) : over ? VAN_HOVER : VAN_TEXT;
+            float x = at.x + COL[i] * lw + 6 * s;
+            van_cell(rl, x, at.y + (row - lh) * .5f, (COL[i + 1] - COL[i]) * lw - 10 * s, col, cell[i]);
+        }
+        rows++;
+    }
+    if (!rows) ImGui::TextColored(ImColor(VAN_TITLE), "%s", d.state == 0 ? TR("Загрузка...", "Loading...") : TR("Матчей пока нет", "No matches yet"));
+    ImGui::EndChild();
+    ImGui::SetWindowFontScale(1);
+    if (g_game_font) ImGui::PopFont();
+    ImGui::End();
+    ImGui::PopStyleColor(4);
+    ImGui::PopStyleVar(3);
+}
+
 static bool lobby_chat_tab(float *x, float *y, float *w, float *h, float *rw, float *rh) {
     ChatPanel cp;
     if (g_live_match || !chat_panel(&cp)) { g_chat_tab = g_lobby_list = false; return false; }
@@ -1483,7 +1701,7 @@ static bool lobby_chat_tab(float *x, float *y, float *w, float *h, float *rw, fl
             g_chat_tab = g_lobby_list = false;
     }
     if (g_game_font) ImGui::PushFont(g_game_font);
-    const char *label = "GLOBAL CHAT", *label2 = "LOBBY LIST";
+    const char *label = TR("ГЛОБАЛЬНЫЙ ЧАТ", "GLOBAL CHAT"), *label2 = TR("СПИСОК ЛОББИ", "LOBBY LIST");
     float size = (g_game_font ? g_game_font->FontSize : ImGui::GetFontSize()) * sy;
     ImFont *font = ImGui::GetFont();
     float tab_y = cp.y, tab_h = cp.body_y - cp.y;           // the game's tabs' own strip, when they were found
@@ -1690,7 +1908,7 @@ static void lobby_list_block(float x, float y, float w, float h, float rw, float
         if (l.max_spectators > 0) snprintf(players, sizeof players, "%d/%d [%d/%d]", l.players, l.max, l.spectators, l.max_spectators);
         else snprintf(players, sizeof players, "%d/%d", l.players, l.max);
         char host[80];
-        snprintf(host, sizeof host, "%s%s", l.locked ? "[P] " : "", l.host);
+        snprintf(host, sizeof host, "%s%s", l.locked ? TR("[П] ", "[P] ") : "", l.host);
         const char *text[4] = {host, l.mode, l.map, players};
         ImU32 color = hot ? VAN_HOVER : VAN_TEXT;
         if (l.mods) {                       // a modded lobby: a small plate in the margin
@@ -1931,6 +2149,29 @@ static void chat_block() {
                 ImGui::TextWrapped("%s", m.text);
             ImGui::PopID();
         }
+        // what was just sent, until the server's copy comes back
+        ChatEcho &echo = g_chat_echo[g_chat_ch];
+        if (echo.text[0]) {
+            bool back = st.sent[0] || GetTickCount() - echo.at > 15000;
+            for (int i = 0; i < n; i++) back |= msgs[i].id > echo.after && !strcmp(msgs[i].sid, my);
+            if (back) echo.text[0] = 0;
+            else {
+                time_t t = time(nullptr);
+                struct tm tmv;
+                localtime_s(&tmv, &t);
+                char hm[8], nm[ONLINE_NAME + 2];
+                strftime(hm, sizeof hm, "%H:%M", &tmv);
+                snprintf(nm, sizeof nm, "%s:", my_name);
+                ImGui::TextColored(ImColor(VAN_TAB_OFF), "%s", hm);
+                ImGui::SameLine();
+                ImGui::TextColored(ImColor(ACCENT), "%s", nm);
+                ImGui::SameLine();
+                ImGui::PushStyleColor(ImGuiCol_Text, VAN_TITLE);
+                ImGui::TextWrapped("%s", echo.text);
+                ImGui::PopStyleColor();
+                if (echo.scroll) { echo.scroll = false; ImGui::SetScrollHereY(1.0f); }
+            }
+        }
         chat_mod_menu(menu_id, menu_name, mod);
         long long newest = n ? msgs[n - 1].id : 0;
         if (newest != last_id[g_chat_ch] && (at_end || !last_id[g_chat_ch])) ImGui::SetScrollHereY(1.0f);
@@ -1968,7 +2209,12 @@ static void chat_block() {
             else { snprintf(local_note, sizeof local_note, "%s", TR("Не вижу вашего лобби: зайдите в лобби игры и повторите /invite", "Can't see your lobby: join a game lobby and try /invite again")); text[0] = 0; }
         } else
             local_note[0] = 0;
-        if (text[0]) chat_send(g_chat_ch, text);
+        if (text[0]) {
+            chat_send(g_chat_ch, text);
+            ChatEcho &echo = g_chat_echo[g_chat_ch];
+            if (strncmp(text, "/invite", 7)) snprintf(echo.text, sizeof echo.text, "%s", text);
+            echo.at = GetTickCount(); echo.after = n ? msgs[n - 1].id : 0; echo.scroll = true;
+        }
         text[0] = 0;
         ImGui::SetKeyboardFocusHere(-1);         // stay in the line for the next one
     }
@@ -2268,6 +2514,7 @@ static void draw(IDXGISwapChain *sc) {
     pvp_block();
     chat_block();
     lobby_overlay();
+    card_window();
     g_online_want = online_shown() || g_pvp_drawn || g_chat_drawn;
     if (online_shown()) online_window();
     integrity_window();

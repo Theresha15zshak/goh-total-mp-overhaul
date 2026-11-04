@@ -87,6 +87,21 @@ static int ends_with(const void *str, const char *ours) {
     return size && !_strnicmp(ours + k - size, s, size) && ours[k - size - 1] == '/';
 }
 
+// The Extras page's Camouflage tab has no text of the game's to go by: its title in the language of the mod. The file keeps its
+// length: what comes after moves into the spaces at the end.
+static void localize_layout(uint8_t *b, size_t n) {
+    static const char key[] = "titleValue=\"CAMOUFLAGE\"", ru[] = "titleValue=\"КАМУФЛЯЖ\"";
+    const size_t kn = sizeof key - 1, rn = sizeof ru - 1, grow = rn - kn;
+    if (lang_en() || n < rn) return;
+    for (size_t i = 0; i + kn <= n; i++) {
+        if (memcmp(b + i, key, kn)) continue;
+        for (size_t k = n - grow; k < n; k++) if (b[k] != ' ') return;
+        memmove(b + i + rn, b + i + kn, n - i - rn);
+        memcpy(b + i, ru, rn);
+        return;
+    }
+}
+
 static void *open_hook(void *path, uint32_t mode) {
     void *r;
     if (camo_open(path, mode, g_prev_open, &r)) return r;
@@ -103,9 +118,11 @@ static void *open_hook(void *path, uint32_t mode) {
         const char *what = !whole ? "its own (stream not as expected)" : !game ? "its own (not the game's file: a mod?)" : "its own (unknown stream)";
         if (game && vt == VT_ZIP_STREAM) {
             memcpy(b, f->data, f->size);
+            localize_layout(b, f->size);
             what = "ours";
         } else if (game && vt == VT_BUF_STREAM && g_ui_copy[i]) {
             uint8_t *c = g_ui_copy[i];
+            localize_layout(c, f->size);
             *(uint8_t **)(st + 8) = c; *(uint8_t **)(st + 0x10) = c + f->size; *(uint64_t *)(st + 0x18) = f->size;
             *(uint8_t **)(st + 0x30) = c; *(uint8_t **)(st + 0x28) = c + f->size;
             what = "ours";
@@ -392,6 +409,9 @@ void pvp_page_shown(void *page) { (void)page; }
 static const uint32_t VT_CHANNEL_VIEWS[] = {0x1042fc0, 0x1042c58, 0x1041bd0, 0x10435e0, 0x1043da0, 0x1042270};
 static void *g_panel_walk;                   // found on this walk
 static void *volatile g_panel;               // ... and the last one
+#define VT_GAME_MENU 0x1013f48               // eDialogBlur: only the ESC menu (page_game_menu) and popups have one
+static int g_menu_walk;                      // seen on this walk
+static volatile int g_game_menu;             // ... and on the last one
 
 static void walk(uint64_t d, int depth, int in_session, void **found, int *n, int *budget) {
     if (!d || depth > 72 || --*budget < 0 || *n >= MAX_NAMES) return;
@@ -399,6 +419,7 @@ static void walk(uint64_t d, int depth, int in_session, void **found, int *n, in
     if (!peek((void *)(d + 0x48), &flags, 4) || !(flags & 2)) return;     // not on screen: nothing under it is
     uint64_t vt = pq(d);
     if (vt == (uintptr_t)(g_base + VT_CHAT_VIEW) && !g_panel_walk) g_panel_walk = (void *)d;
+    if (vt == (uintptr_t)(g_base + VT_GAME_MENU)) g_menu_walk = 1;
     if (vt == (uintptr_t)(g_base + VT_SESSION_VIEW)) in_session = 1;
     if (in_session && vt == (uintptr_t)(g_base + VT_NAME_VIEW)) { found[(*n)++] = (void *)d; return; }
     uint64_t b = pq(d + 0xd8), e = pq(d + 0xe0);
@@ -414,7 +435,10 @@ static void scan_names(void) {
     void *found[MAX_NAMES];
     int n = 0, budget = 20000;
     g_panel_walk = NULL;
+    g_menu_walk = 0;
     if (root && pq(root) == (uintptr_t)(g_base + VT_DESKTOP)) walk(root, 0, 0, found, &n, &budget);
+    if (g_menu_walk != g_game_menu) rc_log("pvp: the ESC menu %s", g_menu_walk ? "on screen" : "gone");
+    g_game_menu = g_menu_walk;
     if (g_panel_walk != g_panel) rc_log("pvp: the game's chat panel %s", g_panel_walk ? "on screen" : "gone");
     g_panel = g_panel_walk;
     AcquireSRWLockExclusive(&g_names_lock);
@@ -424,6 +448,8 @@ static void scan_names(void) {
     static int last_n = -1;
     if (n != last_n) { rc_log("pvp: lobby names on screen: %d (%d dialogs looked at)", n, 20000 - budget); last_n = n; }
 }
+
+int pvp_game_menu(void) { scan_names(); return g_game_menu; }
 
 // ---- the lobby's lines taller: the listbox's own line height -------------------------------------------------
 // What did not work (2026-11-02): resizing and moving the lines ourselves (the listbox put them back: they jumped),

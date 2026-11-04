@@ -217,7 +217,11 @@ void online_want(int doc) { g_doc_want[doc] = GetTickCount() | 1; }
 
 void online_doc_ids(int doc, const char *ids) {
     AcquireSRWLockExclusive(&g_doc_lock);
-    if (strcmp(ids, g_doc_ids[doc])) { snprintf(g_doc_ids[doc], sizeof g_doc_ids[doc], "%s", ids); g_doc_at[doc] = 0; }
+    if (strcmp(ids, g_doc_ids[doc])) {
+        snprintf(g_doc_ids[doc], sizeof g_doc_ids[doc], "%s", ids);
+        g_doc_at[doc] = 0;
+        if (doc == DOC_CARD) { free(g_doc[doc]); g_doc[doc] = NULL; g_doc_state[doc] = 0; }     // another player: nothing of the last one
+    }
     ReleaseSRWLockExclusive(&g_doc_lock);
 }
 
@@ -240,9 +244,10 @@ static void fetch_docs(HINTERNET s, char *buf) {
         char ids[sizeof g_doc_ids[0]];
         memcpy(ids, g_doc_ids[d], sizeof ids);
         ReleaseSRWLockShared(&g_doc_lock);
-        if (fresh || ((d == DOC_RATINGS || d == DOC_LOBBY || d == DOC_CHAT) && !ids[0])) continue;
+        if (fresh || ((d == DOC_RATINGS || d == DOC_LOBBY || d == DOC_CHAT || d == DOC_CARD) && !ids[0])) continue;
         wchar_t path[400];
         if (d == DOC_PLAYER) swprintf(path, 400, L"/player?id=%hs", g_id);
+        else if (d == DOC_CARD) swprintf(path, 400, L"/player?id=%hs", ids);
         else if (d == DOC_BOARD_1V1) swprintf(path, 400, L"/leaderboard?ladder=1v1");
         else if (d == DOC_BOARD_TEAM) swprintf(path, 400, L"/leaderboard?ladder=team");
         else swprintf(path, 400, L"/ratings?ids=%hs", ids);
@@ -280,12 +285,14 @@ int chat_copy(int ch, ChatMsg *out, int max, ChatStatus *st) {
     return n;
 }
 
+static HANDLE g_chat_wake;                      // a message to send: the worker does not sleep on
 void chat_send(int ch, const char *text) {
     AcquireSRWLockExclusive(&g_chat_lock);
     snprintf(g_chat_out[ch & 1], sizeof g_chat_out[0], "%s", text);
     for (char *p = g_chat_out[ch & 1]; *p; p++) if (*p == '\n' || *p == '\r') *p = ' ';
     g_chat_st.sent[0] = 0;
     ReleaseSRWLockExclusive(&g_chat_lock);
+    if (g_chat_wake) SetEvent(g_chat_wake);
 }
 
 void chat_mod(const char *action, const char *target, int days) {
@@ -592,7 +599,8 @@ static DWORD WINAPI online_thread(LPVOID unused) {
         fetch_docs(s, buf);
         chat_tick(s, buf);
         login_tick(s, buf);
-        Sleep(chat_busy() ? 100 : 500);
+        if (!g_chat_wake) g_chat_wake = CreateEventW(NULL, FALSE, FALSE, NULL);
+        if (!g_chat_wake || WaitForSingleObject(g_chat_wake, chat_busy() ? 100 : 500) == WAIT_FAILED) Sleep(500);
     }
 }
 

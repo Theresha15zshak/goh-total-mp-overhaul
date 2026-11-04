@@ -154,7 +154,7 @@ int online_copy(OnlinePlayer *out, int max, int *state);   // state 0 nothing ye
 const char *online_my_id(void);
 int steam_id_ok(const char *s);             // 17 digits of a SteamID             // "" until Steam is up
 // texts of the rating server (server/src/matches.js), fetched while the panel asks for them each frame
-enum { DOC_PLAYER, DOC_BOARD_1V1, DOC_BOARD_TEAM, DOC_RATINGS, DOC_LOBBY, DOC_CHAT, DOC_N };   // DOC_RATINGS: the online tab,
+enum { DOC_PLAYER, DOC_BOARD_1V1, DOC_BOARD_TEAM, DOC_RATINGS, DOC_LOBBY, DOC_CHAT, DOC_CARD, DOC_N };   // DOC_RATINGS: the online tab,
                                                                                             // DOC_CHAT: the chat's online list
 void online_want(int doc);                  // on screen this frame
 void online_doc_ids(int doc, const char *ids);   // DOC_RATINGS / DOC_LOBBY / DOC_CHAT: whose (comma separated SteamIDs, at most 16)
@@ -203,6 +203,7 @@ int chat_rect(float *x, float *y, float *w, float *h, float *root_w, float *root
 // its channel starts below the tabs, the right end of the tabs and each tab's place (game units, as pvp_rect)
 typedef struct { float x, y, w, h, body_y, tabs_r, root_w, root_h; int ntabs; float tab[8][4]; } ChatPanel;
 int chat_panel(ChatPanel *p);
+int pvp_game_menu(void);                                    // the ESC menu of a battle or a replay is on screen
 // the lobbies of the game as Steam has them (steamlobby.c): kept fresh while the tab keeps asking
 #define LOBBY_LINES 200
 typedef struct { uint64_t id; char owner[24], host[64], mode[64], mode_key[48], map[160]; int players, max, spectators, max_spectators, locked, mods; } LobbyLine;

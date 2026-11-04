@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <string>
 #include <memory>
+#include <cstdint>
 #include "imgui.h"
 #include "goh_replay.h"
 #include "camo.h"
@@ -29,7 +30,9 @@ struct Preset { CamoSettings settings; std::string name; int id; };
 std::vector<Preset> presets;
 // A vehicle's camouflage: its picture (a preset's file) and how it lies, with the vehicle's textures, as found in its
 // model: all of them take the picture, the main ones tell the vehicle in a battle.
-struct Assign { std::string model; int picture; CamoSettings s; std::vector<std::string> all, main; };
+// A sticker: one picture at one place on the vehicle, a projector from outside onto the surface around that point.
+struct Sticker { int picture; float c[3], n[3], size, rotation, opacity, soft, wear; };
+struct Assign { std::string model; int picture; CamoSettings s; std::vector<std::string> all, main; std::vector<Sticker> stickers; };
 std::vector<Assign> assigns;
 wchar_t vehicles_ini[MAX_PATH];
 int selected = -1;
@@ -72,17 +75,26 @@ constexpr uintptr_t FN_MOD_NEW = 0x556310, FN_MOD_FREE = 0x5564e0;
 // which keeps textures by name. A second name, gohcamoid<crc of the model>, is only on the vehicle's main textures: a
 // skeleton that has it is that vehicle (small textures are shared between vehicles). What the other threads may use of
 // the camouflages is in `published`, under its lock.
-struct Published { std::string token, id_token; int id; CamoSettings s; std::string model; std::vector<std::string> all, main; };
+struct Published { std::string token, id_token; int id; CamoSettings s; std::string model; std::vector<std::string> all, main; std::vector<Sticker> stickers; };
 std::vector<Published> published;
 SRWLOCK published_lock = SRWLOCK_INIT;
 struct Vec { unsigned char *begin, *end, *cap; };
 void *(*tex_mods_real)(void *, void *);
+// A damaged part comes from the vehicle's _x model, a burned one from its _xx: the same layout of the texture, a texture of
+// their own, is2_44_x beside is2_44. They are the same texture to the camouflage: without that it comes off where hit.
+std::string undamaged(std::string s) {
+    size_t n = s.size();
+    if (n > 3 && !s.compare(n - 3, 3, "_xx")) s.resize(n - 3);
+    else if (n > 2 && !s.compare(n - 2, 2, "_x")) s.resize(n - 2);
+    return s;
+}
 bool is_camo_texture(const char *s, size_t n) {
     std::string k(s, n);
     for (auto &c : k) c = (char)tolower((unsigned char)c);
     if (k.find("_vehicle/") == std::string::npos || k.find("/tracks/") != std::string::npos || k.find('#') != std::string::npos) return false;
     size_t dot = k.rfind('.');
     if (dot != std::string::npos && dot + 5 >= k.size()) k.resize(dot);
+    k = undamaged(k);
     for (const char *end : {"_bp", "_sp", "_lm", "_nm", "_ao"})
         if (k.size() > 3 && !k.compare(k.size() - 3, 3, end)) return false;
     return true;
@@ -109,7 +121,7 @@ void *tex_mods(void *map, void *key) {
     const GameString *k = (const GameString *)key;
     const char *s = k->cap > 15 ? k->ptr : k->buf;
     if (!v || k->size > 400 || !is_camo_texture(s, k->size)) return v;
-    std::string stem = stem_of(s, k->size);
+    std::string stem = undamaged(stem_of(s, k->size));
     AcquireSRWLockShared(&published_lock);
     for (const auto &e : published) {
         if (std::find(e.all.begin(), e.all.end(), stem) != e.all.end()) add_variant(v, e.token.c_str());
@@ -120,7 +132,18 @@ void *tex_mods(void *map, void *key) {
 }
 
 // the pattern on the textures: for now a test pattern of three colours
-struct Pattern { std::vector<unsigned char> px; int w = 0, h = 0; CamoSettings s; std::string model; };
+struct Pattern;
+// A sticker: a projector at its point, looking straight onto the surface there. Over the picture lies a grid: `chosen` is the
+// floor the sticker lies on in a cell, `levels` all the heights there it paints (the floor and all that stands on it);
+// `stretch` lengthens distances from the middle by what the surface bends away.
+struct StickerImage {
+    std::shared_ptr<Pattern> pic;
+    float c[3], n[3], e1[3], e2[3], half_w, half_h, opacity, wear;
+    int gx = 0, gy = 0;
+    float cell = 1;
+    std::vector<float> chosen, levels, stretch;
+};
+struct Pattern { std::vector<unsigned char> px; int w = 0, h = 0; CamoSettings s; std::string model; std::vector<StickerImage> stickers; };
 struct VehicleMap;
 void free_projection(VehicleMap *);
 Pattern test_pattern() {
@@ -143,8 +166,30 @@ struct Placement { float cx, cy, top, width, height, ca, sa, ox, oy; bool throug
 Placement place_picture(const float lo[3], const float hi[3], int pw, int ph, const CamoSettings &s);
 bool on_picture(const Placement &l, const float *P, float &u, float &v);
 const float *texel_place(const VehicleMap &pr, size_t at);
+void stick(const VehicleMap &pr, size_t at, const std::vector<StickerImage> &list, uint8_t io[4]);
 Placement place_on(const VehicleMap &pr, const Pattern &p);
 bool texel(const VehicleMap &pr, int x, int y, int w, int h, size_t &at);
+void paint_pixel(const int rgb[3], int x, int y, int w, int h, const Pattern &p, float average, const VehicleMap *pr, const Placement &pl, int o[3]) {
+    float lum = rgb[0] * .3f + rgb[1] * .59f + rgb[2] * .11f, keep = lum / average;
+    keep = keep < .45f ? .45f : keep > 1.6f ? 1.6f : keep;
+    uint8_t flat[4], out[4];
+    for (int c = 0; c < 3; c++) { float f = rgb[c] / keep; flat[c] = (uint8_t)(f > 255 ? 255 : f); }
+    flat[3] = 255;
+    if (pr) {
+        size_t at;
+        float u, v;
+        memcpy(out, flat, 4);
+        if (texel(*pr, x, y, w, h, at)) {
+            if (p.w && on_picture(pl, texel_place(*pr, at), u, v)) camo_blend(p.px.data(), p.w, p.h, u, v, flat, p.s, out);
+            stick(*pr, at, p.stickers, out);
+        }
+    } else if (p.w) camo_pixel(p.px.data(), p.w, p.h, (x + .5f) / w, (y + .5f) / h, flat, p.s, out);
+    else memcpy(out, flat, 4);
+    for (int c = 0; c < 3; c++) {
+        int v = (int)(out[c] * keep);
+        o[c] = v < 0 ? 0 : v > 255 ? 255 : v;
+    }
+}
 void block(unsigned char *b, int bx, int by, int w, int h, const Pattern &p, float average, const VehicleMap *pr, const Placement &pl) {
     uint16_t c0 = b[0] | b[1] << 8, c1 = b[2] | b[3] << 8;
     uint32_t bits = b[4] | b[5] << 8 | b[6] << 16 | (uint32_t)b[7] << 24;
@@ -157,20 +202,8 @@ void block(unsigned char *b, int bx, int by, int w, int h, const Pattern &p, flo
     int px[16][3], lo[3] = {255, 255, 255}, hi[3] = {0, 0, 0};
     for (int i = 0; i < 16; i++) {
         int k = bits >> (2 * i) & 3, x = bx + (i & 3), y = by + (i >> 2);
-        float lum = pal[k][0] * .3f + pal[k][1] * .59f + pal[k][2] * .11f, keep = lum / average;
-        keep = keep < .45f ? .45f : keep > 1.6f ? 1.6f : keep;
-        uint8_t flat[4], out[4];
-        for (int c = 0; c < 3; c++) { float f = pal[k][c] / keep; flat[c] = (uint8_t)(f > 255 ? 255 : f); }
-        flat[3] = 255;
-        if (pr) {
-            size_t at;
-            float u, v;
-            if (texel(*pr, x, y, w, h, at) && on_picture(pl, texel_place(*pr, at), u, v)) camo_blend(p.px.data(), p.w, p.h, u, v, flat, p.s, out);
-            else memcpy(out, flat, 4);
-        } else camo_pixel(p.px.data(), p.w, p.h, (x + .5f) / w, (y + .5f) / h, flat, p.s, out);
+        paint_pixel(pal[k], x, y, w, h, p, average, pr, pl, px[i]);
         for (int c = 0; c < 3; c++) {
-            int v = (int)(out[c] * keep);
-            px[i][c] = v < 0 ? 0 : v > 255 ? 255 : v;
             if (px[i][c] < lo[c]) lo[c] = px[i][c];
             if (px[i][c] > hi[c]) hi[c] = px[i][c];
         }
@@ -191,13 +224,51 @@ void block(unsigned char *b, int bx, int by, int w, int h, const Pattern &p, flo
     }
     b[0] = a & 255; b[1] = a >> 8; b[2] = z & 255; b[3] = z >> 8; memcpy(b + 4, &out, 4);
 }
+// a mod's texture can be plain 32 bit pixels; each mask says where a colour is
+int shift_of(uint32_t mask) { int s = 0; while (mask && !(mask & 1)) { mask >>= 1; s++; } return s; }
+bool paint_plain(unsigned char *f, size_t n, const Pattern &p, const VehicleMap *pr, uint32_t w, uint32_t h, uint32_t mips) {
+    uint32_t mask[3];
+    memcpy(mask, f + 92, 12);
+    if (!mask[0] || !mask[1] || !mask[2]) return false;
+    int shift[3] = {shift_of(mask[0]), shift_of(mask[1]), shift_of(mask[2])};
+    double sum = 0;
+    size_t count = (size_t)w * h;
+    if (128 + count * 4 > n) return false;
+    for (size_t i = 0; i < count; i += 16) {
+        uint32_t v;
+        memcpy(&v, f + 128 + i * 4, 4);
+        sum += (v >> shift[0] & 255) * .3 + (v >> shift[1] & 255) * .59 + (v >> shift[2] & 255) * .11;
+    }
+    float average = sum > 8.0 * (count / 16) ? (float)(sum / (count / 16 + 1)) : 90.f;
+    Placement pl = {};
+    if (pr) pl = place_on(*pr, p);
+    size_t at = 128;
+    for (uint32_t m = 0; m < mips && w && h; m++) {
+        if (at + (size_t)w * h * 4 > n) break;
+        for (uint32_t y = 0; y < h; y++) for (uint32_t x = 0; x < w; x++) {
+            unsigned char *b = f + at + ((size_t)y * w + x) * 4;
+            uint32_t v;
+            memcpy(&v, b, 4);
+            int rgb[3] = {(int)(v >> shift[0] & 255), (int)(v >> shift[1] & 255), (int)(v >> shift[2] & 255)}, o[3];
+            paint_pixel(rgb, x, y, w, h, p, average, pr, pl, o);
+            v &= ~(mask[0] | mask[1] | mask[2]);
+            for (int c = 0; c < 3; c++) v |= (uint32_t)o[c] << shift[c];
+            memcpy(b, &v, 4);
+        }
+        at += (size_t)w * h * 4;
+        w = w > 1 ? w / 2 : 1; h = h > 1 ? h / 2 : 1;
+    }
+    return true;
+}
 bool paint_dds(unsigned char *f, size_t n, const Pattern &p, const VehicleMap *pr) {
     if (n < 128 || memcmp(f, "DDS ", 4)) return false;
-    uint32_t h, w, mips, four;
-    memcpy(&h, f + 12, 4); memcpy(&w, f + 16, 4); memcpy(&mips, f + 28, 4); memcpy(&four, f + 84, 4);
-    int size = four == 0x31545844 ? 8 : four == 0x35545844 ? 16 : 0;       // DXT1, DXT5
-    if (!size || !w || !h) return false;
+    uint32_t h, w, mips, four, bits;
+    memcpy(&h, f + 12, 4); memcpy(&w, f + 16, 4); memcpy(&mips, f + 28, 4); memcpy(&four, f + 84, 4); memcpy(&bits, f + 88, 4);
+    int size = four == 0x31545844 ? 8 : four == 0x35545844 || four == 0x33545844 ? 16 : 0;       // DXT1, DXT5, DXT3
+    if (!w || !h) return false;
     if (!mips) mips = 1;
+    if (!four && bits == 32) return paint_plain(f, n, p, pr, w, h, mips);
+    if (!size) return false;
     double sum = 0;
     size_t blocks = 0;
     for (size_t o = 128 + size - 8, top = 128 + (size_t)((w + 3) / 4) * ((h + 3) / 4) * size; o + 8 <= top && o + 8 <= n; o += size * 16) {
@@ -231,26 +302,93 @@ struct Painted { std::string name; std::vector<unsigned char> data; };
 std::vector<Painted *> painted;
 void filename(int id, wchar_t *out);
 bool readfile(const wchar_t *path, std::vector<unsigned char> &out);
+std::shared_ptr<Pattern> load_picture(int id) {
+    wchar_t path[MAX_PATH];
+    std::vector<unsigned char> bytes;
+    int c, w, h;
+    filename(id, path);
+    if (!readfile(path, bytes)) return nullptr;
+    unsigned char *d = stbi_load_from_memory(bytes.data(), (int)bytes.size(), &w, &h, &c, 4);
+    if (!d) return nullptr;
+    auto r = std::make_shared<Pattern>();
+    r->w = w; r->h = h; r->px.assign(d, d + (size_t)w * h * 4);
+    stbi_image_free(d);
+    return r;
+}
+// A soft sticker: the picture's alpha blurred, with nothing beyond its frame, so both the frame and the outline of what is
+// drawn (the digits of a number on a clear PNG) fade out gently. The colours stay as they are.
+std::shared_ptr<Pattern> softened(std::shared_ptr<Pattern> pic, float soft) {
+    if (!pic || soft <= .001f) return pic;
+    const int w = pic->w, h = pic->h, r = (int)(soft * .1f * (w < h ? w : h)) + 1;
+    auto out = std::make_shared<Pattern>(*pic);
+    std::vector<float> a((size_t)w * h), b((size_t)w * h);
+    for (size_t i = 0; i < a.size(); i++) a[i] = pic->px[i * 4 + 3];
+    for (int pass = 0; pass < 2; pass++) {            // two box blurs, near enough a soft edge
+        for (int y = 0; y < h; y++) {
+            double sum = 0;
+            for (int x = -r; x < w; x++) {
+                if (x + r < w) sum += a[(size_t)y * w + x + r];
+                if (x - r - 1 >= 0) sum -= a[(size_t)y * w + x - r - 1];
+                if (x >= 0) b[(size_t)y * w + x] = (float)(sum / (2 * r + 1));
+            }
+        }
+        for (int x = 0; x < w; x++) {
+            double sum = 0;
+            for (int y = -r; y < h; y++) {
+                if (y + r < h) sum += b[(size_t)(y + r) * w + x];
+                if (y - r - 1 >= 0) sum -= b[(size_t)(y - r - 1) * w + x];
+                if (y >= 0) a[(size_t)y * w + x] = (float)(sum / (2 * r + 1));
+            }
+        }
+    }
+    for (size_t i = 0; i < a.size(); i++) {
+        float keep = a[i] / 255;                      // where the picture is see-through its colour must not darken the edge
+        out->px[i * 4 + 3] = (unsigned char)(fminf(a[i], 255.f) * (pic->px[i * 4 + 3] ? 1.f : fminf(keep * 2, 1.f)));
+    }
+    return out;
+}
+void normalize(float v[3]) {
+    float l = sqrtf(v[0] * v[0] + v[1] * v[1] + v[2] * v[2]) + 1e-9f;
+    for (int i = 0; i < 3; i++) v[i] /= l;
+}
+void cross(const float a[3], const float b[3], float o[3]) {
+    o[0] = a[1] * b[2] - a[2] * b[1]; o[1] = a[2] * b[0] - a[0] * b[2]; o[2] = a[0] * b[1] - a[1] * b[0];
+}
+// seen from outside: right along e1, down along e2, so the picture is the right way round
+StickerImage sticker_image(const Sticker &s, std::shared_ptr<Pattern> pic) {
+    StickerImage r;
+    memcpy(r.c, s.c, sizeof r.c); memcpy(r.n, s.n, sizeof r.n);
+    normalize(r.n);
+    float up[3] = {0, 0, 1}, right[3], down[3];
+    if (fabsf(r.n[2]) > .9f) { up[0] = 1; up[2] = 0; }
+    cross(up, r.n, right); normalize(right);
+    cross(right, r.n, down);
+    float a = s.rotation * .017453292f, ca = cosf(a), sa = sinf(a);
+    for (int i = 0; i < 3; i++) { r.e1[i] = ca * right[i] + sa * down[i]; r.e2[i] = ca * down[i] - sa * right[i]; }
+    r.pic = pic;
+    r.half_w = s.size / 2;
+    r.half_h = pic && pic->w ? s.size / 2 * pic->h / pic->w : s.size / 2;
+    r.opacity = s.opacity;
+    r.wear = s.wear;
+    return r;
+}
 Pattern pattern_of(const std::string &token) {
     Pattern p;
     int id = -1;
+    bool known = false;
+    std::vector<Sticker> stickers;
     AcquireSRWLockShared(&published_lock);
-    for (auto &e : published) if (e.token == token) { id = e.id; p.s = e.s; p.model = e.model; }
+    for (auto &e : published) if (e.token == token) { id = e.id; p.s = e.s; p.model = e.model; stickers = e.stickers; known = true; }
     ReleaseSRWLockShared(&published_lock);
-    wchar_t path[MAX_PATH];
-    std::vector<unsigned char> bytes;
-    int c;
+    for (const Sticker &s : stickers) if (auto pic = load_picture(s.picture)) p.stickers.push_back(sticker_image(s, softened(pic, s.soft)));
     if (id >= 0) {
-        filename(id, path);
-        if (readfile(path, bytes)) {
-            unsigned char *d = stbi_load_from_memory(bytes.data(), (int)bytes.size(), &p.w, &p.h, &c, 4);
-            if (d) { p.px.assign(d, d + (size_t)p.w * p.h * 4); stbi_image_free(d); return p; }
-        }
+        if (auto pic = load_picture(id)) { p.px = pic->px; p.w = pic->w; p.h = pic->h; return p; }
     }
+    if (known) return p;                                // stickers only
     rc_log("camo: no picture for %s, test pattern", token.c_str());
     return test_pattern();
 }
-bool make_projection(const std::string &file, const unsigned char *f, size_t n, const std::string &model, VehicleMap *&out);
+bool make_projection(const std::string &file, const unsigned char *f, size_t n, const std::string &model, std::vector<StickerImage> &stickers, VehicleMap *&out);
 Painted *painted_of(const std::string &name, const std::string &token, const unsigned char *f, size_t n) {
     AcquireSRWLockExclusive(&paint_lock);
     Painted *r = nullptr;
@@ -264,10 +402,10 @@ Painted *painted_of(const std::string &name, const std::string &token, const uns
         r = new Painted{key, std::vector<unsigned char>(f, f + n)};
         VehicleMap *pr = nullptr;
         bool tracks = !p.s.mode && name.find("track") != std::string::npos;     // nobody paints those
-        if (!p.s.mode && !tracks) make_projection(name, f, n, p.model, pr);
+        if (!p.s.mode && !tracks) make_projection(name, f, n, p.model, p.stickers, pr);
         bool ok = tracks || paint_dds(r->data.data(), n, p, pr);
         free_projection(pr);
-        rc_log("camo: %s painted in %lu ms: %s", key.c_str(), GetTickCount() - t0, ok ? "ok" : "not a DXT1/DXT5 DDS, left as it is");
+        rc_log("camo: %s painted in %lu ms: %s", key.c_str(), GetTickCount() - t0, ok ? "ok" : "a kind of DDS not known, left as it is");
         painted.push_back(r);
     }
     ReleaseSRWLockExclusive(&paint_lock);
@@ -343,9 +481,9 @@ void load_image(int index) {
     wchar_t path[MAX_PATH]; filename(presets[index].id, path);
     std::vector<unsigned char> bytes;
     int w, h, c;
-    if (!readfile(path, bytes) || !validate(bytes, w, h)) { status = "PNG missing or invalid"; return; }
+    if (!readfile(path, bytes) || !validate(bytes, w, h)) { status = TR("PNG не найден или повреждён", "PNG missing or invalid"); return; }
     unsigned char *p = stbi_load_from_memory(bytes.data(), (int)bytes.size(), &w, &h, &c, 4);
-    if (!p) { status = "Could not decode PNG"; return; }
+    if (!p) { status = TR("Не удалось прочитать PNG", "Could not decode PNG"); return; }
     auto r = std::make_shared<Pattern>();
     r->w = w; r->h = h; r->px.assign(p, p + (size_t)w * h * 4); stbi_image_free(p); status.clear();
     picture = r;
@@ -359,14 +497,17 @@ uint32_t fnv(const void *data, size_t n, uint32_t h = 2166136261u) {
     for (size_t i = 0; i < n; i++) h = (h ^ b[i]) * 16777619u;
     return h;
 }
+volatile LONG warm_needed;                             // camouflages changed: paint them ahead of the battle
 void publish() {
+    InterlockedExchange(&warm_needed, 1);
     std::vector<Published> list;
     for (const auto &a : assigns) {
         uint32_t id = fnv(a.model.data(), a.model.size()), crc = fnv(&a.s, sizeof a.s, id);
+        if (!a.stickers.empty()) crc = fnv(a.stickers.data(), a.stickers.size() * sizeof a.stickers[0], crc);
         char token[48], id_token[48];
         snprintf(token, sizeof token, "gohcamo%dx%08x", a.picture, crc);
         snprintf(id_token, sizeof id_token, "gohcamoid%08x", id);
-        list.push_back({token, id_token, a.picture, a.s, a.model, a.all, a.main});
+        list.push_back({token, id_token, a.picture, a.s, a.model, a.all, a.main, a.stickers});
     }
     AcquireSRWLockExclusive(&published_lock);
     published = std::move(list);
@@ -390,19 +531,31 @@ std::vector<std::string> split(const std::string &s) {
 }
 void save_vehicles() {
     wchar_t tmp[MAX_PATH]; swprintf(tmp, MAX_PATH, L"%s.tmp", vehicles_ini);
-    FILE *f = _wfopen(tmp, L"wb"); if (!f) { status = "Cannot save vehicles"; return; }
-    fprintf(f, "GOH_CAMO_V1\n");
-    for (const auto &a : assigns) fprintf(f, "%d %.9g %.9g %.9g %.9g %d %d %.9g %d %d %d\t%s\t%s\t%s\n", a.picture,
-        a.s.offset[0], a.s.offset[1], a.s.rotation, a.s.opacity, a.s.blend, a.s.repeat, a.s.size, a.s.through, a.s.flip_x, a.s.flip_y,
-        a.model.c_str(), joined(a.all).c_str(), joined(a.main).c_str());
+    FILE *f = _wfopen(tmp, L"wb"); if (!f) { status = TR("Не удалось сохранить настройки техники", "Cannot save vehicles"); return; }
+    fprintf(f, "GOH_CAMO_V2\n");
+    for (const auto &a : assigns) {
+        fprintf(f, "%d %.9g %.9g %.9g %.9g %d %d %.9g %d %d %d\t%s\t%s\t%s\n", a.picture,
+            a.s.offset[0], a.s.offset[1], a.s.rotation, a.s.opacity, a.s.blend, a.s.repeat, a.s.size, a.s.through, a.s.flip_x, a.s.flip_y,
+            a.model.c_str(), joined(a.all).c_str(), joined(a.main).c_str());
+        for (const auto &s : a.stickers) fprintf(f, "S %d %.9g %.9g %.9g %.9g %.9g %.9g %.9g %.9g %.9g %.9g %.9g\n", s.picture,
+            s.c[0], s.c[1], s.c[2], s.n[0], s.n[1], s.n[2], s.size, s.rotation, s.opacity, s.soft, s.wear);
+    }
     bool ok = !ferror(f); if (fclose(f)) ok = false;
-    if (!ok || !MoveFileExW(tmp, vehicles_ini, MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)) status = "Cannot save vehicles";
+    if (!ok || !MoveFileExW(tmp, vehicles_ini, MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)) status = TR("Не удалось сохранить настройки техники", "Cannot save vehicles");
 }
 void load_vehicles() {
     FILE *f = _wfopen(vehicles_ini, L"rb");
     if (!f) return;
     static char line[8192];
-    if (fgets(line, sizeof line, f) && !strcmp(line, "GOH_CAMO_V1\n")) while (assigns.size() < 2000 && fgets(line, sizeof line, f)) {
+    if (fgets(line, sizeof line, f) && (!strcmp(line, "GOH_CAMO_V1\n") || !strcmp(line, "GOH_CAMO_V2\n"))) while (assigns.size() < 2000 && fgets(line, sizeof line, f)) {
+        if (line[0] == 'S' && line[1] == ' ') {
+            Sticker k = {};
+            if (!assigns.empty() && assigns.back().stickers.size() < 64 && sscanf(line + 2, "%d %f %f %f %f %f %f %f %f %f %f %f", &k.picture, &k.c[0], &k.c[1], &k.c[2],
+                       &k.n[0], &k.n[1], &k.n[2], &k.size, &k.rotation, &k.opacity, &k.soft, &k.wear) >= 10 && isfinite(k.size) && k.size > 0 && isfinite(k.c[0]) &&
+                isfinite(k.c[1]) && isfinite(k.c[2]) && isfinite(k.n[0]) && isfinite(k.n[1]) && isfinite(k.n[2]) && isfinite(k.opacity) && isfinite(k.soft) && isfinite(k.wear))
+                assigns.back().stickers.push_back(k);
+            continue;
+        }
         Assign a; auto &s = a.s;
         if (sscanf(line, "%d %f %f %f %f %d %d %f %d %d %d", &a.picture, &s.offset[0], &s.offset[1], &s.rotation, &s.opacity,
                    &s.blend, &s.repeat, &s.size, &s.through, &s.flip_x, &s.flip_y) != 11) continue;
@@ -422,13 +575,13 @@ void save() {
     publish();
     save_vehicles();
     wchar_t tmp[MAX_PATH]; swprintf(tmp, MAX_PATH, L"%s.tmp", ini);
-    FILE *f = _wfopen(tmp, L"wb"); if (!f) { status = "Cannot save presets"; return; }
+    FILE *f = _wfopen(tmp, L"wb"); if (!f) { status = TR("Не удалось сохранить список картинок", "Cannot save presets"); return; }
     fprintf(f, "GOH_CAMO_2\n");
     for (const auto &p : presets) fprintf(f, "%d %.9g %.9g %.9g %.9g %.9g %d %d %d %.9g %s\n", p.id,
         p.settings.offset[0], p.settings.offset[1], p.settings.scale, p.settings.rotation,
         p.settings.opacity, p.settings.blend, p.settings.mode, p.settings.repeat, p.settings.size, p.name.c_str());
     bool ok = !ferror(f); if (fclose(f)) ok = false;
-    if (!ok || !MoveFileExW(tmp, ini, MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)) status = "Cannot save presets";
+    if (!ok || !MoveFileExW(tmp, ini, MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)) status = TR("Не удалось сохранить список картинок", "Cannot save presets");
 }
 DWORD WINAPI pick(LPVOID) {
     wchar_t path[32768] = {};
@@ -439,12 +592,12 @@ DWORD WINAPI pick(LPVOID) {
     if (GetOpenFileNameW(&of)) {
         int w, h;
         if (!readfile(path, result.png) || !validate(result.png, w, h)) {
-            result.png.clear(); result.error = "Use a valid PNG, up to 4096 x 4096 and 32 MB";
+            result.png.clear(); result.error = TR("Нужен PNG до 4096 x 4096 и до 32 МБ", "Use a valid PNG, up to 4096 x 4096 and 32 MB");
         } else {
             const wchar_t *name = wcsrchr(path, L'\\'); result.name = utf8(name ? name + 1 : path);
             for (char &c : result.name) if (c == '\n' || c == '\r') c = ' ';
         }
-    } else if (CommDlgExtendedError()) result.error = "Could not open the file picker";
+    } else if (CommDlgExtendedError()) result.error = TR("Не удалось открыть окно выбора файла", "Could not open the file picker");
     AcquireSRWLockExclusive(&lock); pending = std::move(result); ReleaseSRWLockExclusive(&lock);
     InterlockedExchange(&importing, 2); return 0;
 }
@@ -457,9 +610,9 @@ void accept_import() {
     if (r.png.empty()) return;
     int id = 0; for (const auto &p : presets) if (p.id >= id) id = p.id + 1;
     wchar_t path[MAX_PATH]; filename(id, path);
-    FILE *f = _wfopen(path, L"wb"); if (!f) { status = "Cannot store the imported PNG"; return; }
+    FILE *f = _wfopen(path, L"wb"); if (!f) { status = TR("Не удалось сохранить загруженный PNG", "Cannot store the imported PNG"); return; }
     bool ok = fwrite(r.png.data(), 1, r.png.size(), f) == r.png.size(); if (fclose(f)) ok = false;
-    if (!ok) { DeleteFileW(path); status = "Cannot store the imported PNG"; return; }
+    if (!ok) { DeleteFileW(path); status = TR("Не удалось сохранить загруженный PNG", "Cannot store the imported PNG"); return; }
     presets.push_back({{}, r.name, id}); selected = (int)presets.size()-1; imported = true; save(); load_image(selected);
 }
 }
@@ -499,6 +652,7 @@ extern "C" void camo_page(void *) {}
 extern "C" void camo_selftest_tick(const char *);
 extern "C" void lobby_dump_tick(const char *);
 extern "C" int dialog_covered(void *dialog);
+void warm_start();
 extern "C" void camo_tick() {
     static bool in_game;
     uintptr_t mode = q(base + GAME_MODE_OBJ);
@@ -518,6 +672,7 @@ extern "C" void camo_tick() {
         if (tab && dialog_covered(tab)) p = {};       // the game's own window over it: exit, ESC
     }
     AcquireSRWLockExclusive(&lock); panel = p; ReleaseSRWLockExclusive(&lock);
+    if (warm_needed && !in_game && !drawn) warm_start();   // not while sliders move: each new setting is a new texture
 }
 extern "C" int camo_shown() { return drawn || floating; }
 namespace {
@@ -648,16 +803,33 @@ void walk_bones(const Node &n, const Mat &parent, std::vector<View> &views) {
                 if (same_key(v.key, "volumeview") && !v.values.empty()) { views.push_back({v.values[0], w}); break; }   // the best one
     }
 }
-struct Triangle { float p[3][3], n[3][3], uv[3][2]; int layer; };    // layer: which of the model's textures, -1 none
+struct Triangle { float p[3][3], n[3][3], uv[3][2]; int layer; bool gun, skin; };    // layer: which of the model's textures, -1 none
+// A barrel takes no sticker: gun.ply, gun2.ply, gun_lod1.ply, and the machine guns' mgun*.ply. Not the mantlet (gun_rot,
+// mantlet.ply), a shield or a gunner's hatch.
+bool is_barrel(std::string file) {
+    for (auto &c : file) c = (char)tolower((unsigned char)c);
+    size_t slash = file.rfind('/');
+    if (slash != std::string::npos) file = file.substr(slash + 1);
+    if (file.find("shield") != std::string::npos) return false;
+    if (!file.compare(0, 4, "mgun") || !file.compare(0, 5, "hmgun")) return true;
+    if (file.compare(0, 3, "gun")) return false;
+    char next = file.size() > 3 ? file[3] : 0;
+    return next == '.' || !next || (next >= '0' && next <= '9') || !file.compare(3, 4, "_lod");
+}
 struct VehicleMap {
     int w = 0, h = 0;
     std::vector<float> pos;                           // x, y, z of a texel
     std::vector<unsigned char> kind;                  // 0 not on the outside of the vehicle, 1 one place, 2 used at several
+    std::vector<float> owner;                         // the size of the triangle whose place a texel holds
+    std::vector<unsigned char> both;                  // 1: no sticker here: the texel is on both sides of the vehicle, or on a barrel
+    std::vector<signed char> normal;                  // which way the surface looks there
     float lo[3] = {1e9f, 1e9f, 1e9f}, hi[3] = {-1e9f, -1e9f, -1e9f};
 };
-struct Model { std::vector<Triangle> all; std::vector<std::string> stems; float lo[3] = {1e9f, 1e9f, 1e9f}, hi[3] = {-1e9f, -1e9f, -1e9f}; };
+struct Model {
+    std::vector<Triangle> all; std::vector<std::string> stems; float lo[3] = {1e9f, 1e9f, 1e9f}, hi[3] = {-1e9f, -1e9f, -1e9f};
+};
 struct Mesh { unsigned first, tris; std::string material; };
-struct Ply { std::vector<Mesh> meshes; const unsigned char *vert = nullptr; unsigned count = 0, stride = 0; const uint16_t *index = nullptr; unsigned indices = 0; };
+struct Ply { std::vector<Mesh> meshes; const unsigned char *vert = nullptr; unsigned count = 0, stride = 0, uv = 24; const uint16_t *index = nullptr; unsigned indices = 0; bool skinned = false; };
 bool read_ply(const std::vector<unsigned char> &d, Ply &o) {
     size_t p = 4, n = d.size();
     if (n < 8 || memcmp(d.data(), "EPLY", 4)) return false;
@@ -668,15 +840,19 @@ bool read_ply(const std::vector<unsigned char> &d, Ply &o) {
             if (p + 26 > n) return false;
             uint32_t fl, first, tris;
             memcpy(&fl, b + 4, 4); memcpy(&first, b + 8, 4); memcpy(&tris, b + 12, 4);
-            size_t q = p + 20 + (fl & 0x40 ? 0 : 4);
+            // then a colour, then the material's name; flag 0x40: the vertices have a colour of their own before their uv
+            size_t q = p + 24;
+            auto named = [&](size_t at) { return at < n && d[at] > 4 && at + 1 + d[at] <= n && !memcmp(&d[at + 1 + d[at] - 4], ".mtl", 4); };
+            if (!named(q)) q = p + 20;
             if (q >= n || q + 1 + d[q] > n) return false;
             o.meshes.push_back({first, tris, std::string((const char *)&d[q + 1], d[q])});
+            if (fl & 0x40) o.uv = 28;
             p = q + 1 + d[q];
             if (fl & 0x1000) { if (p >= n) return false; p += 1 + d[p]; }
         } else if (!memcmp(b, "VERT", 4)) {
             uint32_t cnt; uint16_t stride, fl;
             memcpy(&cnt, b + 4, 4); memcpy(&stride, b + 8, 2); memcpy(&fl, b + 10, 2);
-            if (stride < 32 || (fl & 7) != 7 || p + 12 + (size_t)cnt * stride > n) return false;
+            if (stride < o.uv + 8 || (fl & 7) != 7 || p + 12 + (size_t)cnt * stride > n) return false;
             o.vert = b + 12; o.count = cnt; o.stride = stride;
             p += 12 + (size_t)cnt * stride;
         } else if (!memcmp(b, "INDX", 4)) {
@@ -684,13 +860,19 @@ bool read_ply(const std::vector<unsigned char> &d, Ply &o) {
             if (p + 8 + (size_t)cnt * 2 > n) return false;
             o.index = (const uint16_t *)(b + 8); o.indices = cnt;
             p += 8 + (size_t)cnt * 2;
-        } else return false;                          // SKIN (tracks) and the like: no part of ours
+        } else if (!memcmp(b, "SKIN", 4)) {           // the bones of tracks and suspensions: names, then a mesh like any other
+            uint32_t cnt; memcpy(&cnt, b + 4, 4);
+            if (cnt > 4096) return false;
+            o.skinned = true;
+            p += 8;
+            for (uint32_t i = 0; i < cnt; i++) { if (p >= n) return false; p += 1 + d[p]; }
+        } else return false;
     }
     return o.vert && o.index;
 }
 // A texture is shared: the same texels serve both sides of the hull, all the wheels, and hidden parts like the inside of
 // the engine room. The two sides mirror each other, so y counts by its size; what else lands far apart can't hold a drawing.
-void fill_triangle(VehicleMap &pr, const Triangle &t) {
+void fill_triangle(VehicleMap &pr, const Triangle &t, bool gap_only) {
     float wrap = floorf(fminf(t.uv[0][0], fminf(t.uv[1][0], t.uv[2][0]))), wrapv = floorf(fminf(t.uv[0][1], fminf(t.uv[1][1], t.uv[2][1])));
     float x[3], y[3];
     for (int i = 0; i < 3; i++) { x[i] = (t.uv[i][0] - wrap) * pr.w; y[i] = (t.uv[i][1] - wrapv) * pr.h; }
@@ -700,6 +882,10 @@ void fill_triangle(VehicleMap &pr, const Triangle &t) {
     int y0 = (int)floorf(fminf(y[0], fminf(y[1], y[2]))) - 1, y1 = (int)ceilf(fmaxf(y[0], fmaxf(y[1], y[2]))) + 1;
     if (x1 - x0 > 2 * pr.w || y1 - y0 > 2 * pr.h) return;
     float cy = (pr.lo[1] + pr.hi[1]) / 2, apart = (pr.hi[0] - pr.lo[0]) * .04f;
+    float e0[3], e1[3], ex[3];
+    for (int i = 0; i < 3; i++) { e0[i] = t.p[1][i] - t.p[0][i]; e1[i] = t.p[2][i] - t.p[0][i]; }
+    cross(e0, e1, ex);
+    const float area = sqrtf(ex[0] * ex[0] + ex[1] * ex[1] + ex[2] * ex[2]);
     for (int py = y0; py <= y1; py++) for (int px = x0; px <= x1; px++) {
         float gx = px + .5f, gy = py + .5f;
         float a = ((y[1] - y[2]) * (gx - x[2]) + (x[2] - x[1]) * (gy - y[2])) / den;
@@ -708,12 +894,32 @@ void fill_triangle(VehicleMap &pr, const Triangle &t) {
         if (a < -.03f || b < -.03f || c < -.03f) continue;
         int tx = ((px % pr.w) + pr.w) % pr.w, ty = ((py % pr.h) + pr.h) % pr.h;
         size_t at = (size_t)ty * pr.w + tx;
+        if (t.gun) pr.both[at] = 1;
         float q[3];
         for (int i = 0; i < 3; i++) q[i] = a * t.p[0][i] + b * t.p[1][i] + c * t.p[2][i];
         float *o = &pr.pos[at * 3];
-        if (!pr.kind[at]) { memcpy(o, q, sizeof q); pr.kind[at] = 1; continue; }
-        if (a < 0 || b < 0 || c < 0) continue;        // the rim around a triangle, for the filtering
-        if (fabsf(q[0] - o[0]) > apart || fabsf(q[2] - o[2]) > apart || fabsf(fabsf(q[1] - cy) - fabsf(o[1] - cy)) > apart) pr.kind[at] = 2;
+        if (!pr.kind[at]) {
+            memcpy(o, q, sizeof q); pr.kind[at] = 1; pr.owner[at] = area;
+            for (int i = 0; i < 3; i++) {
+                float n = a * t.n[0][i] + b * t.n[1][i] + c * t.n[2][i];
+                pr.normal[at * 3 + i] = (signed char)(n < -1 ? -127 : n > 1 ? 127 : n * 127);
+            }
+            continue;
+        }
+        if (gap_only || a < 0 || b < 0 || c < 0) continue;      // the rim around a triangle, for the filtering
+        if ((q[1] - cy) * (o[1] - cy) < 0 && fabsf(q[1] - o[1]) > apart * .5f) pr.both[at] = 1;
+        if (fabsf(q[0] - o[0]) > apart || fabsf(q[2] - o[2]) > apart || fabsf(fabsf(q[1] - cy) - fabsf(o[1] - cy)) > apart) {
+            // Two places want the texel. Exact copies of one part (road wheels) can't hold a drawing; otherwise the bigger
+            // surface keeps it: a detail reusing a bit of the hull's texture leaves no hole in the hull.
+            float was = pr.owner[at];
+            if (area > was * 1.05f) {
+                memcpy(o, q, sizeof q); pr.kind[at] = 1; pr.owner[at] = area;
+                for (int i = 0; i < 3; i++) {
+                    float n = a * t.n[0][i] + b * t.n[1][i] + c * t.n[2][i];
+                    pr.normal[at * 3 + i] = (signed char)(n < -1 ? -127 : n > 1 ? 127 : n * 127);
+                }
+            } else if (area > was * .95f) pr.kind[at] = 2;
+        }
     }
 }
 // Which triangles anyone can see: the model looked at from all around, each view with a depth buffer.
@@ -747,6 +953,16 @@ void look_from(const std::vector<Triangle> &all, const float eye[3], const float
         }
     }
     for (int id : ids) if (id >= 0) seen[id] = 1;
+    float close = radius * .008f;
+    for (size_t n = 0; n < all.size(); n++) {
+        if (seen[n]) continue;
+        float q[3] = {0, 0, 0};
+        for (int i = 0; i < 3; i++) for (int c = 0; c < 3; c++) q[c] += (all[n].p[i][c] - centre[c]) / 3;
+        int x = (int)(((q[0] * r[0] + q[1] * r[1] + q[2] * r[2]) / radius * .5f + .5f) * R);
+        int y = (int)(((q[0] * u[0] + q[1] * u[1] + q[2] * u[2]) / radius * .5f + .5f) * R);
+        if (x < 0 || y < 0 || x >= R || y >= R) continue;
+        if (-(q[0] * eye[0] + q[1] * eye[1] + q[2] * eye[2]) <= depth[y * R + x] + close) seen[n] = 2;     // a maybe: it only fills gaps
+    }
 }
 // What of the model is on the outside.
 std::vector<unsigned char> seen_of(const Model &m) {
@@ -768,7 +984,33 @@ void bake_layer(VehicleMap &pr, const Model &m, const std::vector<unsigned char>
     memcpy(pr.lo, m.lo, sizeof pr.lo); memcpy(pr.hi, m.hi, sizeof pr.hi);
     pr.pos.assign((size_t)pr.w * pr.h * 3, 0);
     pr.kind.assign((size_t)pr.w * pr.h, 0);
-    for (size_t i = 0; i < m.all.size(); i++) if (m.all[i].layer == layer && seen[i]) fill_triangle(pr, m.all[i]);
+    pr.both.assign((size_t)pr.w * pr.h, 0);
+    pr.normal.assign((size_t)pr.w * pr.h * 3, 0);
+    pr.owner.assign((size_t)pr.w * pr.h, 0);
+    for (size_t i = 0; i < m.all.size(); i++) if (m.all[i].layer == layer && seen[i] == 1 && !m.all[i].skin) fill_triangle(pr, m.all[i], false);
+    for (size_t i = 0; i < m.all.size(); i++) if (m.all[i].layer == layer && seen[i] == 2 && !m.all[i].skin) fill_triangle(pr, m.all[i], true);
+    const int w = pr.w, h = pr.h;
+    for (int pass = 0; pass < 3; pass++) {
+        std::vector<int> grow;
+        for (int y = 0; y < h; y++) for (int x = 0; x < w; x++) {
+            size_t at = (size_t)y * w + x;
+            if (pr.kind[at]) continue;
+            static const int DX[4] = {1, -1, 0, 0}, DY[4] = {0, 0, 1, -1};
+            for (int k = 0; k < 4; k++) {
+                int nx = x + DX[k], ny = y + DY[k];
+                if (nx < 0 || ny < 0 || nx >= w || ny >= h || pr.kind[(size_t)ny * w + nx] != 1) continue;
+                grow.push_back((int)at); grow.push_back((int)((size_t)ny * w + nx));
+                break;
+            }
+        }
+        for (size_t i = 0; i < grow.size(); i += 2) {
+            size_t to = grow[i], from = grow[i + 1];
+            memcpy(&pr.pos[to * 3], &pr.pos[from * 3], 12);
+            memcpy(&pr.normal[to * 3], &pr.normal[from * 3], 3);
+            pr.both[to] = pr.both[from];
+            pr.kind[to] = 1;
+        }
+    }
 }
 bool read_game_file(const std::string &path, std::vector<unsigned char> &out) {
     GamePath p = path_of(path);
@@ -777,6 +1019,8 @@ bool read_game_file(const std::string &path, std::vector<unsigned char> &out) {
     if (!st) return false;
     uintptr_t vt = *(uintptr_t *)st - base;
     bool ok = false;
+    static int odd;
+    if (vt != VT_FILE && vt != VT_ZIP && vt != VT_BUF && odd++ < 8) rc_log("camo: %s: a stream of kind %llx", path.c_str(), (unsigned long long)vt);
     if (vt == VT_FILE) {
         const GameString *g = (const GameString *)(st + 0x48);
         std::string disk(g->cap > 15 ? g->ptr : g->buf, g->size);
@@ -806,7 +1050,16 @@ bool load_model(const std::string &mdl, Model &o) {
         std::vector<unsigned char> data;
         Ply m;
         if (!read_game_file(dir + v.file, data) || !read_ply(data, m)) continue;
+        const bool barrel = is_barrel(v.file);
+        if (m.skinned) {                              // tracks and suspensions lie where they are; a canvas and such follow their bones
+            std::string name = v.file;
+            for (auto &c : name) c = (char)tolower((unsigned char)c);
+            bool running_gear = false;
+            for (const char *k : {"track", "susp", "torz", "spring", "rod"}) running_gear |= name.find(k) != std::string::npos;
+            if (!running_gear) continue;
+        }
         for (const Mesh &mesh : m.meshes) {
+            if (!_strnicmp(mesh.material.c_str(), "number", 6)) continue;     // plates the game fills in per vehicle
             int layer = -1;
             bool known = false;
             for (auto &e : materials) if (e.first == mesh.material) { layer = e.second; known = true; }
@@ -830,12 +1083,15 @@ bool load_model(const std::string &mdl, Model &o) {
             for (unsigned i = 0; i < mesh.tris && ((size_t)mesh.first + i) * 3 + 2 < m.indices; i++) {
                 Triangle tr;
                 tr.layer = layer;
+                tr.gun = barrel;
+                tr.skin = m.skinned;
                 bool good = true;
                 for (int c = 0; c < 3; c++) {
                     unsigned k = m.index[((size_t)mesh.first + i) * 3 + c];
                     if (k >= m.count) { good = false; break; }
                     float raw[8];
-                    memcpy(raw, m.vert + (size_t)k * m.stride, sizeof raw);
+                    memcpy(raw, m.vert + (size_t)k * m.stride, 24);
+                    memcpy(raw + 6, m.vert + (size_t)k * m.stride + m.uv, 8);
                     turn(v.m, raw, tr.p[c]);
                     turn(v.m, raw + 3, tr.n[c]);
                     for (int a = 0; a < 3; a++) {
@@ -868,7 +1124,268 @@ Placement place_picture(const float lo[3], const float hi[3], int pw, int ph, co
     return l;
 }
 const float *texel_place(const VehicleMap &pr, size_t at) { return &pr.pos[at * 3]; }
-Placement place_on(const VehicleMap &pr, const Pattern &p) { return place_picture(pr.lo, pr.hi, p.w, p.h, p.s); }
+void face_normal(const Triangle &t, float n[3]) {
+    float u[3], v[3];
+    for (int i = 0; i < 3; i++) { u[i] = t.p[1][i] - t.p[0][i]; v[i] = t.p[2][i] - t.p[0][i]; }
+    cross(u, v, n);
+    normalize(n);
+    float s[3] = {t.n[0][0] + t.n[1][0] + t.n[2][0], t.n[0][1] + t.n[1][1] + t.n[2][1], t.n[0][2] + t.n[1][2] + t.n[2][2]};
+    if (n[0] * s[0] + n[1] * s[1] + n[2] * s[2] < 0) for (int i = 0; i < 3; i++) n[i] = -n[i];
+}
+float dot3(const float a[3], const float b[3]) { return a[0] * b[0] + a[1] * b[1] + a[2] * b[2]; }
+// A sticker is a stencil at its point, looking along the surface's normal there, as decals are in games. Over the picture lies
+// a grid; each cell keeps the heights of the surfaces the stencil meets, several layers. From the middle a floor flows
+// over the grid: it goes down only gently, so from a turret's roof nothing falls on the hull, and having gone down a
+// side it does not lie flat again on what is below. Whatever stands on the floor inside the frame takes the picture too:
+// hatches, boxes, cables, a gun, whatever meshes they are. Everything is relative to the plane of the point, so nothing
+// can fly off.
+constexpr int STICKER_GRID = 128, STICKER_LAYERS = 4;
+void sticker_lay(StickerImage &s, const Model &m, const std::vector<unsigned char> &seen) {
+    const float big = fmaxf(s.half_w, s.half_h), cell = 2 * big / STICKER_GRID;
+    const int gx = (int)ceilf(2 * s.half_w / cell) + 1, gy = (int)ceilf(2 * s.half_h / cell) + 1;
+    s.cell = cell; s.gx = gx; s.gy = gy;
+    const size_t cells = (size_t)gx * gy;
+    std::vector<float> height(cells * STICKER_LAYERS), facing(cells * STICKER_LAYERS);
+    std::vector<unsigned char> count(cells, 0);
+    std::vector<float> wall_lo(cells, 1e30f), wall_hi(cells, -1e30f);     // how far up and down a wall runs in a cell
+    for (size_t i = 0; i < m.all.size(); i++) {
+        if (!seen[i] || m.all[i].gun || m.all[i].skin) continue;
+        const Triangle &t = m.all[i];
+        float f[3];
+        face_normal(t, f);
+        float looks = dot3(f, s.n);
+        float x[3], y[3], z[3];
+        for (int k = 0; k < 3; k++) {
+            float d[3] = {t.p[k][0] - s.c[0], t.p[k][1] - s.c[1], t.p[k][2] - s.c[2]};
+            x[k] = (dot3(d, s.e1) + s.half_w) / cell;
+            y[k] = (dot3(d, s.e2) + s.half_h) / cell;
+            z[k] = dot3(d, s.n);
+        }
+        if (looks < .35f) {                           // a side of something: where it stands
+            float len = 0;
+            for (int k = 0; k < 3; k++) {
+                float ex = x[(k + 1) % 3] - x[k], ey = y[(k + 1) % 3] - y[k], ez = (z[(k + 1) % 3] - z[k]) / cell;
+                len = fmaxf(len, sqrtf(ex * ex + ey * ey + ez * ez));
+            }
+            int n = (int)ceilf(len) + 1;
+            n = n > 96 ? 96 : n;
+            for (int a = 0; a <= n; a++) for (int b = 0; b <= n - a; b++) {
+                float wa = (float)a / n, wb = (float)b / n, wc = 1 - wa - wb;
+                int cx = (int)(wa * x[0] + wb * x[1] + wc * x[2]), cy = (int)(wa * y[0] + wb * y[1] + wc * y[2]);
+                if (cx < 0 || cy < 0 || cx >= gx || cy >= gy) continue;
+                float h = wa * z[0] + wb * z[1] + wc * z[2];
+                size_t at = (size_t)cy * gx + cx;
+                wall_lo[at] = fminf(wall_lo[at], h); wall_hi[at] = fmaxf(wall_hi[at], h);
+            }
+        }
+        if (looks < .1f) continue;
+        int x0 = (int)fmaxf(floorf(fminf(x[0], fminf(x[1], x[2]))), 0), x1 = (int)fminf(ceilf(fmaxf(x[0], fmaxf(x[1], x[2]))) + 1, (float)gx);
+        int y0 = (int)fmaxf(floorf(fminf(y[0], fminf(y[1], y[2]))), 0), y1 = (int)fminf(ceilf(fmaxf(y[0], fmaxf(y[1], y[2]))) + 1, (float)gy);
+        if (x1 <= x0 || y1 <= y0) continue;
+        float den = (y[1] - y[2]) * (x[0] - x[2]) + (x[2] - x[1]) * (y[0] - y[2]);
+        if (fabsf(den) < 1e-7f) continue;
+        for (int py = y0; py < y1; py++) for (int px = x0; px < x1; px++) {
+            float gxc = px + .5f, gyc = py + .5f;
+            float a = ((y[1] - y[2]) * (gxc - x[2]) + (x[2] - x[1]) * (gyc - y[2])) / den;
+            float b = ((y[2] - y[0]) * (gxc - x[2]) + (x[0] - x[2]) * (gyc - y[2])) / den;
+            float c = 1 - a - b;
+            if (a < -.1f || b < -.1f || c < -.1f) continue;
+            float depth = a * z[0] + b * z[1] + c * z[2];
+            size_t at = (size_t)py * gx + px;
+            float *h = &height[at * STICKER_LAYERS], *l = &facing[at * STICKER_LAYERS];
+            int n = count[at], same = -1;
+            for (int k = 0; k < n; k++) if (fabsf(h[k] - depth) < cell * 1.5f) same = k;
+            if (same >= 0) { if (depth > h[same]) { h[same] = depth; l[same] = looks; } continue; }
+            if (n < STICKER_LAYERS) { h[n] = depth; l[n] = looks; count[at]++; continue; }
+            int worst = 0;
+            for (int k = 1; k < n; k++) if (fabsf(h[k]) > fabsf(h[worst])) worst = k;
+            if (fabsf(depth) < fabsf(h[worst])) { h[worst] = depth; l[worst] = looks; }
+        }
+    }
+    s.chosen.assign(cells, 1e30f);
+    s.stretch.assign(cells, 1);
+    // the middle: the layer at the sticker's point, on the nearest cell that has one
+    int mx = gx / 2, my = gy / 2, start = -1, layer = 0;
+    for (int r = 0; r < 16 && start < 0; r++) for (int dy = -r; dy <= r && start < 0; dy++) for (int dx = -r; dx <= r; dx++) {
+        int x = mx + dx, y = my + dy;
+        if (x < 0 || y < 0 || x >= gx || y >= gy || !count[(size_t)y * gx + x]) continue;
+        start = y * gx + x;
+        break;
+    }
+    if (start < 0) return;
+    for (int k = 1; k < count[start]; k++) if (fabsf(height[(size_t)start * STICKER_LAYERS + k]) < fabsf(height[(size_t)start * STICKER_LAYERS + layer])) layer = k;
+    const float small = fmaxf(cell * 4, 1.5f), level = cell * 3;
+    std::vector<float> turned(cells, 1);
+    std::vector<int> queue;
+    queue.reserve(cells);
+    s.chosen[start] = height[(size_t)start * STICKER_LAYERS + layer];
+    turned[start] = facing[(size_t)start * STICKER_LAYERS + layer];
+    queue.push_back(start);
+    static const int WAYS[16][2] = {{1, 0}, {-1, 0}, {0, 1}, {0, -1}, {1, 1}, {-1, 1}, {1, -1}, {-1, -1}, {3, 0}, {-3, 0}, {0, 3}, {0, -3}, {3, 3}, {-3, 3}, {3, -3}, {-3, -3}};
+    for (size_t at = 0; at < queue.size(); at++) {
+        int p = queue[at], px = p % gx, py = p / gx;
+        float here = s.chosen[p];
+        for (const auto &w : WAYS) {
+            int x = px + w[0], y = py + w[1];
+            if (x < 0 || y < 0 || x >= gx || y >= gy) continue;
+            int q = y * gx + x;
+            if (s.chosen[q] < 1e29f || !count[q]) continue;
+            // the lowest layer the floor can go on to; over a gap only what lies level with here
+            bool gap = abs(w[0]) > 1 || abs(w[1]) > 1;
+            float lowest = gap ? here - level : here - small, best = 1e30f, look = 1;
+            for (int k = 0; k < count[q]; k++) {
+                float h = height[(size_t)q * STICKER_LAYERS + k];
+                if (h >= lowest && h < best) { best = h; look = facing[(size_t)q * STICKER_LAYERS + k]; }
+            }
+            if (best > 1e29f || (gap && best > here + level)) continue;
+            if (best <= here && look > turned[p] + .2f) continue;   // paper bends one way
+            s.chosen[q] = fminf(best, here);                         // standing on something, the floor stays where it was
+            turned[q] = best <= here ? fminf(turned[p], look) : turned[p];
+            queue.push_back(q);
+        }
+    }
+    // The sticker paints the floor, and what stands on it: a level above joined to the floor by a wall, a hatch, a box. What
+    // only hangs over the floor (a turret's bustle over the deck) has no wall down to it, and takes nothing.
+    const float standing = fminf(big * .5f, 8.f), touching = fmaxf(cell * 3, 1.5f);
+    std::vector<unsigned char> painted(cells * STICKER_LAYERS, 0);
+    std::vector<int> states;
+    states.reserve(cells);
+    for (size_t i = 0; i < cells; i++) {
+        if (s.chosen[i] > 1e29f) continue;
+        for (int k = 0; k < count[i]; k++)
+            if (fabsf(height[i * STICKER_LAYERS + k] - s.chosen[i]) <= small) { painted[i * STICKER_LAYERS + k] = 1; states.push_back((int)(i * STICKER_LAYERS + k)); }
+    }
+    auto wall_between = [&](int x, int y, float lo, float hi) {
+        float a = 1e30f, b = -1e30f;                  // the wall around here, however it runs from cell to cell
+        for (int dy = -1; dy <= 1; dy++) for (int dx = -1; dx <= 1; dx++) {
+            int cx = x + dx, cy = y + dy;
+            if (cx < 0 || cy < 0 || cx >= gx || cy >= gy) continue;
+            a = fminf(a, wall_lo[(size_t)cy * gx + cx]); b = fmaxf(b, wall_hi[(size_t)cy * gx + cx]);
+        }
+        return a <= lo + touching && b >= hi - touching;
+    };
+    for (size_t at = 0; at < states.size(); at++) {
+        int state = states[at], p = state / STICKER_LAYERS, px = p % gx, py = p / gx;
+        float here = height[state];
+        for (int dy = -1; dy <= 1; dy++) for (int dx = -1; dx <= 1; dx++) {
+            int x = px + dx, y = py + dy;
+            if (x < 0 || y < 0 || x >= gx || y >= gy) continue;
+            int q = y * gx + x;
+            if (s.chosen[q] > 1e29f) continue;
+            for (int k = 0; k < count[q]; k++) {
+                int next = q * STICKER_LAYERS + k;
+                float h = height[next];
+                if (painted[next] || h > s.chosen[q] + standing) continue;
+                if (fabsf(h - here) > small && !(h > here && wall_between(x, y, here, h))) continue;
+                painted[next] = 1;
+                states.push_back(next);
+            }
+        }
+    }
+    s.levels.assign(cells * STICKER_LAYERS, 1e30f);
+    for (size_t i = 0; i < cells * STICKER_LAYERS; i++) if (painted[i]) s.levels[i] = height[i];
+    // Distances from the middle along the surface: what bends away still takes its part of the picture, not a smear.
+    const int sx = start % gx, sy = start / gx;
+    std::vector<float> raw(cells, 1);
+    for (int y = 0; y < gy; y++) for (int x = 0; x < gx; x++) {
+        if (s.chosen[(size_t)y * gx + x] > 1e29f) continue;
+        int dx = x - sx, dy = y - sy, steps = abs(dx) > abs(dy) ? abs(dx) : abs(dy);
+        if (!steps) continue;
+        float straight = sqrtf((float)(dx * dx + dy * dy)) * cell, part = straight / steps, along = 0, prev = s.chosen[start];
+        for (int k = 1; k <= steps; k++) {
+            int cx = sx + dx * k / steps, cy = sy + dy * k / steps;
+            float h = s.chosen[(size_t)cy * gx + cx], d = 0;
+            if (h < 1e29f) { d = h - prev; prev = h; if (fabsf(d) > part * 4) d = 0; }
+            along += sqrtf(part * part + d * d);
+        }
+        raw[(size_t)y * gx + x] = fminf(along / straight, 2.5f);
+    }
+    // Rivets and edges are no reason for a jump in the picture: the stretch is smoothed wide, so the sticker's edges stay smooth.
+    std::vector<float> sum(cells), weight(cells), sum2(cells), weight2(cells);
+    for (size_t i = 0; i < cells; i++) { bool on = s.chosen[i] < 1e29f; sum[i] = on ? raw[i] : 0; weight[i] = on ? 1.f : 0; }
+    const int R = 10;
+    for (int pass = 0; pass < 2; pass++) {
+        for (int y = 0; y < gy; y++) for (int x = 0; x < gx; x++) {
+            float a = 0, b = 0;
+            for (int d = -R; d <= R; d++) { int c = x + d; if (c >= 0 && c < gx) { a += sum[(size_t)y * gx + c]; b += weight[(size_t)y * gx + c]; } }
+            sum2[(size_t)y * gx + x] = a; weight2[(size_t)y * gx + x] = b;
+        }
+        for (int y = 0; y < gy; y++) for (int x = 0; x < gx; x++) {
+            float a = 0, b = 0;
+            for (int d = -R; d <= R; d++) { int c = y + d; if (c >= 0 && c < gy) { a += sum2[(size_t)c * gx + x]; b += weight2[(size_t)c * gx + x]; } }
+            sum[(size_t)y * gx + x] = a; weight[(size_t)y * gx + x] = b;
+        }
+    }
+    for (size_t i = 0; i < cells; i++) s.stretch[i] = weight[i] > 0 ? sum[i] / weight[i] : 1;
+}
+// where a point of the surface falls on the sticker; false = it does not
+bool on_sticker(const StickerImage &s, const float *P, float look, float &u, float &v) {
+    if (look < .25f || s.levels.empty()) return false;
+    float d[3] = {P[0] - s.c[0], P[1] - s.c[1], P[2] - s.c[2]};
+    float a = dot3(d, s.e1), b = dot3(d, s.e2);
+    if (fabsf(a) >= s.half_w || fabsf(b) >= s.half_h) return false;
+    int x = (int)((a + s.half_w) / s.cell), y = (int)((b + s.half_h) / s.cell);
+    float depth = dot3(d, s.n), slope = sqrtf(fmaxf(0, 1 - look * look)) / look, room = s.cell * (1.5f + 2 * slope), nearest = 1e30f;
+    for (int dy = -1; dy <= 1; dy++) for (int dx = -1; dx <= 1; dx++) {
+        int cx = x + dx, cy = y + dy;
+        if (cx < 0 || cy < 0 || cx >= s.gx || cy >= s.gy) continue;
+        const float *h = &s.levels[((size_t)cy * s.gx + cx) * STICKER_LAYERS];
+        for (int k = 0; k < STICKER_LAYERS; k++) {
+            if (h[k] > 1e29f) continue;
+            float off = fabsf(h[k] - depth) + (dx || dy ? s.cell * .5f : 0);
+            if (off < nearest) nearest = off;
+        }
+    }
+    if (nearest > room) return false;
+    float fx = (a + s.half_w) / s.cell - .5f, fy = (b + s.half_h) / s.cell - .5f;
+    int x0 = (int)floorf(fx), y0 = (int)floorf(fy);
+    fx -= x0; fy -= y0;
+    auto stretch_at = [&](int cx, int cy) {
+        cx = cx < 0 ? 0 : cx >= s.gx ? s.gx - 1 : cx; cy = cy < 0 ? 0 : cy >= s.gy ? s.gy - 1 : cy;
+        return s.stretch[(size_t)cy * s.gx + cx];
+    };
+    float k = (stretch_at(x0, y0) * (1 - fx) + stretch_at(x0 + 1, y0) * fx) * (1 - fy) + (stretch_at(x0, y0 + 1) * (1 - fx) + stretch_at(x0 + 1, y0 + 1) * fx) * fy;
+    u = a * k / (2 * s.half_w) + .5f;
+    v = b * k / (2 * s.half_h) + .5f;
+    return u >= 0 && u < 1 && v >= 0 && v < 1;
+}
+// Worn paint: patches of it gone, by a noise of three sizes over the picture.
+float wear_noise(float u, float v) {
+    auto hash = [](int x, int y) { uint32_t h = (uint32_t)x * 374761393u + (uint32_t)y * 668265263u; h = (h ^ h >> 13) * 1274126177u; return (float)((h ^ h >> 16) & 0xffff) / 65535.f; };
+    float sum = 0, weight = 0, amp = 1, scale = 11;
+    for (int o = 0; o < 4; o++, amp *= .55f, scale *= 2.3f) {
+        float x = u * scale, y = v * scale;
+        int ix = (int)floorf(x), iy = (int)floorf(y);
+        float fx = x - ix, fy = y - iy;
+        fx = fx * fx * (3 - 2 * fx); fy = fy * fy * (3 - 2 * fy);
+        float a = hash(ix, iy), b = hash(ix + 1, iy), c = hash(ix, iy + 1), d = hash(ix + 1, iy + 1);
+        sum += amp * ((a * (1 - fx) + b * fx) * (1 - fy) + (c * (1 - fx) + d * fx) * fy);
+        weight += amp;
+    }
+    return sum / weight;
+}
+void sticker_pixel(const StickerImage &s, float u, float v, uint8_t io[4]) {
+    CamoSettings blend;
+    blend.opacity = s.opacity;
+    if (s.wear > .001f) {
+        float k = (wear_noise(u, v) - (s.wear * .75f + .12f)) / .1f + .5f;
+        k = k < 0 ? 0 : k > 1 ? 1 : k;
+        blend.opacity *= k * k * (3 - 2 * k);
+    }
+    uint8_t base[4] = {io[0], io[1], io[2], io[3]};
+    camo_blend(s.pic->px.data(), s.pic->w, s.pic->h, u, v, base, blend, io);
+}
+// Stickers over a texel, only those in one place of the vehicle: what both sides share would show it twice.
+void stick(const VehicleMap &pr, size_t at, const std::vector<StickerImage> &list, uint8_t io[4]) {
+    if (list.empty() || pr.both[at]) return;
+    const float *P = &pr.pos[at * 3];
+    const signed char *N = &pr.normal[at * 3];
+    for (const StickerImage &s : list) {
+        float u, v, look = (N[0] * s.n[0] + N[1] * s.n[1] + N[2] * s.n[2]) / 127.f;
+        if (on_sticker(s, P, look, u, v)) sticker_pixel(s, u, v, io);
+    }
+}
+Placement place_on(const VehicleMap &pr, const Pattern &p) { return place_picture(pr.lo, pr.hi, p.w ? p.w : 1, p.h ? p.h : 1, p.s); }
 bool on_picture(const Placement &l, const float *P, float &u, float &v) {
     float a = P[0] - l.cx, b = fabsf(P[1] - l.cy) + l.top - P[2];
     if (!l.through) b -= l.height / 2;
@@ -931,7 +1448,7 @@ void *variant_open(unsigned char *self, unsigned mode) {
     }
     return r;
 }
-void free_projection(VehicleMap *p) { delete p; }
+void free_projection(VehicleMap *) {}               // the maps stay in make_projection's cache
 // Which model a texture belongs to: every material of the game's vehicles, read once. The repository is a std::map of
 // file names (root at [[1556ee8]+8]; node: +0 left, +0x10 right, +0x19 nil, +0x20 the name); its lock is 1556ec0.
 constexpr uintptr_t G_REPOSITORY = 0x1556ee8, G_REPOSITORY_LOCK = 0x1556ec0;
@@ -984,32 +1501,60 @@ std::vector<std::string> models_of_texture(std::string stem) {
     }
     return found;
 }
-bool make_projection(const std::string &file, const unsigned char *f, size_t n, const std::string &model, VehicleMap *&out) {
+bool make_projection(const std::string &file, const unsigned char *f, size_t n, const std::string &model, std::vector<StickerImage> &stickers, VehicleMap *&out) {
     uint32_t h, w;
     if (n < 128) return false;
     memcpy(&h, f + 12, 4); memcpy(&w, f + 16, 4);
     if (w > 4096 || h > 4096) return false;
     size_t at = file.find("/texture/common/");
     if (at == std::string::npos) return false;
-    std::string stem = stem_of(file.c_str(), file.size());
+    std::string stem = undamaged(stem_of(file.c_str(), file.size()));
     // several models can use a texture, some only for a few parts: the one that covers most of it, if it isn't known
     std::vector<std::string> list;
     if (!model.empty()) list.push_back(model);
     else list = models_of_texture(stem);
-    std::unique_ptr<Model> best;
+    // A vehicle's model is read once, the place of a texture's texels worked out once: the plain, _x and _xx textures of a
+    // vehicle and all its camouflages use the same ones. The caller holds paint_lock.
+    struct Read { std::string name; std::shared_ptr<Model> m; std::vector<unsigned char> seen; };
+    static std::vector<std::shared_ptr<Read>> models_read;
+    struct Baked { std::string key; std::unique_ptr<VehicleMap> map; };
+    static Baked baked[2];
+    static int baked_next;
+    std::shared_ptr<Read> best;
     int most = 0, layer = -1, tried = 0;
-    for (const auto &m : list) {
+    for (const auto &name : list) {
         if (++tried > 16) break;
-        std::unique_ptr<Model> p(new Model);
-        if (!load_model(m, *p)) continue;
-        int l = (int)(std::find(p->stems.begin(), p->stems.end(), stem) - p->stems.begin()), count = 0;
-        for (const Triangle &t : p->all) count += t.layer == l;
-        if (l < (int)p->stems.size() && count > most) { most = count; layer = l; best = std::move(p); }
+        std::shared_ptr<Read> r;
+        for (auto &e : models_read) if (e->name == name) r = e;
+        if (!r) {
+            r = std::make_shared<Read>();
+            r->name = name;
+            r->m = std::make_shared<Model>();
+            if (!load_model(name, *r->m)) continue;
+            if (models_read.size() >= 6) models_read.erase(models_read.begin());
+            models_read.push_back(r);
+        }
+        int l = (int)(std::find(r->m->stems.begin(), r->m->stems.end(), stem) - r->m->stems.begin()), count = 0;
+        for (const Triangle &t : r->m->all) count += t.layer == l;
+        if (l < (int)r->m->stems.size() && count > most) { most = count; layer = l; best = r; }
     }
     if (!best) { rc_log("camo: no model for %s: the picture goes on as a pattern", stem.c_str()); return false; }
-    VehicleMap *r = new VehicleMap;
-    r->w = w; r->h = h;
-    bake_layer(*r, *best, seen_of(*best), layer);
+    if (best->seen.empty()) best->seen = seen_of(*best->m);
+    char size[32];
+    snprintf(size, sizeof size, "|%ux%u", w, h);
+    std::string key = best->name + "|" + stem + size;
+    VehicleMap *r = nullptr;
+    for (auto &b : baked) if (b.key == key) r = b.map.get();
+    if (!r) {
+        Baked &b = baked[baked_next];
+        baked_next = (baked_next + 1) % 2;
+        b.key = key;
+        b.map.reset(new VehicleMap);
+        r = b.map.get();
+        r->w = w; r->h = h;
+        bake_layer(*r, *best->m, best->seen, layer);
+    }
+    for (StickerImage &s : stickers) sticker_lay(s, *best->m, best->seen);
     out = r;
     return true;
 }
@@ -1069,6 +1614,39 @@ extern "C" int camo_open(void *, unsigned, void *(*prev)(void *, unsigned), void
     return 0;
 }
 
+// Every texture of every camouflage set, with its damaged versions, is painted here, in the background, in the menus. A
+// vehicle coming into a battle then finds them ready: painting at that moment stalls the game.
+volatile LONG warming;
+DWORD WINAPI warm_thread(LPVOID) {
+    SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_BELOW_NORMAL);
+    AcquireSRWLockShared(&published_lock);
+    std::vector<Published> list = published;
+    ReleaseSRWLockShared(&published_lock);
+    DWORD t0 = GetTickCount();
+    int done = 0;
+    for (const Published &e : list) for (const std::string &stem : e.all) {
+        if (stem.find("track") != std::string::npos) continue;
+        for (const char *end : {"", "_x", "_xx"}) {
+            std::string file = texture_file("/texture/common/" + stem + end);
+            std::vector<unsigned char> bytes;
+            if (file.empty() || !read_game_file(file, bytes)) continue;
+            painted_of(file, e.token, bytes.data(), bytes.size());
+            done++;
+        }
+    }
+    if (done) rc_log("camo: %d textures painted ahead, %lu ms", done, GetTickCount() - t0);
+    InterlockedExchange(&warming, 0);
+    return 0;
+}
+void warm_start() {
+    static DWORD started;
+    if (!started) started = GetTickCount();
+    if (!open_prev || GetTickCount() - started < 8000) return;      // the game's files first
+    if (InterlockedCompareExchange(&warming, 1, 0)) return;
+    InterlockedExchange(&warm_needed, 0);
+    HANDLE h = CreateThread(nullptr, 1 << 20, warm_thread, nullptr, 0, nullptr);
+    if (h) CloseHandle(h); else InterlockedExchange(&warming, 0);
+}
 // [debug] camo_selftest=1 in goh_snapshots.ini: in the menu, what a vehicle would do with our variant, without a battle
 void selftest() {
     std::string token = "gohcamoselftest";
@@ -1161,17 +1739,39 @@ struct Layer {
 };
 struct Preview {
     Model m;
+    std::vector<unsigned char> seen;
     std::string model;
     std::vector<std::shared_ptr<Layer>> layers;
     std::vector<std::string> all, main;
+    size_t shared = 0, single = 0;                    // texels on both sides / in one place: for the log
 };
 // a DDS's first level, DXT1 and DXT5 as all the vehicles have
 bool decode_dds(const std::vector<unsigned char> &f, Layer &l) {
     if (f.size() < 128 || memcmp(f.data(), "DDS ", 4)) return false;
-    uint32_t h, w, four;
-    memcpy(&h, &f[12], 4); memcpy(&w, &f[16], 4); memcpy(&four, &f[84], 4);
-    int size = four == 0x31545844 ? 8 : four == 0x35545844 ? 16 : 0;
-    if (!size || !w || !h || w > 4096 || h > 4096) return false;
+    uint32_t h, w, four, pixel_bits;
+    memcpy(&h, &f[12], 4); memcpy(&w, &f[16], 4); memcpy(&four, &f[84], 4); memcpy(&pixel_bits, &f[88], 4);
+    int size = four == 0x31545844 ? 8 : four == 0x35545844 || four == 0x33545844 ? 16 : 0;
+    if (!w || !h || w > 4096 || h > 4096) return false;
+    if (!four && pixel_bits == 32) {                  // plain pixels
+        uint32_t mask[4];
+        memcpy(mask, &f[92], 16);
+        if (!mask[0] || !mask[1] || !mask[2] || 128 + (size_t)w * h * 4 > f.size()) return false;
+        int sr = shift_of(mask[0]), sg = shift_of(mask[1]), sb = shift_of(mask[2]), sa = shift_of(mask[3]);
+        l.w = w; l.h = h;
+        l.rgba.resize((size_t)w * h * 4);
+        double all = 0;
+        for (size_t i = 0; i < (size_t)w * h; i++) {
+            uint32_t v;
+            memcpy(&v, &f[128 + i * 4], 4);
+            unsigned char *o = &l.rgba[i * 4];
+            o[0] = v >> sr & 255; o[1] = v >> sg & 255; o[2] = v >> sb & 255; o[3] = mask[3] ? v >> sa & 255 : 255;
+            all += o[0] * .3 + o[1] * .59 + o[2] * .11;
+        }
+        l.average = (float)(all / ((double)w * h));
+        if (l.average < 1) l.average = 1;
+        return true;
+    }
+    if (!size) return false;
     int bw = (w + 3) / 4, bh = (h + 3) / 4;
     if (128 + (size_t)bw * bh * size > f.size()) return false;
     l.w = w; l.h = h;
@@ -1181,7 +1781,10 @@ bool decode_dds(const std::vector<unsigned char> &f, Layer &l) {
         const unsigned char *b = &f[128 + ((size_t)by * bw + bx) * size];
         int alpha[8];
         uint64_t abits = 0;
-        if (size == 16) {
+        bool sharp = four == 0x33545844;              // DXT3: four bits of alpha per pixel
+        const unsigned char *sharp_alpha = b;
+        if (size == 16 && sharp) b += 8;
+        else if (size == 16) {
             alpha[0] = b[0]; alpha[1] = b[1];
             for (int i = 2; i < 8; i++) alpha[i] = alpha[0] > alpha[1] ? ((8 - i) * alpha[0] + (i - 1) * alpha[1]) / 7 :
                 i < 6 ? ((6 - i) * alpha[0] + (i - 1) * alpha[1]) / 5 : i == 6 ? 0 : 255;
@@ -1202,7 +1805,7 @@ bool decode_dds(const std::vector<unsigned char> &f, Layer &l) {
             int k = bits >> (2 * i) & 3;
             unsigned char *o = &l.rgba[((size_t)y * w + x) * 4];
             o[0] = (unsigned char)pal[k][0]; o[1] = (unsigned char)pal[k][1]; o[2] = (unsigned char)pal[k][2];
-            o[3] = size == 16 ? (unsigned char)alpha[abits >> (3 * i) & 7] : 255;
+            o[3] = sharp ? (unsigned char)((sharp_alpha[i / 2] >> (i & 1) * 4 & 15) * 17) : size == 16 ? (unsigned char)alpha[abits >> (3 * i) & 7] : 255;
             sum += pal[k][0] * .3 + pal[k][1] * .59 + pal[k][2] * .11;
         }
     }
@@ -1215,7 +1818,8 @@ std::shared_ptr<Preview> load_preview(const std::string &mdl) {
     auto p = std::make_shared<Preview>();
     p->model = mdl;
     if (!load_model(mdl, p->m)) return nullptr;
-    std::vector<unsigned char> seen = seen_of(p->m);
+    std::vector<unsigned char> &seen = p->seen;
+    seen = seen_of(p->m);
     std::vector<int> count(p->m.stems.size());
     for (const Triangle &t : p->m.all) if (t.layer >= 0) count[t.layer]++;
     int most = 0;
@@ -1226,15 +1830,18 @@ std::shared_ptr<Preview> load_preview(const std::string &mdl) {
         p->layers.push_back(l);
         std::string file = texture_file("/texture/common/" + l->stem);
         std::vector<unsigned char> bytes;
-        if (file.empty() || !read_game_file(file, bytes) || !decode_dds(bytes, *l)) { rc_log("camo: %s not shown", l->stem.c_str()); continue; }
+        bool got = !file.empty() && read_game_file(file, bytes);
+        if (!got || !decode_dds(bytes, *l)) { rc_log("camo: %s not shown: file \"%s\", read %d, %d bytes", l->stem.c_str(), file.c_str(), got, (int)bytes.size()); continue; }
         if (l->stem.find("track") != std::string::npos || !is_camo_texture(("_vehicle/" + l->stem).c_str(), l->stem.size() + 9)) continue;
         p->all.push_back(l->stem);
         if (count[i] * 10 >= most * 3) p->main.push_back(l->stem);
         l->map.w = l->w > 1024 ? 1024 : l->w;
         l->map.h = l->h > 1024 ? 1024 : l->h;
         bake_layer(l->map, p->m, seen, (int)i);
+        for (size_t k = 0; k < l->map.kind.size(); k++) if (l->map.kind[k] == 1) { if (l->map.both[k]) p->shared++; else p->single++; }
     }
-    rc_log("camo: %s for the tab: %d triangles, %d textures, %lu ms", mdl.c_str(), (int)p->m.all.size(), (int)p->layers.size(), GetTickCount() - t0);
+    rc_log("camo: %s for the tab: %d triangles, %d textures, %lu ms, both sides share %d%% of the outside", mdl.c_str(), (int)p->m.all.size(),
+           (int)p->layers.size(), GetTickCount() - t0, (int)(p->shared * 100 / (p->shared + p->single + 1)));
     return p;
 }
 // a texture coordinate as a row or column; the models have some that are no numbers
@@ -1252,12 +1859,15 @@ struct Buffers {
     std::vector<float> depth, bary;
     std::vector<Screen> screen;
     std::vector<unsigned char> out;
+    std::vector<float> pick;                          // per pixel of the view: place and normal, x 1e30 for nothing
 };
 struct Band {
     const Preview *p; const Pattern *pic; const CamoSettings *s; Placement place;
+    const std::vector<StickerImage> *stickers;
     Buffers *b; int w, h, ss, W, y0, y1;
     float light[3];
 };
+bool debug_kinds;
 DWORD WINAPI draw_band(LPVOID arg) {
     const Band &B = *(const Band *)arg;
     const Preview &p = *B.p;
@@ -1304,7 +1914,11 @@ DWORD WINAPI draw_band(LPVOID arg) {
         for (int x = 0; x < w; x++) {
             size_t at = (size_t)y * w + x;
             unsigned char *o = &line[x * 3];
-            if (buf.ids[at] < 0) { o[0] = o[1] = o[2] = (unsigned char)(46 - 16 * y / h); continue; }
+            if (buf.ids[at] < 0) {
+                o[0] = o[1] = o[2] = (unsigned char)(46 - 16 * y / h);
+                if (y % B.ss == 0 && x % B.ss == 0) buf.pick[((size_t)(y / B.ss) * B.W + x / B.ss) * 6] = 1e30f;
+                continue;
+            }
             const Triangle &t = p.m.all[buf.ids[at]];
             float a = buf.bary[at * 2], b = buf.bary[at * 2 + 1], c = 1 - a - b;
             float nx = a * t.n[0][0] + b * t.n[1][0] + c * t.n[2][0], ny = a * t.n[0][1] + b * t.n[1][1] + c * t.n[2][1], nz = a * t.n[0][2] + b * t.n[1][2] + c * t.n[2][2];
@@ -1316,19 +1930,38 @@ DWORD WINAPI draw_band(LPVOID arg) {
                 float tu = a * t.uv[0][0] + b * t.uv[1][0] + c * t.uv[2][0], tv = a * t.uv[0][1] + b * t.uv[1][1] + c * t.uv[2][1];
                 const unsigned char *e = &l->rgba[((size_t)cell(tv, l->h) * l->w + cell(tu, l->w)) * 4];
                 memcpy(col, e, 3);
-                if (pic && !l->map.kind.empty()) {
+                if (!l->map.kind.empty() && (pic || !B.stickers->empty())) {
                     size_t m = (size_t)cell(tv, l->map.h) * l->map.w + cell(tu, l->map.w);
-                    float pu, pv;
-                    if (l->map.kind[m] == 1 && on_picture(B.place, texel_place(l->map, m), pu, pv)) {
+                    if (l->map.kind[m] == 1) {
+                        float pu, pv;
                         float lum = e[0] * .3f + e[1] * .59f + e[2] * .11f, keep = lum / l->average;
                         keep = keep < .45f ? .45f : keep > 1.6f ? 1.6f : keep;
                         uint8_t flat[4], out[4];
                         for (int i = 0; i < 3; i++) { float f = e[i] / keep; flat[i] = (uint8_t)(f > 255 ? 255 : f); }
                         flat[3] = 255;
-                        camo_blend(pic->px.data(), pic->w, pic->h, pu, pv, flat, *B.s, out);
+                        memcpy(out, flat, 4);
+                        if (pic && on_picture(B.place, texel_place(l->map, m), pu, pv)) camo_blend(pic->px.data(), pic->w, pic->h, pu, pv, flat, *B.s, out);
+                        if (!l->map.both[m] && !t.gun) for (const StickerImage &k : *B.stickers) {      // exact: per pixel, not per texel
+                            float place[3], su, sv, look = (nx * k.n[0] + ny * k.n[1] + nz * k.n[2]) / nl;
+                            for (int i = 0; i < 3; i++) place[i] = a * t.p[0][i] + b * t.p[1][i] + c * t.p[2][i];
+                            if (on_sticker(k, place, look, su, sv)) sticker_pixel(k, su, sv, out);
+                        }
                         for (int i = 0; i < 3; i++) { float f = out[i] * keep; col[i] = (unsigned char)(f > 255 ? 255 : f); }
                     }
                 }
+            }
+            if (debug_kinds && l) {                   // self test: red not outside, blue used at several places, green both sides
+                float tu = a * t.uv[0][0] + b * t.uv[1][0] + c * t.uv[2][0], tv = a * t.uv[0][1] + b * t.uv[1][1] + c * t.uv[2][1];
+                int k = l->map.kind.empty() ? 9 : 0;
+                size_t m = 0;
+                if (!k) { m = (size_t)cell(tv, l->map.h) * l->map.w + cell(tu, l->map.w); k = l->map.kind[m]; if (k == 1 && l->map.both[m]) k = 3; }
+                static const unsigned char TINT[4][3] = {{220, 40, 40}, {120, 120, 120}, {40, 70, 230}, {40, 200, 70}};
+                if (k < 4) memcpy(col, TINT[k], 3);
+            }
+            if (y % B.ss == 0 && x % B.ss == 0) {     // where the mouse would be on the vehicle
+                float *k = &buf.pick[((size_t)(y / B.ss) * B.W + x / B.ss) * 6];
+                for (int i = 0; i < 3; i++) k[i] = a * t.p[0][i] + b * t.p[1][i] + c * t.p[2][i];
+                k[3] = nx / nl; k[4] = ny / nl; k[5] = nz / nl;
             }
             for (int i = 0; i < 3; i++) { float f = col[i] * shade; o[i] = (unsigned char)(f > 255 ? 255 : f); }
         }
@@ -1345,7 +1978,7 @@ DWORD WINAPI draw_band(LPVOID arg) {
     }
     return 0;
 }
-void render_view(Buffers &buf, const Preview &p, const Pattern *pic, const CamoSettings &s, int W, int H, const View3D &view, bool fine) {
+void render_view(Buffers &buf, const Preview &p, const Pattern *pic, const std::vector<StickerImage> &stickers, const CamoSettings &s, int W, int H, const View3D &view, bool fine) {
     const int ss = fine ? 2 : 1, w = W * ss, h = H * ss;
     float yaw = view.yaw * .017453292f, pitch = view.pitch * .017453292f;
     float eye[3] = {cosf(pitch) * cosf(yaw), cosf(pitch) * sinf(yaw), sinf(pitch)};
@@ -1358,6 +1991,7 @@ void render_view(Buffers &buf, const Preview &p, const Pattern *pic, const CamoS
     float scale = (w < h * 1.6f ? w / 1.6f : h) / (2 * radius) * 1.45f * view.zoom;
     buf.ids.resize((size_t)w * h); buf.depth.resize((size_t)w * h); buf.bary.resize((size_t)w * h * 2);
     buf.out.resize((size_t)W * H * 4);
+    buf.pick.resize((size_t)W * H * 6);
     buf.screen.resize(p.m.all.size());
     for (size_t n = 0; n < p.m.all.size(); n++) for (int i = 0; i < 3; i++) {
         const float *v = p.m.all[n].p[i];
@@ -1375,7 +2009,7 @@ void render_view(Buffers &buf, const Preview &p, const Pattern *pic, const CamoS
     int rows = (H + n - 1) / n * ss, started = 0;
     for (int i = 0; i < n && i * rows < h; i++) {
         Band &b = bands[i];
-        b = {&p, pic, &s, Placement(), &buf, w, h, ss, W, i * rows, i * rows + rows < h ? i * rows + rows : h, {}};
+        b = {&p, pic, &s, Placement(), &stickers, &buf, w, h, ss, W, i * rows, i * rows + rows < h ? i * rows + rows : h, {}};
         if (pic) b.place = place_picture(p.m.lo, p.m.hi, pic->w, pic->h, s);
         for (int k = 0; k < 3; k++) b.light[k] = eye[k] * .55f + r[k] * .35f + u[k] * .6f;
         threads[started] = i + 1 < n && (i + 1) * rows < h ? CreateThread(nullptr, 64 << 10, draw_band, &b, 0, nullptr) : nullptr;
@@ -1445,17 +2079,32 @@ void want_model(const std::string &m) {
         if (t) CloseHandle(t); else { AcquireSRWLockExclusive(&lock); loader_running = false; ReleaseSRWLockExclusive(&lock); }
     }
 }
-struct Job { std::shared_ptr<Preview> p; std::shared_ptr<Pattern> pic; CamoSettings s; int w, h; View3D view; bool fine; };
+struct Job { std::shared_ptr<Preview> p; std::shared_ptr<Pattern> pic; std::vector<StickerImage> stickers; CamoSettings s; int w, h; View3D view; bool fine; };
 volatile LONG drawing;
 std::vector<unsigned char> frame;
-int frame_w, frame_h;
+std::vector<float> frame_pick, view_pick;              // the place under each pixel: drawn / on screen
+int frame_w, frame_h, view_w, view_h;
 bool frame_new;
 DWORD WINAPI draw_job(LPVOID arg) {
     std::unique_ptr<Job> j((Job *)arg);
     static Buffers buf;
-    render_view(buf, *j->p, j->pic.get(), j->s, j->w, j->h, j->view, j->fine);
+    static std::vector<StickerImage> laid;
+    static const Preview *laid_on;
+    if (laid_on != j->p.get()) { laid.clear(); laid_on = j->p.get(); }
+    for (StickerImage &s : j->stickers) {
+        bool same = false;
+        for (const StickerImage &o : laid)
+            if (!memcmp(o.c, s.c, sizeof s.c) && !memcmp(o.n, s.n, sizeof s.n) && !memcmp(o.e1, s.e1, sizeof s.e1) && o.half_w == s.half_w && o.half_h == s.half_h) {
+                s.gx = o.gx; s.gy = o.gy; s.cell = o.cell; s.chosen = o.chosen; s.levels = o.levels; s.stretch = o.stretch; same = true;
+                break;
+            }
+        if (!same) sticker_lay(s, j->p->m, j->p->seen);
+    }
+    laid = j->stickers;
+    render_view(buf, *j->p, j->pic.get(), j->stickers, j->s, j->w, j->h, j->view, j->fine);
     AcquireSRWLockExclusive(&lock);
     frame = buf.out; frame_w = j->w; frame_h = j->h; frame_new = true;
+    frame_pick.swap(buf.pick);
     ReleaseSRWLockExclusive(&lock);
     InterlockedExchange(&drawing, 0);
     return 0;
@@ -1466,7 +2115,7 @@ void upload_frame(ID3D11Device *dev) {
     bool fresh = frame_new;
     std::vector<unsigned char> f;
     int w = frame_w, h = frame_h;
-    if (fresh) { f = std::move(frame); frame_new = false; }
+    if (fresh) { f = std::move(frame); frame_new = false; view_pick.swap(frame_pick); view_w = w; view_h = h; }
     ReleaseSRWLockExclusive(&lock);
     if (!fresh || f.empty()) return;
     D3D11_TEXTURE2D_DESC desc = {}; desc.Width = w; desc.Height = h; desc.MipLevels = desc.ArraySize = 1;
@@ -1485,6 +2134,24 @@ std::string current;                                   // the model open in the 
 CamoSettings fresh_settings;
 View3D view3d;
 bool unsaved;
+int sticker_at = -1;                                   // the sticker chosen in the list
+bool import_sticker;                                   // the picture being imported is for a new sticker
+bool add_soft;                                         // new stickers start soft
+struct StickerPicture { int id, soft; std::shared_ptr<Pattern> pic; };
+std::vector<StickerPicture> sticker_pictures;
+std::shared_ptr<Pattern> sticker_picture(int id, float soft) {
+    int step = (int)(soft * 50 + .5f);                // a slider's small moves share one blur
+    for (auto &e : sticker_pictures) if (e.id == id && e.soft == step) return e.pic;
+    auto p = softened(load_picture(id), step / 50.f);
+    if (sticker_pictures.size() > 24) sticker_pictures.erase(sticker_pictures.begin());
+    sticker_pictures.push_back({id, step, p});
+    return p;
+}
+const float *picked(int x, int y) {                   // the place under a pixel of the view
+    if (x < 0 || y < 0 || x >= view_w || y >= view_h || view_pick.size() < (size_t)view_w * view_h * 6) return nullptr;
+    const float *k = &view_pick[((size_t)y * view_w + x) * 6];
+    return k[0] > 1e29f ? nullptr : k;
+}
 Assign *assign_of(const std::string &m) {
     for (auto &a : assigns) if (a.model == m) return &a;
     return nullptr;
@@ -1500,17 +2167,56 @@ void open_vehicle(const std::string &m) {
     want_model(m);
     Assign *a = assign_of(m);
     selected = a ? preset_of(a->picture) : -1;
+    sticker_at = -1;
     load_image(selected);
 }
 void put_picture(int index) {                         // on the vehicle in the tab; -1 takes it off
     Assign *a = assign_of(current);
     if (index < 0) {
-        if (a) assigns.erase(assigns.begin() + (a - assigns.data()));
+        if (a && a->stickers.empty()) assigns.erase(assigns.begin() + (a - assigns.data()));
+        else if (a) a->picture = -1;
     } else if (a) a->picture = presets[index].id;
-    else if (shown) assigns.push_back({current, presets[index].id, CamoSettings(), shown->all, shown->main});
-    selected = assign_of(current) ? index : -1;
+    else if (shown) assigns.push_back({current, presets[index].id, CamoSettings(), shown->all, shown->main, {}});
+    selected = index;
     load_image(selected);
     save();
+}
+// a new sticker, on what is nearest to the middle of the view
+void add_sticker(int picture) {
+    if (!shown) return;
+    Assign *a = assign_of(current);
+    if (!a) { assigns.push_back({current, -1, CamoSettings(), shown->all, shown->main, {}}); a = &assigns.back(); }
+    if (a->stickers.size() >= 64) return;
+    const float *at = nullptr;
+    int best = 1 << 30;
+    for (int y = 0; y < view_h; y += 4) for (int x = 0; x < view_w; x += 4) {
+        int d = abs(x - view_w / 2) + abs(y - view_h / 2);
+        if (d < best) if (const float *k = picked(x, y)) { best = d; at = k; }
+    }
+    Sticker s;
+    s.picture = picture;
+    for (int i = 0; i < 3; i++) {
+        s.c[i] = at ? at[i] : (shown->m.lo[i] + shown->m.hi[i]) / 2;
+        s.n[i] = at ? at[3 + i] : i == 2;
+    }
+    s.size = (shown->m.hi[0] - shown->m.lo[0]) * .2f;
+    s.rotation = 0; s.opacity = 1;
+    s.soft = add_soft ? .4f : 0; s.wear = add_soft ? .2f : 0;
+    a->stickers.push_back(s);
+    sticker_at = (int)a->stickers.size() - 1;
+    dirty = true;
+    save();
+}
+// the folders of the game's files, as names
+const char *group_name(const std::string &k) {
+    static const char *const NAMES[][3] = {
+        {"eng", "Британия", "Britain"}, {"finland", "Финляндия", "Finland"}, {"generic", "Общая", "Generic"}, {"germany", "Германия", "Germany"},
+        {"usa", "США", "USA"}, {"ussr", "СССР", "USSR"}, {"japan", "Япония", "Japan"}, {"italy", "Италия", "Italy"}, {"france", "Франция", "France"},
+        {"btr", "Бронетранспортёры", "Armoured carriers"}, {"car", "Автомобили", "Cars"}, {"tank_light", "Лёгкие танки", "Light tanks"},
+        {"tank_medium", "Средние танки", "Medium tanks"}, {"tank_heavy", "Тяжёлые танки", "Heavy tanks"}, {"spg", "САУ", "Self-propelled guns"},
+    };
+    for (const auto &n : NAMES) if (k == n[0]) return TR(n[1], n[2]);
+    return k.c_str();
 }
 void vehicle_row(const Vehicle &v) {
     bool has = assign_of(v.model) != nullptr;
@@ -1537,12 +2243,12 @@ void vehicle_list() {
         const std::string &country = vehicles[i].country;
         size_t e = i;
         while (e < vehicles.size() && vehicles[e].country == country) e++;
-        if (ImGui::TreeNode(country.c_str())) {
+        if (ImGui::TreeNode(country.c_str(), "%s", group_name(country))) {
             for (size_t k = i; k < e;) {
                 const std::string &kind = vehicles[k].kind;
                 size_t ke = k;
                 while (ke < e && vehicles[ke].kind == kind) ke++;
-                if (ImGui::TreeNode(kind.c_str())) {
+                if (ImGui::TreeNode(kind.c_str(), "%s", group_name(kind))) {
                     for (size_t n = k; n < ke; n++) vehicle_row(vehicles[n]);
                     ImGui::TreePop();
                 }
@@ -1572,7 +2278,9 @@ void vehicle_view(ID3D11Device *device, const CamoSettings &s) {
     if (shown && dirty && InterlockedCompareExchange(&drawing, 1, 0) == 0) {
         dirty = false;
         plain = moving;
-        Job *j = new Job{shown, picture, s, w, h, view3d, !moving};
+        std::vector<StickerImage> images;
+        if (Assign *a = assign_of(current)) for (const Sticker &k : a->stickers) if (auto pic = sticker_picture(k.picture, k.soft)) images.push_back(sticker_image(k, pic));
+        Job *j = new Job{shown, picture, std::move(images), s, w, h, view3d, !moving};
         HANDLE t = CreateThread(nullptr, 1 << 20, draw_job, j, 0, nullptr);
         if (t) CloseHandle(t); else { delete j; InterlockedExchange(&drawing, 0); }
     }
@@ -1585,7 +2293,26 @@ void vehicle_view(ID3D11Device *device, const CamoSettings &s) {
     if (current.empty()) dl->AddText(ImVec2(a.x + 16, a.y + 16), IM_COL32(200, 200, 200, 255), TR("Выбери технику в списке слева", "Choose a vehicle on the left"));
     else if (loading || !shown) dl->AddText(ImVec2(a.x + 16, a.y + 16), IM_COL32(200, 200, 200, 255), TR("Загружаю модель...", "Loading the model..."));
     ImGuiIO &io = ImGui::GetIO();
-    if (ImGui::IsItemActive() && (io.MouseDelta.x || io.MouseDelta.y)) {
+    // on a sticker the mouse takes it: it follows the surface under the mouse; anywhere else it turns the vehicle
+    static bool carrying;
+    int mx = (int)((io.MousePos.x - a.x) * view_w / (b.x - a.x + 1)), my = (int)((io.MousePos.y - a.y) * view_h / (b.y - a.y + 1));
+    Assign *owner_of = assign_of(current);
+    if (ImGui::IsItemActivated()) {
+        carrying = false;
+        const float *k = picked(mx, my);
+        for (int i = owner_of && k ? (int)owner_of->stickers.size() - 1 : -1; i >= 0; i--) {
+            const Sticker &s = owner_of->stickers[i];
+            float d = 0;
+            for (int c = 0; c < 3; c++) d += (k[c] - s.c[c]) * (k[c] - s.c[c]);
+            if (sqrtf(d) < s.size * .6f) { sticker_at = i; carrying = true; break; }
+        }
+    }
+    if (ImGui::IsItemActive() && carrying && owner_of && sticker_at >= 0 && sticker_at < (int)owner_of->stickers.size()) {
+        if (const float *k = picked(mx, my)) {
+            Sticker &s = owner_of->stickers[sticker_at];
+            if (memcmp(s.c, k, sizeof s.c)) { memcpy(s.c, k, sizeof s.c); memcpy(s.n, k + 3, sizeof s.n); dirty = true; unsaved = true; }
+        }
+    } else if (ImGui::IsItemActive() && (io.MouseDelta.x || io.MouseDelta.y)) {
         view3d.yaw -= io.MouseDelta.x * .5f;
         view3d.pitch = fminf(85, fmaxf(-20, view3d.pitch + io.MouseDelta.y * .4f));
         dirty = true;
@@ -1594,7 +2321,7 @@ void vehicle_view(ID3D11Device *device, const CamoSettings &s) {
         view3d.zoom = fminf(6, fmaxf(.5f, view3d.zoom * (1 + io.MouseWheel * .1f)));
         dirty = true;
     }
-    ImGui::TextDisabled(TR("Левая кнопка: вращать. Колесо: приблизить. Гусеницы в просмотре не показаны.", "Left button: turn. Wheel: zoom. Tracks are not shown here."));
+    ImGui::TextDisabled(TR("Левая кнопка: вращать, на наклейке: двигать её. Колесо: приблизить.", "Left button: turn, on a sticker: move it. Wheel: zoom."));
 }
 void vehicle_settings() {
     const bool disable_import = importing || presets.size() >= 256;
@@ -1602,11 +2329,15 @@ void vehicle_settings() {
     if (ImGui::Button(TR("Загрузить PNG", "Import PNG"), ImVec2(-1,0))) {
         InterlockedExchange(&importing,1);
         HANDLE thread = CreateThread(nullptr, 4<<20, pick, nullptr, STACK_SIZE_PARAM_IS_A_RESERVATION, nullptr);
-        if (thread) CloseHandle(thread); else { InterlockedExchange(&importing,0); status = "Cannot open file picker"; }
+        if (thread) CloseHandle(thread); else { InterlockedExchange(&importing,0); status = TR("Не удалось открыть окно выбора файла", "Cannot open file picker"); }
     }
     if (disable_import) ImGui::EndDisabled();
     if (current.empty()) { if (!status.empty()) ImGui::TextWrapped("%s", status.c_str()); return; }
-    ImGui::TextWrapped("%s", current.substr(current.rfind('/') + 1).c_str());
+    {
+        std::string title = current.substr(current.rfind('/') + 1);
+        title.resize(title.size() > 4 ? title.size() - 4 : 0);        // without .mdl
+        ImGui::TextWrapped("%s", title.c_str());
+    }
     if (!shown) ImGui::BeginDisabled();
     const char *none = TR("Без камуфляжа", "No camouflage");
     if (ImGui::BeginCombo(TR("Камуфляж", "Camouflage"), selected >= 0 ? presets[selected].name.c_str() : none)) {
@@ -1620,7 +2351,7 @@ void vehicle_settings() {
     }
     if (!shown) ImGui::EndDisabled();
     Assign *a = assign_of(current);
-    if (a) {
+    if (a && a->picture >= 0) {
         auto &s = a->s;
         bool changed = false;
         ImGui::SeparatorText(TR("Положение", "Position"));
@@ -1636,11 +2367,64 @@ void vehicle_settings() {
         if (ImGui::Checkbox(TR("Продолжать за краями картинки", "Go on beyond its edges"), &rep)) { s.repeat = rep; changed = true; }
         ImGui::SeparatorText(TR("Цвет", "Colour"));
         changed |= ImGui::SliderFloat(TR("Непрозрачность", "Opacity"), &s.opacity, 0, 1, "%.2f");
-        changed |= ImGui::Combo(TR("Наложение", "Blend"), &s.blend, "Normal\0Multiply\0Overlay\0");
+        changed |= ImGui::Combo(TR("Наложение", "Blend"), &s.blend, TR("Обычное\0Умножение\0Перекрытие\0", "Normal\0Multiply\0Overlay\0"));
         if (ImGui::Button(TR("Сбросить настройки", "Reset settings"), ImVec2(-1,0))) { s = CamoSettings(); changed = true; }
         if (changed) { dirty = true; unsaved = true; }
         ImGui::Spacing();
         ImGui::TextWrapped("%s", TR("В бою камуфляж появится на твоей технике сам.", "In a battle your own vehicles get it by themselves."));
+    }
+    ImGui::SeparatorText(TR("Наклейки", "Stickers"));
+    a = assign_of(current);
+    if (a) {
+        bool changed = false;
+        for (int i = 0; i < (int)a->stickers.size(); i++) {
+            ImGui::PushID(1000 + i);
+            int pi = preset_of(a->stickers[i].picture);
+            char row[160];
+            snprintf(row, sizeof row, "%d. %s", i + 1, pi >= 0 ? presets[pi].name.c_str() : "?");
+            float del = ImGui::CalcTextSize("X").x + 20;
+            if (ImGui::Selectable(row, i == sticker_at, 0, ImVec2(ImGui::GetContentRegionAvail().x - del, 0))) sticker_at = i;
+            ImGui::SameLine();
+            bool gone = ImGui::SmallButton("X");
+            ImGui::PopID();
+            if (gone) {
+                a->stickers.erase(a->stickers.begin() + i);
+                if (sticker_at >= (int)a->stickers.size()) sticker_at = (int)a->stickers.size() - 1;
+                changed = true;
+                break;
+            }
+        }
+        if (sticker_at >= 0 && sticker_at < (int)a->stickers.size()) {
+            Sticker &k = a->stickers[sticker_at];
+            float big = shown ? shown->m.hi[0] - shown->m.lo[0] : 200;
+            changed |= ImGui::SliderFloat(TR("Размер наклейки", "Sticker size"), &k.size, big * .02f, big, "%.1f");
+            changed |= ImGui::SliderFloat(TR("Поворот наклейки", "Sticker rotation"), &k.rotation, -180, 180, "%.0f");
+            changed |= ImGui::SliderFloat(TR("Непрозрачность наклейки", "Sticker opacity"), &k.opacity, 0, 1, "%.2f");
+            changed |= ImGui::SliderFloat(TR("Мягкие края", "Soft edges"), &k.soft, 0, 1, "%.2f");
+            changed |= ImGui::SliderFloat(TR("Потёртость", "Wear"), &k.wear, 0, 1, "%.2f");
+        }
+        if (changed) { dirty = true; unsaved = true; }
+    }
+    ImGui::TextWrapped("%s", TR("Наклейка лежит только в одном месте. На деталях, где текстура общая для двух бортов, её не будет.", "A sticker is in one place only. It does not show on parts that share their texture between the two sides."));
+    bool can_add = shown && !importing && presets.size() < 256;
+    if (!can_add) ImGui::BeginDisabled();
+    if (ImGui::Button(TR("Добавить наклейку", "Add a sticker"), ImVec2(-1,0))) ImGui::OpenPopup("##sticker_from");
+    if (!can_add) ImGui::EndDisabled();
+    if (ImGui::BeginPopup("##sticker_from")) {
+        ImGui::Checkbox(TR("Мягкая наклейка: плавные края и лёгкий износ", "Soft sticker: gentle edges and a little wear"), &add_soft);
+        ImGui::Separator();
+        if (ImGui::Selectable(TR("Загрузить PNG...", "Import a PNG..."))) {
+            import_sticker = true;
+            InterlockedExchange(&importing,1);
+            HANDLE thread = CreateThread(nullptr, 4<<20, pick, nullptr, STACK_SIZE_PARAM_IS_A_RESERVATION, nullptr);
+            if (thread) CloseHandle(thread); else { InterlockedExchange(&importing,0); import_sticker = false; status = TR("Не удалось открыть окно выбора файла", "Cannot open file picker"); }
+        }
+        for (int i = 0; i < (int)presets.size(); i++) {
+            ImGui::PushID(i);
+            if (ImGui::Selectable(presets[i].name.c_str())) add_sticker(presets[i].id);
+            ImGui::PopID();
+        }
+        ImGui::EndPopup();
     }
     if (unsaved && !ImGui::IsAnyItemActive()) { unsaved = false; status.clear(); save(); }
     if (!status.empty()) ImGui::TextWrapped("%s", status.c_str());
@@ -1652,7 +2436,19 @@ extern "C" void camo_draw(ID3D11Device *device, void *window) {
     bool key = GetForegroundWindow() == owner && (GetAsyncKeyState(VK_SHIFT)&0x8000) && (GetAsyncKeyState(VK_F11)&0x8000);
     if (key && !was) floating = !floating; was = key;
     accept_import();
-    if (imported) { imported = false; if (!current.empty() && shown) put_picture(selected); else { selected = -1; load_image(-1); } }
+    if (importing == 0 && import_sticker && !imported) import_sticker = false;      // the file window was closed
+    if (imported) {
+        imported = false;
+        int fresh = selected;
+        if (import_sticker) {                         // the new picture is a sticker: the camouflage stays as it was
+            import_sticker = false;
+            Assign *was = assign_of(current);
+            selected = was ? preset_of(was->picture) : -1;
+            load_image(selected);
+            add_sticker(presets[fresh].id);
+        } else if (!current.empty() && shown) put_picture(selected);
+        else { selected = -1; load_image(-1); }
+    }
     Panel p; AcquireSRWLockShared(&lock); p = panel; ReleaseSRWLockShared(&lock);
     drawn = p.shown || floating;
     if (!drawn) return;
@@ -1663,7 +2459,7 @@ extern "C" void camo_draw(ID3D11Device *device, void *window) {
         ImGui::SetNextWindowBgAlpha(1);
         flags |= ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoCollapse;
     } else ImGui::SetNextWindowSize(ImVec2(1100, 680), ImGuiCond_FirstUseEver);
-    if (!ImGui::Begin("CAMOUFLAGE", p.shown ? nullptr : &floating, flags)) { ImGui::End(); return; }
+    if (!ImGui::Begin(TR("КАМУФЛЯЖ###goh_camo", "CAMOUFLAGE###goh_camo"), p.shown ? nullptr : &floating, flags)) { ImGui::End(); return; }
     float all = ImGui::GetContentRegionAvail().x;
     ImGui::BeginChild("vehicles", ImVec2(all * .22f, 0), true);
     vehicle_list();
@@ -1682,34 +2478,35 @@ extern "C" void camo_draw(ID3D11Device *device, void *window) {
 // the self test's look at the tab: a vehicle with the first picture, both ways over the sides, in goh_camo
 void preview_test() {
     if (presets.empty()) return;
-    const char *model = "/entity/-vehicle/ussr/tank_heavy/is2_44/is2_44.mdl";
-    std::shared_ptr<Preview> p = load_preview(model);
-    if (!p) { rc_log("camo selftest: no preview"); return; }
+    // camouflage on vehicles, as it is and as a map of the texels: red not outside, blue used at several places, green both sides
+    static const struct { const char *model; float yaw, pitch, zoom; } CASES[] = {
+        {"/entity/-vehicle/germany/btr/sdkfz251d_16/sdkfz251d_16.mdl", 300, 22, 1.3f},
+        {"/entity/-vehicle/ussr/tank_heavy/is2_45/is2_45.mdl", 300, 30, 1.3f},
+        {"/entity/-vehicle/usa/tank_light/m18_hellcat/m18_hellcat.mdl", 300, 30, 1.3f},
+        {"/entity/-vehicle/germany/tank_medium/stug3g/stug3g.mdl", 300, 30, 1.3f},
+    };
     load_image(0);
-    for (int through = 0; through < 2; through++) {
-        CamoSettings s;
-        s.through = through;
-        View3D v;
-        Buffers buf;
-        LARGE_INTEGER a, b, hz;
-        QueryPerformanceFrequency(&hz);
-        QueryPerformanceCounter(&a);
-        render_view(buf, *p, picture.get(), s, 720, 460, v, false);
-        QueryPerformanceCounter(&b);
-        rc_log("camo selftest: quick view %.1f ms", (b.QuadPart - a.QuadPart) * 1000. / hz.QuadPart);
-        QueryPerformanceCounter(&a);
-        render_view(buf, *p, picture.get(), s, 720, 460, v, true);
-        QueryPerformanceCounter(&b);
-        rc_log("camo selftest: fine view %.1f ms", (b.QuadPart - a.QuadPart) * 1000. / hz.QuadPart);
-        const std::vector<unsigned char> &f = buf.out;
-        wchar_t path[MAX_PATH];
-        swprintf(path, MAX_PATH, L"%s\\preview%d.ppm", folder, through);
-        FILE *d = _wfopen(path, L"wb");
-        if (!d) continue;
-        fprintf(d, "P6 720 460 255\n");
-        for (size_t i = 0; i < f.size(); i += 4) fwrite(&f[i], 1, 3, d);
-        fclose(d);
+    for (int i = 0; i < 4; i++) {
+        std::shared_ptr<Preview> p = load_preview(CASES[i].model);
+        if (!p) continue;
+        for (int look = 0; look < 2; look++) {
+            CamoSettings s;
+            View3D v;
+            v.yaw = CASES[i].yaw; v.pitch = CASES[i].pitch; v.zoom = CASES[i].zoom;
+            Buffers buf;
+            std::vector<StickerImage> none;
+            debug_kinds = look == 1;
+            render_view(buf, *p, picture.get(), none, s, 720, 460, v, true);
+            debug_kinds = false;
+            wchar_t path[MAX_PATH];
+            swprintf(path, MAX_PATH, L"%s\\preview%d.ppm", folder, i * 2 + look);
+            FILE *d = _wfopen(path, L"wb");
+            if (!d) continue;
+            fprintf(d, "P6 720 460 255\n");
+            for (size_t b = 0; b < buf.out.size(); b += 4) fwrite(&buf.out[b], 1, 3, d);
+            fclose(d);
+        }
     }
-    rc_log("camo selftest: stems %d, main %d", (int)p->all.size(), (int)p->main.size());
     load_image(-1);
+    rc_log("camo selftest: stems done");
 }
