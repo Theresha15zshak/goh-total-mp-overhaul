@@ -769,9 +769,11 @@ static const char *ABOUT_EN[] = {
 };
 static const char *NEWS_RU[] = {
     "Камуфляж и наклейки больше не пересвечены: картинки приводятся к яркости техники",
+    "Ползунки яркости для камуфляжа и каждой наклейки",
 };
 static const char *NEWS_EN[] = {
     "Camouflage and stickers are no longer overexposed: pictures are brought to the vehicles' brightness",
+    "Brightness sliders for camouflage and for each sticker",
 };
 
 // which news the player has read: by their text, so a build with the same news stays quiet

@@ -34,7 +34,9 @@ int next_picture;                                      // a deleted picture's nu
 // A vehicle's camouflage: its picture (a preset's file) and how it lies, with the vehicle's textures, as found in its
 // model: all of them take the picture, the main ones tell the vehicle in a battle.
 // A sticker: one picture at one place on the vehicle, a projector from outside onto the surface around that point.
-struct Sticker { int picture; float c[3], n[3], size, rotation, opacity, soft, wear; int flip_x, flip_y; };
+struct Sticker { int picture; float c[3], n[3], size, rotation, opacity, soft, wear; int flip_x, flip_y; float bright; };
+constexpr float BRIGHT_MIN = .2f, BRIGHT_MAX = 5;     // 1 is the vehicles' level; 5 brings even a white picture back to itself
+float bright_ok(float b) { return isfinite(b) && b >= BRIGHT_MIN && b <= BRIGHT_MAX ? b : 1; }
 struct Assign { std::string model; int picture; CamoSettings s; std::vector<std::string> all, main; std::vector<Sticker> stickers; };
 std::vector<Assign> assigns;
 wchar_t vehicles_ini[MAX_PATH];
@@ -147,7 +149,7 @@ struct Pattern;
 // `stretch` lengthens distances from the middle by what the surface bends away.
 struct StickerImage {
     std::shared_ptr<Pattern> pic;
-    float c[3], n[3], e1[3], e2[3], half_w, half_h, opacity, wear;
+    float c[3], n[3], e1[3], e2[3], half_w, half_h, opacity, wear, bright = 1;
     bool flip_x = false, flip_y = false;
     int gx = 0, gy = 0;
     float cell = 1;
@@ -396,6 +398,7 @@ StickerImage sticker_image(const Sticker &s, std::shared_ptr<Pattern> pic) {
     r.half_h = pic && pic->w ? s.size / 2 * pic->h / pic->w : s.size / 2;
     r.opacity = s.opacity;
     r.wear = s.wear;
+    r.bright = s.bright;
     r.flip_x = s.flip_x; r.flip_y = s.flip_y;
     return r;
 }
@@ -563,11 +566,11 @@ void save_vehicles() {
     FILE *f = _wfopen(tmp, L"wb"); if (!f) { status = TR("Не удалось сохранить настройки техники", "Cannot save vehicles"); return; }
     fprintf(f, "GOH_CAMO_V2\n");
     for (const auto &a : assigns) {
-        fprintf(f, "%d %.9g %.9g %.9g %.9g %d %d %.9g %d %d %d\t%s\t%s\t%s\n", a.picture,
-            a.s.offset[0], a.s.offset[1], a.s.rotation, a.s.opacity, a.s.blend, a.s.repeat, a.s.size, a.s.through, a.s.flip_x, a.s.flip_y,
+        fprintf(f, "%d %.9g %.9g %.9g %.9g %d %d %.9g %d %d %d %.9g\t%s\t%s\t%s\n", a.picture,
+            a.s.offset[0], a.s.offset[1], a.s.rotation, a.s.opacity, a.s.blend, a.s.repeat, a.s.size, a.s.through, a.s.flip_x, a.s.flip_y, a.s.bright,
             a.model.c_str(), joined(a.all).c_str(), joined(a.main).c_str());
-        for (const auto &s : a.stickers) fprintf(f, "S %d %.9g %.9g %.9g %.9g %.9g %.9g %.9g %.9g %.9g %.9g %.9g %d %d\n", s.picture,
-            s.c[0], s.c[1], s.c[2], s.n[0], s.n[1], s.n[2], s.size, s.rotation, s.opacity, s.soft, s.wear, s.flip_x, s.flip_y);
+        for (const auto &s : a.stickers) fprintf(f, "S %d %.9g %.9g %.9g %.9g %.9g %.9g %.9g %.9g %.9g %.9g %.9g %d %d %.9g\n", s.picture,
+            s.c[0], s.c[1], s.c[2], s.n[0], s.n[1], s.n[2], s.size, s.rotation, s.opacity, s.soft, s.wear, s.flip_x, s.flip_y, s.bright);
     }
     bool ok = !ferror(f); if (fclose(f)) ok = false;
     if (!ok || !MoveFileExW(tmp, vehicles_ini, MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)) status = TR("Не удалось сохранить настройки техники", "Cannot save vehicles");
@@ -579,15 +582,19 @@ void load_vehicles() {
     if (fgets(line, sizeof line, f) && (!strcmp(line, "GOH_CAMO_V1\n") || !strcmp(line, "GOH_CAMO_V2\n"))) while (assigns.size() < 2000 && fgets(line, sizeof line, f)) {
         if (line[0] == 'S' && line[1] == ' ') {
             Sticker k = {};
-            if (!assigns.empty() && assigns.back().stickers.size() < 64 && sscanf(line + 2, "%d %f %f %f %f %f %f %f %f %f %f %f %d %d", &k.picture, &k.c[0], &k.c[1], &k.c[2],
-                       &k.n[0], &k.n[1], &k.n[2], &k.size, &k.rotation, &k.opacity, &k.soft, &k.wear, &k.flip_x, &k.flip_y) >= 10 && isfinite(k.size) && k.size > 0 && isfinite(k.c[0]) &&
-                isfinite(k.c[1]) && isfinite(k.c[2]) && isfinite(k.n[0]) && isfinite(k.n[1]) && isfinite(k.n[2]) && isfinite(k.opacity) && isfinite(k.soft) && isfinite(k.wear))
+            k.bright = 1;
+            if (!assigns.empty() && assigns.back().stickers.size() < 64 && sscanf(line + 2, "%d %f %f %f %f %f %f %f %f %f %f %f %d %d %f", &k.picture, &k.c[0], &k.c[1], &k.c[2],
+                       &k.n[0], &k.n[1], &k.n[2], &k.size, &k.rotation, &k.opacity, &k.soft, &k.wear, &k.flip_x, &k.flip_y, &k.bright) >= 10 && isfinite(k.size) && k.size > 0 && isfinite(k.c[0]) &&
+                isfinite(k.c[1]) && isfinite(k.c[2]) && isfinite(k.n[0]) && isfinite(k.n[1]) && isfinite(k.n[2]) && isfinite(k.opacity) && isfinite(k.soft) && isfinite(k.wear)) {
+                k.bright = bright_ok(k.bright);
                 assigns.back().stickers.push_back(k);
+            }
             continue;
         }
         Assign a; auto &s = a.s;
-        if (sscanf(line, "%d %f %f %f %f %d %d %f %d %d %d", &a.picture, &s.offset[0], &s.offset[1], &s.rotation, &s.opacity,
-                   &s.blend, &s.repeat, &s.size, &s.through, &s.flip_x, &s.flip_y) != 11) continue;
+        if (sscanf(line, "%d %f %f %f %f %d %d %f %d %d %d %f", &a.picture, &s.offset[0], &s.offset[1], &s.rotation, &s.opacity,
+                   &s.blend, &s.repeat, &s.size, &s.through, &s.flip_x, &s.flip_y, &s.bright) < 11) continue;
+        s.bright = bright_ok(s.bright);
         std::string l(line);
         while (!l.empty() && (l.back() == '\n' || l.back() == '\r')) l.pop_back();
         size_t t0 = l.find('\t'), t1 = t0 == std::string::npos ? t0 : l.find('\t', t0 + 1), t2 = t1 == std::string::npos ? t1 : l.find('\t', t1 + 1);
@@ -1451,6 +1458,7 @@ void sticker_pixel(const StickerImage &s, float u, float v, uint8_t io[4]) {
     CamoSettings blend;
     blend.opacity = s.opacity;
     blend.dim = s.pic->s.dim;
+    blend.bright = s.bright;
     if (s.wear > .001f) {
         float k = (wear_noise(u, v) - (s.wear * .75f + .12f)) / .1f + .5f;
         k = k < 0 ? 0 : k > 1 ? 1 : k;
@@ -2349,7 +2357,7 @@ void add_sticker(int picture) {
         s.n[i] = at ? at[3 + i] : i == 2;
     }
     s.size = (shown->m.hi[0] - shown->m.lo[0]) * .2f;
-    s.rotation = 0; s.opacity = 1;
+    s.rotation = 0; s.opacity = 1; s.bright = 1;
     s.soft = add_soft ? .4f : 0; s.wear = add_soft ? .2f : 0;
     a->stickers.push_back(s);
     sticker_at = (int)a->stickers.size() - 1;
@@ -2520,6 +2528,7 @@ void vehicle_settings() {
         if (ImGui::Checkbox(TR("Продолжать за краями картинки", "Go on beyond its edges"), &rep)) { s.repeat = rep; changed = true; }
         ImGui::SeparatorText(TR("Цвет", "Colour"));
         changed |= ImGui::SliderFloat(TR("Непрозрачность", "Opacity"), &s.opacity, 0, 1, "%.2f");
+        changed |= ImGui::SliderFloat(TR("Яркость", "Brightness"), &s.bright, BRIGHT_MIN, BRIGHT_MAX, "%.2f", ImGuiSliderFlags_Logarithmic);
         changed |= ImGui::Combo(TR("Наложение", "Blend"), &s.blend, TR("Обычное\0Умножение\0Перекрытие\0", "Normal\0Multiply\0Overlay\0"));
         if (ImGui::Button(TR("Сбросить настройки", "Reset settings"), ImVec2(-1,0))) { s = CamoSettings(); changed = true; }
         if (changed) { dirty = true; unsaved = true; }
@@ -2553,6 +2562,7 @@ void vehicle_settings() {
             changed |= ImGui::SliderFloat(TR("Размер наклейки", "Sticker size"), &k.size, big * .02f, big, "%.1f");
             changed |= ImGui::SliderFloat(TR("Поворот наклейки", "Sticker rotation"), &k.rotation, -180, 180, "%.0f");
             changed |= ImGui::SliderFloat(TR("Непрозрачность наклейки", "Sticker opacity"), &k.opacity, 0, 1, "%.2f");
+            changed |= ImGui::SliderFloat(TR("Яркость наклейки", "Sticker brightness"), &k.bright, BRIGHT_MIN, BRIGHT_MAX, "%.2f", ImGuiSliderFlags_Logarithmic);
             changed |= ImGui::SliderFloat(TR("Мягкие края", "Soft edges"), &k.soft, 0, 1, "%.2f");
             changed |= ImGui::SliderFloat(TR("Потёртость", "Wear"), &k.wear, 0, 1, "%.2f");
             bool fx = k.flip_x, fy = k.flip_y;
