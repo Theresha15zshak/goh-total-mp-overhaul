@@ -21,6 +21,10 @@ people who don't have the mod. Russian and English (it follows the game's langua
 - Bottom left in the menus the mod says whether your DLL is an official build; check by hand against
   [the list of official builds](https://goh-online.goh-mod.workers.dev/versions.html).
 
+## Credites
+
+Huge thanks to sick cunt aka rafik for replays!
+
 ## Русский
 
 Клиентский мод для Gates of Hell 1.067: PVP-рейтинг (MMR) по реплеям, кнопка PVP со списком онлайна,
