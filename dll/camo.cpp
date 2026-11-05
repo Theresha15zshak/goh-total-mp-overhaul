@@ -312,6 +312,21 @@ struct Painted { std::string name; std::vector<unsigned char> data; };
 std::vector<Painted *> painted;
 void filename(int id, wchar_t *out);
 bool readfile(const wchar_t *path, std::vector<unsigned char> &out);
+// The game's light is made for its own colour textures, and they are dark: 52 of 255 on average over the 687 main textures of its
+// vehicles (the middle 80% of them 38 to 66). A picture of ordinary brightness, 120 to 160, comes out overexposed on a vehicle. So a
+// brighter one comes down to that level as a whole, its colours keeping their proportions; a darker one stays. Multiply and overlay
+// work from the texture's own colour, they do not need it.
+constexpr float VEHICLE_LEVEL = 52;
+float picture_level(const std::vector<unsigned char> &px) {
+    double sum = 0, weight = 0;
+    for (size_t i = 0; i + 3 < px.size(); i += 4) {
+        double a = px[i + 3];
+        sum += a * (px[i] * .3 + px[i + 1] * .59 + px[i + 2] * .11);
+        weight += a;
+    }
+    float mean = weight > 0 ? (float)(sum / weight) : 0;
+    return mean > VEHICLE_LEVEL ? VEHICLE_LEVEL / mean : 1;
+}
 std::shared_ptr<Pattern> load_picture(int id) {
     wchar_t path[MAX_PATH];
     std::vector<unsigned char> bytes;
@@ -322,6 +337,7 @@ std::shared_ptr<Pattern> load_picture(int id) {
     if (!d) return nullptr;
     auto r = std::make_shared<Pattern>();
     r->w = w; r->h = h; r->px.assign(d, d + (size_t)w * h * 4);
+    r->s.dim = picture_level(r->px);
     stbi_image_free(d);
     return r;
 }
@@ -393,7 +409,7 @@ Pattern pattern_of(const std::string &token) {
     ReleaseSRWLockShared(&published_lock);
     for (const Sticker &s : stickers) if (auto pic = load_picture(s.picture)) p.stickers.push_back(sticker_image(s, softened(pic, s.soft)));
     if (id >= 0) {
-        if (auto pic = load_picture(id)) { p.px = pic->px; p.w = pic->w; p.h = pic->h; return p; }
+        if (auto pic = load_picture(id)) { p.px = pic->px; p.w = pic->w; p.h = pic->h; p.s.dim = pic->s.dim; return p; }
     }
     if (known) return p;                                // stickers only
     rc_log("camo: no picture for %s, test pattern", token.c_str());
@@ -498,7 +514,7 @@ void load_image(int index) {
     unsigned char *p = stbi_load_from_memory(bytes.data(), (int)bytes.size(), &w, &h, &c, 4);
     if (!p) { status = TR("Не удалось прочитать PNG", "Could not decode PNG"); return; }
     auto r = std::make_shared<Pattern>();
-    r->w = w; r->h = h; r->px.assign(p, p + (size_t)w * h * 4); stbi_image_free(p); status.clear();
+    r->w = w; r->h = h; r->px.assign(p, p + (size_t)w * h * 4); r->s.dim = picture_level(r->px); stbi_image_free(p); status.clear();
     picture = r;
 }
 std::string utf8(const wchar_t *s) {
@@ -1434,6 +1450,7 @@ float wear_noise(float u, float v) {
 void sticker_pixel(const StickerImage &s, float u, float v, uint8_t io[4]) {
     CamoSettings blend;
     blend.opacity = s.opacity;
+    blend.dim = s.pic->s.dim;
     if (s.wear > .001f) {
         float k = (wear_noise(u, v) - (s.wear * .75f + .12f)) / .1f + .5f;
         k = k < 0 ? 0 : k > 1 ? 1 : k;
@@ -1979,6 +1996,8 @@ DWORD WINAPI draw_band(LPVOID arg) {
     }
     const float *light = B.light;
     const Pattern *pic = B.pic;
+    CamoSettings shown = *B.s;
+    if (pic) shown.dim = pic->s.dim;
     unsigned char row[2][4096 * 3];
     for (int y = B.y0; y < B.y1; y++) {
         unsigned char *line = row[(y - B.y0) % B.ss];
@@ -2011,7 +2030,7 @@ DWORD WINAPI draw_band(LPVOID arg) {
                         for (int i = 0; i < 3; i++) { float f = e[i] / keep; flat[i] = (uint8_t)(f > 255 ? 255 : f); }
                         flat[3] = 255;
                         memcpy(out, flat, 4);
-                        if (pic && on_picture(B.place, texel_place(l->map, m), pu, pv)) camo_blend(pic->px.data(), pic->w, pic->h, pu, pv, flat, *B.s, out);
+                        if (pic && on_picture(B.place, texel_place(l->map, m), pu, pv)) camo_blend(pic->px.data(), pic->w, pic->h, pu, pv, flat, shown, out);
                         if (l->map.twinned[m]) stick(l->map, m, *B.stickers, out);
                         else if (!l->map.both[m] && !t.gun) for (const StickerImage &k : *B.stickers) {      // exact: per pixel, not per texel
                             float place[3], su, sv, look = (nx * k.n[0] + ny * k.n[1] + nz * k.n[2]) / nl;

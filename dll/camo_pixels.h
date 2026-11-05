@@ -11,6 +11,7 @@ struct CamoSettings {
     float size = 1;                                 // mode 0: 1 = the smallest picture that covers the whole vehicle
     int through = 0;                                // mode 0: 0 both sides alike, mirrored along the roof; 1 one sheet over it all
     int flip_x = 0, flip_y = 0;                     // mode 0: the picture turned over
+    float dim = 1;                                  // the picture's level, in plain blending (camo.cpp, picture_level); not a setting
 };
 // one texel of the picture between its pixels, the picture repeating
 static void camo_sample(const uint8_t *pattern, int w, int h, float u, float v, float out[4]) {
@@ -31,7 +32,7 @@ static void camo_blend(const uint8_t *pattern, int w, int h, float u, float v,
     camo_sample(pattern, w, h, u, v, p);
     float alpha = s.opacity * p[3] / 255.f;
     for (int c = 0; c < 3; ++c) {
-        float b = base[c] / 255.f, a = p[c] / 255.f;
+        float b = base[c] / 255.f, a = p[c] / 255.f * (s.blend == 0 ? s.dim : 1);
         float mix = s.blend == 1 ? b * a : s.blend == 2 ?
             (b <= .5f ? 2*b*a : 1-2*(1-b)*(1-a)) : a;
         out[c] = (uint8_t)(fminf(255, fmaxf(0, 255 * (b + alpha * (mix - b)))) + .5f);

@@ -768,22 +768,10 @@ static const char *ABOUT_EN[] = {
     "Sign in through Steam: the mod gets only your SteamID, no password",
 };
 static const char *NEWS_RU[] = {
-    "Всегда день: галочка у хоста в лобби, ночных боёв больше нет",
-    "Кнопка «Камуфляж» в лобби: красить технику, не выходя из него",
-    "Наклейки: отражение, удаление картинок из меню наклеек и камуфляжа",
-    "Камуфляж: полугусеничные машины красятся, люки тоже берут рисунок",
-    "Реплеи: кнопка «Открыть папку реплеев»",
-    "Упоминание в чате вдвое тише, плашка версии прячется через 15 секунд",
-    "Это окно больше не появляется после «Понятно» до следующих новостей",
+    "Камуфляж и наклейки больше не пересвечены: картинки приводятся к яркости техники",
 };
 static const char *NEWS_EN[] = {
-    "Always Day: a box for the host in the lobby, no more night battles",
-    "A Camouflage button in the lobby: paint vehicles without leaving it",
-    "Stickers: flipping, and pictures can be deleted from the sticker and camouflage menus",
-    "Camouflage: half-tracks take it, and so do hatches",
-    "Replays: an Open replays folder button",
-    "Chat mentions are half as loud, the version box hides after 15 seconds",
-    "This window stays away after Got it, until the next news",
+    "Camouflage and stickers are no longer overexposed: pictures are brought to the vehicles' brightness",
 };
 
 // which news the player has read: by their text, so a build with the same news stays quiet
