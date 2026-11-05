@@ -21,8 +21,9 @@ constexpr uintptr_t G_DESKTOP = 0x159ca68;
 uintptr_t base;
 wchar_t folder[MAX_PATH], ini[MAX_PATH];
 SRWLOCK lock = SRWLOCK_INIT;
-struct Panel { bool shown; float x, y, w, h; } panel, replays_list, lobby_info, day_row;
+struct Panel { bool shown; float x, y, w, h; } panel, replays_list, lobby_info, day_row, option_row;
 bool floating, drawn;
+float option_box;                                      // where the boxes of the options stand
 volatile bool lobby_open, from_lobby_close;           // the lobby is on screen; a battle began
 bool from_lobby;                                       // the window was opened from the lobby
 volatile LONG importing;
@@ -665,6 +666,28 @@ extern "C" void camo_page(void *) {}
 extern "C" void camo_selftest_tick(const char *);
 extern "C" void lobby_dump_tick(const char *);
 extern "C" int dialog_covered(void *dialog);
+// The Game tab of the options: its list, its last row, wherever the groups put it, and the place of its boxes
+constexpr uintptr_t VT_TREE = 0x110cab0, VT_TREE_ROW = 0x110c800, VT_CHECKBOX = 0x1134ba0;
+uintptr_t tree_of(uintptr_t d, int depth) {
+    if (!d || depth > 8) return 0;
+    if (q(d) == base + VT_TREE) return d;
+    uintptr_t b = q(d + 0xd8), e = q(d + 0xe0);
+    if (!b || e < b || e - b > 8 * 256) return 0;
+    for (uintptr_t k = b; k < e; k += 8) if (uintptr_t found = tree_of(q(k), depth + 1)) return found;
+    return 0;
+}
+void tree_rows(uintptr_t d, Panel &last, float &box, int depth, int &budget) {
+    if (!d || depth > 12 || --budget < 0) return;
+    unsigned flags = 0;
+    if (!read(d + 0x48, &flags, 4) || !(flags & 2)) return;
+    uintptr_t vt = q(d);
+    Panel here = {};
+    if (vt == base + VT_TREE_ROW && bounds(d, here) && (!last.shown || here.y + here.h > last.y + last.h)) last = here;
+    if (vt == base + VT_CHECKBOX && !box && bounds(d, here)) box = here.x;
+    uintptr_t b = q(d + 0xd8), e = q(d + 0xe0);
+    if (!b || e < b || e - b > 8 * 4096) return;
+    for (uintptr_t k = b; k < e; k += 8) tree_rows(q(k), last, box, depth + 1, budget);
+}
 void lowest_row(uintptr_t d, const Panel &area, Panel &last, int depth, int &budget) {
     if (!d || depth > 24 || --budget < 0) return;
     unsigned flags = 0;
@@ -684,44 +707,66 @@ extern "C" void camo_tick() {
     if (mode) read(mode + 0x908, &on, 1);
     if ((on == 1) != in_game) { in_game = on == 1; InterlockedIncrement(&battle_number); }
     { char path[MAX_PATH]; snprintf(path, sizeof path, "%ls\\..\\goh_snapshots.ini", folder); camo_selftest_tick(path); lobby_dump_tick(path); }
-    // our tab, wherever the page is: looked for a few times a second, it is a walk through the screen's dialogs
-    static DWORD next;
-    static Panel p, list, info, day;
-    DWORD now = GetTickCount();
-    if ((LONG)(now - next) >= 0) {
-        next = now + 200;
-        p = {};
-        void *root = (void *)q(base + G_DESKTOP), *tab = root ? find(root, "camo_root") : nullptr;
-        if (tab) bounds((uintptr_t)tab, p);
-        if (tab && dialog_covered(tab)) p = {};       // the game's own window over it: exit, ESC
-        list = {};
-        void *replays = root ? find(root, "lb_replays") : nullptr;
-        if (replays) bounds((uintptr_t)replays, list);
-        if (replays && dialog_covered(replays)) list = {};
-        info = {};
-        void *lobby = root ? find(root, "btn_game_info") : nullptr;   // only the lobby has it
-        if (lobby) bounds((uintptr_t)lobby, info);
-        if (lobby && dialog_covered(lobby)) info = {};
-        day = {};
-        void *start = root ? find(root, "btn_start") : nullptr, *settings = root ? find(root, "panel_settings") : nullptr;
+    // what lies on the game's pages, from the last look at the screen; the row's place, a walk of its own, a few times a second
+    static long seen;
+    static Panel p, list, info, day, last;
+    static DWORD rows_at;
+    long seq = pvp_screen_seq();
+    if (seq != seen) {
+        seen = seq;
+        auto of = [](int which, Panel &out) {
+            out = {};
+            void *d = pvp_screen_named(which);
+            if (d && bounds((uintptr_t)d, out) && dialog_covered(d)) out = {};    // the game's own window over it: exit, ESC
+            return d;
+        };
+        of(SCREEN_CAMO, p);
+        of(SCREEN_REPLAYS, list);
+        of(SCREEN_LOBBY, info);
         Panel button = {}, area = {};
-        if (start) bounds((uintptr_t)start, button);
+        of(SCREEN_START, button);
+        void *settings = of(SCREEN_SETTINGS, area);
         if (button.shown) day_host = true;
         else if (info.shown) day_host = false;
         day_publish(always_day && day_host);
-        if (button.shown && settings && !dialog_covered(settings) && bounds((uintptr_t)settings, area)) {
-            // under the last of the settings' rows; they are made by the game, as many as the mode has
-            Panel last = {};
-            int budget = 600;
-            lowest_row((uintptr_t)settings, area, last, 0, budget);
+        day = {};
+        if (button.shown && area.shown) {
+            DWORD now = GetTickCount();
+            if (now - rows_at >= 200 || !last.shown) {
+                rows_at = now;
+                last = {};
+                int budget = 600;
+                lowest_row((uintptr_t)settings, area, last, 0, budget);
+            }
             float h = last.shown ? last.h : 33;
             day = {true, last.shown ? last.x : area.x, last.shown ? last.y + last.h + 1 : area.y + area.h - h - 8, last.shown ? last.w : area.w, h};
             if (day.y + day.h > area.y + area.h) day.y = area.y + area.h - day.h;
+        } else last = {};
+        // under the last row of the Game tab, when the list is at its end
+        static Panel option;
+        static float box;
+        static DWORD option_at;
+        void *game = pvp_screen_named(SCREEN_OPTIONS_GAME);
+        if (!game) option = {};
+        else if (GetTickCount() - option_at >= 30) {
+            option_at = GetTickCount();
+            Panel area = {}, end = {};
+            uintptr_t tree = tree_of((uintptr_t)game, 0);
+            float found = 0;
+            int budget = 400;
+            option = {};
+            if (tree && bounds(tree, area)) tree_rows(tree, end, found, 0, budget);
+            if (found) box = found;
+            if (end.shown && end.y + end.h <= area.y + area.h + 2) option = {true, end.x, end.y + end.h + 1, end.w, end.h};
+            static int told;
+            if (end.shown && !told++) rc_log("options: list at %.0f %.0f %.0f x %.0f, last row at %.0f %.0f %.0f x %.0f, boxes at %.0f", area.x, area.y, area.w, area.h, end.x, end.y, end.w, end.h, box);
         }
+        AcquireSRWLockExclusive(&lock);
+        panel = p; replays_list = list; lobby_info = info; day_row = day; option_row = option; option_box = box;
+        ReleaseSRWLockExclusive(&lock);
+        lobby_open = info.shown || option.shown;
+        from_lobby_close = from_lobby_close || in_game;
     }
-    AcquireSRWLockExclusive(&lock); panel = p; replays_list = list; lobby_info = info; day_row = day; ReleaseSRWLockExclusive(&lock);
-    lobby_open = info.shown;
-    from_lobby_close = from_lobby_close || in_game;
     if (warm_needed && !in_game && !drawn) warm_start();   // not while sliders move: each new setting is a new texture
 }
 extern "C" int camo_shown() { return drawn || floating || replays_list.shown || lobby_open; }
@@ -2598,46 +2643,64 @@ void lobby_button() {
     ImGui::End();
 }
 ImFont *ui_game_font();
-// The host's row under the session's settings, drawn as the game draws those: a name, and a box in the column of the values
-void day_setting() {
-    static int loaded;
-    if (!loaded) { loaded = 1; InterlockedExchange(&always_day, online_list_opt("always_day")); }
-    Panel r; AcquireSRWLockShared(&lock); r = day_row; ReleaseSRWLockShared(&lock);
-    if (!r.shown) return;
+// A row of ours in a list of the game's, drawn as the game draws its own: a name, and a box in the column of the values
+bool setting_row(const Panel &r, const char *id, const char *name, float box_x, float indent, bool on) {
+    bool clicked = false;
     ImGui::SetNextWindowPos(ImVec2(r.x, r.y));
     ImGui::SetNextWindowSize(ImVec2(r.w, r.h));
     ImGui::SetNextWindowBgAlpha(0);
     ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0, 0));
     ImGui::PushStyleVar(ImGuiStyleVar_WindowBorderSize, 0);
-    if (ImGui::Begin("###goh_always_day", nullptr, ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoMove |
+    if (ImGui::Begin(id, nullptr, ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoMove |
                      ImGuiWindowFlags_NoFocusOnAppearing | ImGuiWindowFlags_NoBringToFrontOnFocus)) {
-        if (ImGui::InvisibleButton("##day", ImVec2(r.w, r.h))) {
-            InterlockedExchange(&always_day, !always_day);
-            online_set_list_opt("always_day", always_day);
-        }
+        clicked = ImGui::InvisibleButton("##row", ImVec2(r.w, r.h));
         const bool hot = ImGui::IsItemHovered();
         ImDrawList *dl = ImGui::GetWindowDrawList();
-        const char *name = TR("Всегда день", "Always Day");
         ImFont *font = ui_game_font();
         if (font) ImGui::PushFont(font);
         float size = ImGui::GetTextLineHeight(), mid = r.y + r.h / 2;
         if (hot) dl->AddRectFilled(ImVec2(r.x, r.y), ImVec2(r.x + r.w, r.y + r.h - 1), IM_COL32(44, 42, 38, 200));
         dl->AddLine(ImVec2(r.x, r.y + r.h - 1), ImVec2(r.x + r.w, r.y + r.h - 1), IM_COL32(70, 70, 66, 120));
-        dl->AddLine(ImVec2(r.x + 199, r.y), ImVec2(r.x + 199, r.y + r.h), IM_COL32(70, 70, 66, 120));
-        dl->AddText(ImVec2(floorf(r.x + 5), floorf(mid - size / 2)), hot ? IM_COL32(235, 178, 108, 255) : IM_COL32(190, 172, 140, 255), name);
+        dl->AddLine(ImVec2(box_x - 3, r.y), ImVec2(box_x - 3, r.y + r.h), IM_COL32(70, 70, 66, 120));
+        dl->AddText(ImVec2(floorf(r.x + indent), floorf(mid - size / 2)), hot ? IM_COL32(235, 178, 108, 255) : IM_COL32(190, 172, 140, 255), name);
         if (font) ImGui::PopFont();
-        float s = 16, x = r.x + 202, y = r.y + 8;              // where the game has its boxes in a row
+        float s = 16, x = box_x, y = floorf(mid - s / 2);
         dl->AddRect(ImVec2(x, y), ImVec2(x + s, y + s), IM_COL32(215, 215, 210, 255));
-        if (always_day) dl->AddRectFilled(ImVec2(x + 3, y + 3), ImVec2(x + s - 3, y + s - 3), IM_COL32(190, 190, 185, 255));
+        if (on) dl->AddRectFilled(ImVec2(x + 3, y + 3), ImVec2(x + s - 3, y + s - 3), IM_COL32(190, 190, 185, 255));
     }
     ImGui::End();
     ImGui::PopStyleVar(2);
+    return clicked;
+}
+// the host's row under the session's settings
+void day_setting() {
+    static int loaded;
+    if (!loaded) { loaded = 1; InterlockedExchange(&always_day, online_list_opt("always_day")); }
+    Panel r; AcquireSRWLockShared(&lock); r = day_row; ReleaseSRWLockShared(&lock);
+    if (r.shown && setting_row(r, "###goh_always_day", TR("Всегда день", "Always Day"), r.x + 202, 5, always_day != 0)) {
+        InterlockedExchange(&always_day, !always_day);
+        online_set_list_opt("always_day", always_day);
+    }
+}
+// the Game tab of the options: a test, farshoot.c
+volatile LONG no_farshoot;
+void farshoot_setting() {
+    static int loaded;
+    if (!loaded) { loaded = 1; InterlockedExchange(&no_farshoot, online_list_opt("no_farshoot")); farshoot_enable(no_farshoot); }
+    Panel r; float box;
+    AcquireSRWLockShared(&lock); r = option_row; box = option_box; ReleaseSRWLockShared(&lock);
+    if (r.shown && setting_row(r, "###goh_no_farshoot", "No farshoot from first person", box ? box : r.x + r.w * .56f, 20, no_farshoot != 0)) {
+        InterlockedExchange(&no_farshoot, !no_farshoot);
+        online_set_list_opt("no_farshoot", no_farshoot);
+        farshoot_enable(no_farshoot);
+    }
 }
 extern "C" void camo_draw(ID3D11Device *device, void *window) {
     owner = (HWND)window;
     replays_button();
     lobby_button();
     day_setting();
+    farshoot_setting();
     static bool was;
     bool key = GetForegroundWindow() == owner && (GetAsyncKeyState(VK_SHIFT)&0x8000) && (GetAsyncKeyState(VK_F11)&0x8000);
     if (key && !was) floating = !floating; was = key;

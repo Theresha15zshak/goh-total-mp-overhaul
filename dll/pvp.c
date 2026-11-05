@@ -102,11 +102,39 @@ static void localize_layout(uint8_t *b, size_t n) {
     }
 }
 
+// the units' answers (pathing.c): a file changed as the game opens it, the stream's own copy, or one of ours for a stored entry
+static void tuned_file(void *path, uint8_t *st) {
+    static const char *const FILES[][2] = {{"properties/human.ext", "human.ext"}, {"properties/mobility.inc", "mobility.inc"},
+                                           {"properties/human_fsm/request.inc", "request.inc"}, {"properties/human_fsm/switch.inc", "switch.inc"}};
+    for (int i = 0; i < 4; i++) {
+        if (!ends_with(path, FILES[i][0])) continue;
+        uintptr_t vt = *(uintptr_t *)st - (uintptr_t)g_base;
+        uint8_t *b = *(uint8_t **)(st + 8), *e = *(uint8_t **)(st + 0x28);
+        if (!b || e <= b || *(uint64_t *)(st + 0x20) || *(uint8_t **)(st + 0x30) != b) { rc_log("pathing: %s: the stream is not as expected", FILES[i][1]); return; }
+        size_t n = (size_t)(e - b);
+        size_t cap = n;
+        if (vt == VT_BUF_STREAM) {
+            cap = n + pathing_more();
+            uint8_t *c = malloc(cap);                     // lives as long as the game may read it
+            if (!c) return;
+            memcpy(c, b, n);
+            b = c;
+        } else if (vt != VT_ZIP_STREAM) { rc_log("pathing: %s: a stream of kind %llx", FILES[i][1], (unsigned long long)vt); return; }
+        n = pathing_edit(FILES[i][1], b, n, cap);
+        if (vt == VT_BUF_STREAM) {
+            *(uint8_t **)(st + 8) = b; *(uint8_t **)(st + 0x10) = b + n; *(uint64_t *)(st + 0x18) = n;
+            *(uint8_t **)(st + 0x30) = b; *(uint8_t **)(st + 0x28) = b + n;
+        }
+        return;
+    }
+}
+
 static void *open_hook(void *path, uint32_t mode) {
     void *r;
     if (camo_open(path, mode, g_prev_open, &r)) return r;
     r = g_prev_open(path, mode);
     if (!r) return r;
+    if (pathing_wants()) tuned_file(path, r);
     for (size_t i = 0; i < NUI; i++) {
         if (!ends_with(path, UI_FILES[i].path)) continue;
         const UiFile *f = &UI_FILES[i];
@@ -296,7 +324,7 @@ static uint64_t root_of(uint64_t d) {
     return 0;
 }
 
-int chat_rect(float *x, float *y, float *w, float *h, float *root_w, float *root_h) {
+static int chat_rect_now(float *x, float *y, float *w, float *h, float *root_w, float *root_h) {
     void *f = g_chat_frame;
     int32_t fx, fy, fw, fh, rw, rh;
     static int why_logged = -1;
@@ -314,7 +342,7 @@ int chat_rect(float *x, float *y, float *w, float *h, float *root_w, float *root
     return 1;
 }
 
-int pvp_rect(float *x, float *y, float *w, float *h, float *head_h, float *root_w, float *root_h) {
+static int pvp_rect_now(float *x, float *y, float *w, float *h, float *head_h, float *root_w, float *root_h) {
     void *btn = g_btn, *list = g_list, *head = g_head;
     if (btn && covered(btn)) return 0;
     int32_t bx, by, bw, bh, lx, ly, lw, lh, rw, rh;
@@ -394,11 +422,6 @@ unsigned char *pvp_sound_file(const char *name, size_t *n) { return pak_file(g_s
 #define VT_NAME_VIEW 0x105b538
 #define MAX_NAMES 16
 
-static void *g_names[MAX_NAMES];
-static int g_name_count;
-static SRWLOCK g_names_lock = SRWLOCK_INIT;
-static DWORD g_scan_at;
-
 void pvp_page_shown(void *page) { (void)page; }
 
 
@@ -407,49 +430,9 @@ void pvp_page_shown(void *page) { (void)page; }
 // game's (ui.cpp), and our chat over the channel's place while it is on.
 #define VT_CHAT_VIEW 0x1044a10
 static const uint32_t VT_CHANNEL_VIEWS[] = {0x1042fc0, 0x1042c58, 0x1041bd0, 0x10435e0, 0x1043da0, 0x1042270};
-static void *g_panel_walk;                   // found on this walk
-static void *volatile g_panel;               // ... and the last one
+static void *volatile g_panel;               // the last look at the screen saw it
 #define VT_GAME_MENU 0x1013f48               // eDialogBlur: only the ESC menu (page_game_menu) and popups have one
-static int g_menu_walk;                      // seen on this walk
-static volatile int g_game_menu;             // ... and on the last one
-
-static void walk(uint64_t d, int depth, int in_session, void **found, int *n, int *budget) {
-    if (!d || depth > 72 || --*budget < 0 || *n >= MAX_NAMES) return;
-    uint32_t flags = 0;
-    if (!peek((void *)(d + 0x48), &flags, 4) || !(flags & 2)) return;     // not on screen: nothing under it is
-    uint64_t vt = pq(d);
-    if (vt == (uintptr_t)(g_base + VT_CHAT_VIEW) && !g_panel_walk) g_panel_walk = (void *)d;
-    if (vt == (uintptr_t)(g_base + VT_GAME_MENU)) g_menu_walk = 1;
-    if (vt == (uintptr_t)(g_base + VT_SESSION_VIEW)) in_session = 1;
-    if (in_session && vt == (uintptr_t)(g_base + VT_NAME_VIEW)) { found[(*n)++] = (void *)d; return; }
-    uint64_t b = pq(d + 0xd8), e = pq(d + 0xe0);
-    if (!b || e < b || e - b > 8 * 4096) return;
-    for (uint64_t p = b; p < e; p += 8) walk(pq(p), depth + 1, in_session, found, n, budget);
-}
-
-static void scan_names(void) {
-    DWORD now = GetTickCount();
-    if (now - g_scan_at < 500) return;
-    g_scan_at = now;
-    uint64_t root = pq((uintptr_t)(g_base + G_DESKTOP));
-    void *found[MAX_NAMES];
-    int n = 0, budget = 20000;
-    g_panel_walk = NULL;
-    g_menu_walk = 0;
-    if (root && pq(root) == (uintptr_t)(g_base + VT_DESKTOP)) walk(root, 0, 0, found, &n, &budget);
-    if (g_menu_walk != g_game_menu) rc_log("pvp: the ESC menu %s", g_menu_walk ? "on screen" : "gone");
-    g_game_menu = g_menu_walk;
-    if (g_panel_walk != g_panel) rc_log("pvp: the game's chat panel %s", g_panel_walk ? "on screen" : "gone");
-    g_panel = g_panel_walk;
-    AcquireSRWLockExclusive(&g_names_lock);
-    memcpy(g_names, found, n * sizeof found[0]);
-    g_name_count = n;
-    ReleaseSRWLockExclusive(&g_names_lock);
-    static int last_n = -1;
-    if (n != last_n) { rc_log("pvp: lobby names on screen: %d (%d dialogs looked at)", n, 20000 - budget); last_n = n; }
-}
-
-int pvp_game_menu(void) { scan_names(); return g_game_menu; }
+static volatile int g_game_menu;             // the last look at the screen saw it
 
 // ---- the lobby's lines taller: the listbox's own line height -------------------------------------------------
 // What did not work (2026-11-02): resizing and moving the lines ourselves (the listbox put them back: they jumped),
@@ -502,24 +485,89 @@ static void lb_apply_install(void (*patch)(void *, const void *, size_t)) {
 
 static uint64_t g_tall_listbox;          // the last one made taller (a new one is made each time a lobby opens)
 
-// the session list and the names in its lines
-typedef struct { uint64_t listbox; void *names[MAX_NAMES]; int n; } SessionFind;
+// One look at the screen, about 120 times a second, on the game's thread between its GUI updates: the only place where the
+// dialogs stand still. It goes down what is on screen, as the game's own drawing does, so it reads them directly: a call into
+// the system for each read made the old looks cost 3 to 9 ms, a hitch each time. Everything drawn over the game's pages takes
+// what this look saw (the screen's places below too), so an ESC menu or a page that changes hides what is over it at once.
+#define SCREEN_EVERY_US 8000
+#define VT_OPTIONS_GAME 0x1048578      // eOptionsGameTab: the Game tab of the options, by its class: it has no id
+static const char *const SCREEN_NAMES[SCREEN_N] = {"camo_root", "lb_replays", "btn_game_info", "btn_start", "panel_settings"};
+typedef struct { uint64_t listbox; void *names[MAX_NAMES]; int n, menu, session, looked; void *panel, *named[SCREEN_N]; } ScreenFind;
 
-static void tall_walk(uint64_t d, int depth, int in_session, int *budget, SessionFind *f) {
-    if (!d || depth > 72 || --*budget < 0) return;
-    uint32_t flags = 0;
-    if (!peek((void *)(d + 0x48), &flags, 4) || !(flags & 2)) return;
-    uint64_t vt = pq(d);
-    if (vt == (uintptr_t)(g_base + VT_SESSION_VIEW)) in_session = 1;
+static void screen_walk(uint64_t d, int depth, int in_session, int *budget, ScreenFind *f) {
+    if (d < 0x10000 || (d & 7) || depth > 72 || --*budget < 0) return;
+    const uint8_t *p = (const uint8_t *)(uintptr_t)d;
+    if (!(*(const uint32_t *)(p + 0x48) & 2)) return;       // not on screen: nothing under it is
+    f->looked++;
+    uint64_t vt = *(const uint64_t *)p;
+    if (vt == (uintptr_t)(g_base + VT_CHAT_VIEW) && !f->panel) f->panel = (void *)(uintptr_t)d;
+    if (vt == (uintptr_t)(g_base + VT_GAME_MENU)) f->menu = 1;
+    if (vt == (uintptr_t)(g_base + VT_OPTIONS_GAME)) f->named[SCREEN_OPTIONS_GAME] = (void *)(uintptr_t)d;
+    if (vt == (uintptr_t)(g_base + VT_SESSION_VIEW)) f->session = in_session = 1;
     if (in_session && vt == (uintptr_t)(g_base + VT_MENU_LISTBOX) && !f->listbox) f->listbox = d;
     if (in_session && vt == (uintptr_t)(g_base + VT_NAME_VIEW)) { if (f->n < MAX_NAMES) f->names[f->n++] = (void *)(uintptr_t)d; return; }
-    uint64_t b = pq(d + 0xd8), e = pq(d + 0xe0);
+    uint64_t size = *(const uint64_t *)(p + 0x68), cap = *(const uint64_t *)(p + 0x70);      // its id, as the layout names it
+    if (cap == 15 && size >= 9 && size <= 15)
+        for (int i = 0; i < SCREEN_OPTIONS_GAME; i++)
+            if (!f->named[i] && strlen(SCREEN_NAMES[i]) == size && !memcmp(p + 0x58, SCREEN_NAMES[i], size)) f->named[i] = (void *)(uintptr_t)d;
+    uint64_t b = *(const uint64_t *)(p + 0xd8), e = *(const uint64_t *)(p + 0xe0);
     if (!b || e < b || e - b > 8 * 4096) return;
-    for (uint64_t p = b; p < e; p += 8) tall_walk(pq(p), depth + 1, in_session, budget, f);
+    for (uint64_t k = b; k < e; k += 8) screen_walk(*(const uint64_t *)(uintptr_t)k, depth + 1, in_session, budget, f);
+}
+
+// what the drawing takes from the last look
+typedef struct { int pvp_ok, chat_ok, panel_ok; float pvp[7], chat[6]; ChatPanel panel; } ScreenPlaces;
+static ScreenPlaces g_places;
+static SRWLOCK g_places_lock = SRWLOCK_INIT;
+static void *g_screen_named[SCREEN_N];
+static long g_screen_seq;
+static int chat_panel_now(ChatPanel *out);
+
+void *pvp_screen_named(int which) { return g_screen_named[which]; }
+long pvp_screen_seq(void) { return g_screen_seq; }
+
+static void screen_publish(const ScreenFind *f) {
+    if (f->menu != g_game_menu) rc_log("pvp: the ESC menu %s", f->menu ? "on screen" : "gone");
+    g_game_menu = f->menu;
+    if (f->panel != g_panel) rc_log("pvp: the game's chat panel %s", f->panel ? "on screen" : "gone");
+    g_panel = f->panel;
+    memcpy(g_screen_named, f->named, sizeof g_screen_named);
+    static ScreenPlaces s;
+    s.pvp_ok = pvp_rect_now(&s.pvp[0], &s.pvp[1], &s.pvp[2], &s.pvp[3], &s.pvp[4], &s.pvp[5], &s.pvp[6]);
+    s.chat_ok = chat_rect_now(&s.chat[0], &s.chat[1], &s.chat[2], &s.chat[3], &s.chat[4], &s.chat[5]);
+    s.panel_ok = chat_panel_now(&s.panel);
+    AcquireSRWLockExclusive(&g_places_lock);
+    g_places = s;
+    ReleaseSRWLockExclusive(&g_places_lock);
+    g_screen_seq++;
+}
+
+int pvp_game_menu(void) { return g_game_menu; }
+int pvp_rect(float *x, float *y, float *w, float *h, float *head_h, float *root_w, float *root_h) {
+    AcquireSRWLockShared(&g_places_lock);
+    int ok = g_places.pvp_ok;
+    const float *v = g_places.pvp;
+    if (ok) { *x = v[0]; *y = v[1]; *w = v[2]; *h = v[3]; *head_h = v[4]; *root_w = v[5]; *root_h = v[6]; }
+    ReleaseSRWLockShared(&g_places_lock);
+    return ok;
+}
+int chat_rect(float *x, float *y, float *w, float *h, float *root_w, float *root_h) {
+    AcquireSRWLockShared(&g_places_lock);
+    int ok = g_places.chat_ok;
+    const float *v = g_places.chat;
+    if (ok) { *x = v[0]; *y = v[1]; *w = v[2]; *h = v[3]; *root_w = v[4]; *root_h = v[5]; }
+    ReleaseSRWLockShared(&g_places_lock);
+    return ok;
+}
+int chat_panel(ChatPanel *out) {
+    AcquireSRWLockShared(&g_places_lock);
+    int ok = g_places.panel_ok;
+    if (ok) *out = g_places.panel;
+    ReleaseSRWLockShared(&g_places_lock);
+    return ok;
 }
 
 static int rows_now(void **names, int count, LobbyRow *out, int max);
-static int names_alive(void **names, int count);
 static void publish_rows(const LobbyRow *rows, int n, DWORD now);
 // The MMR under the names is drawn on another thread than the one laying the list out: read there, the lines'
 // places were sometimes caught in the middle of a layout and the MMR blinked to a wrong place (2026-11-02). So the
@@ -529,22 +577,23 @@ static int g_rows_n;
 static DWORD g_rows_at;
 static SRWLOCK g_rows_lock = SRWLOCK_INIT;
 
+static int g_steady_n;
 void pvp_gui_tick(void) {
-    static DWORD at, rows_at;
-    static SessionFind f;                // the session list and its names as last found; checked on every iteration
-    DWORD now = GetTickCount();
+    static double at;
+    static ScreenFind f;                 // the last look
     if (!g_base) return;
-    if (now - at >= 250 || (now - at >= 100 && !names_alive(f.names, f.n))) {   // a new look: in time, or a line made anew
-        at = now;
-        uint64_t root = pq((uintptr_t)(g_base + G_DESKTOP));
-        if (!root || pq(root) != (uintptr_t)(g_base + VT_DESKTOP)) return;
+    double us = uistat_now();
+    if (us - at >= SCREEN_EVERY_US) {
+        at = us;
+        uint64_t root = *(const uint64_t *)(g_base + G_DESKTOP);
+        if (!root || *(const uint64_t *)(uintptr_t)root != (uintptr_t)(g_base + VT_DESKTOP)) return;
         int budget = 20000;
         memset(&f, 0, sizeof f);
-        tall_walk(root, 0, 0, &budget, &f);
-    }
-    if (now - rows_at >= 30) {           // the places for the MMR, about thirty times a second
-        rows_at = now;
+        screen_walk(root, 0, 0, &budget, &f);
+        screen_publish(&f);
         LobbyRow rows[16];
+        DWORD now = GetTickCount();
+        if (!f.session) g_steady_n = 0;  // the lobby is gone: its MMR goes with it, not 200 ms later
         int n = rows_now(f.names, f.n, rows, 16);
         publish_rows(rows, n, now);
     }
@@ -566,18 +615,7 @@ void pvp_gui_tick(void) {
     g_tall_listbox = lb;
 }
 
-// The session list makes its lines anew when it updates: names found before are then gone (another object, or
-// not on the screen), and the MMR under them blinked out until the next look. One of them gone: a new look then.
-static int names_alive(void **names, int count) {
-    for (int i = 0; i < count; i++) {
-        uint32_t flags = 0;
-        if (pq((uintptr_t)names[i]) != (uintptr_t)(g_base + VT_NAME_VIEW) || !peek((uint8_t *)names[i] + 0x48, &flags, 4) || !(flags & 2))
-            return 0;
-    }
-    return 1;
-}
-
-// What is drawn is steady: a line's place changes only when it was read the same twice in a row (60 ms), and a
+// What is drawn is steady: a line's place changes only when it was read the same twice in a row, and a
 // line missing from one reading stays for 200 ms; lines are kept in the order of their places. Whatever the list
 // does for a moment while it updates is not drawn. Lines whose spacing is not LINE_H are logged (a few times).
 typedef struct { LobbyRow row, seen; int same; DWORD at; } SteadyRow;
@@ -827,6 +865,8 @@ int pvp_install(uint8_t *exe, const char *dir, uint8_t *(*alloc)(size_t), void (
     filter_install(dir, patch);
     camo_install(exe, alloc, patch);
     day_install(exe, patch, 0);
+    farshoot_init(exe);
+    pathing_install(exe, alloc, patch);
     // the pages: their vtable slots point at ours, which call the game's
     void *binds[2] = {(void *)bind_online, (void *)bind_lan}, *cmds[2] = {(void *)cmd_online, (void *)cmd_lan};
     void *dtors[2] = {(void *)dtor_online, (void *)dtor_lan};
@@ -859,8 +899,7 @@ static void panel_parts(uint64_t d, int depth, uint64_t *channel, Dialogs *all) 
     for (uint64_t p = b; p < e; p += 8) panel_parts(pq(p), depth + 1, channel, all);
 }
 
-int chat_panel(ChatPanel *out) {
-    scan_names();
+static int chat_panel_now(ChatPanel *out) {
     void *v = g_panel;
     uint64_t vt = 0, channel = 0;
     int32_t px, py, pw, ph, rw, rh, cx, cy, cw, ch;

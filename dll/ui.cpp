@@ -12,6 +12,7 @@
 #include <time.h>
 #include <shellapi.h>
 #include "imgui.h"
+#include "imgui_internal.h"
 #include "imgui_impl_win32.h"
 #include "imgui_impl_dx11.h"
 #include "goh_replay.h"
@@ -95,6 +96,13 @@ static bool raw_mouse_button(LPARAM l) {
     return ri.header.dwType == RIM_TYPEMOUSE && (ri.data.mouse.usButtonFlags != 0);
 }
 
+static bool raw_left_down(LPARAM l) {
+    RAWINPUT ri;
+    UINT size = sizeof ri;
+    if (GetRawInputData((HRAWINPUT)l, RID_INPUT, &ri, &size, sizeof(RAWINPUTHEADER)) == (UINT)-1) return false;
+    return ri.header.dwType == RIM_TYPEMOUSE && (ri.data.mouse.usButtonFlags & RI_MOUSE_LEFT_BUTTON_DOWN);
+}
+
 static bool raw_keyboard(LPARAM l) {
     RAWINPUTHEADER hd;
     UINT size = sizeof hd;
@@ -124,7 +132,92 @@ static void hotkeys() {
     census_was = census;
 }
 
+// Whose a click is, by where the mouse is at that moment: ImGui's own answer is from the last frame, and a quick move and click
+// went through to the game or was lost. The windows as the last frame left them; a popup open or a drag under way take every click.
+struct HitBox { float x0, y0, x1, y1; };
+static HitBox g_hit[64];
+static int g_hit_n;
+static bool g_hit_all;
+static SRWLOCK g_hit_lock = SRWLOCK_INIT;
+static void hit_boxes() {
+    ImGuiContext &g = *GImGui;
+    AcquireSRWLockExclusive(&g_hit_lock);
+    g_hit_n = 0;
+    g_hit_all = g.OpenPopupStack.Size > 0 || g.ActiveId != 0;
+    for (ImGuiWindow *win : g.Windows) {
+        if (!win->Active || win->Hidden || win->IsFallbackWindow || (win->Flags & (ImGuiWindowFlags_NoMouseInputs | ImGuiWindowFlags_ChildWindow)) || g_hit_n == 64) continue;
+        g_hit[g_hit_n++] = {win->Pos.x, win->Pos.y, win->Pos.x + win->Size.x, win->Pos.y + win->Size.y};
+    }
+    ReleaseSRWLockExclusive(&g_hit_lock);
+}
+static bool mouse_is_ours(HWND h) {
+    POINT p;
+    if (!GetCursorPos(&p) || !ScreenToClient(h, &p)) return ImGui::GetIO().WantCaptureMouse;
+    AcquireSRWLockShared(&g_hit_lock);
+    bool ours = g_hit_all;
+    for (int i = 0; i < g_hit_n && !ours; i++) ours = p.x >= g_hit[i].x0 && p.x < g_hit[i].x1 && p.y >= g_hit[i].y0 && p.y < g_hit[i].y1;
+    ReleaseSRWLockShared(&g_hit_lock);
+    return ours;
+}
+
+// The order on the press (pathing.c): the game gets the button's going up a frame or two after it went down, ours, marked; the
+// real one then stays away from it.
+#define PRESS_MARK 0x474f4850
+static volatile long g_press_due, g_real_up_raw, g_real_up_msg, g_double_due;
+// Auto-run, a test: one click is two. The game runs a squad on a double click, so ours follows the first, marked too.
+static volatile bool g_autorun;
+static void send_right(DWORD flag) {
+    INPUT in = {};
+    in.type = INPUT_MOUSE;
+    in.mi.dwFlags = flag;
+    in.mi.dwExtraInfo = PRESS_MARK;
+    SendInput(1, &in, sizeof in);
+}
+static void press_seen(HWND h) {
+    if (g_press_due || g_double_due || !pathing_press_order() || mouse_is_ours(h)) return;
+    g_real_up_raw = g_real_up_msg = 1;
+    g_press_due = 1;
+}
+static void press_frame() {
+    if (g_double_due) send_right(--g_double_due ? MOUSEEVENTF_RIGHTDOWN : MOUSEEVENTF_RIGHTUP);
+    if (!g_press_due || --g_press_due) return;
+    send_right(MOUSEEVENTF_RIGHTUP);
+    if (g_autorun) g_double_due = 2;
+}
+// the real button came up before ours went
+static void press_quick() {
+    g_press_due = 0;
+    g_real_up_raw = g_real_up_msg = 0;
+    if (g_autorun) g_double_due = 2;
+}
+// true: not for the game
+static bool press_filter(HWND h, UINT m, LPARAM l) {
+    if (m == WM_RBUTTONDOWN) { if ((long)GetMessageExtraInfo() != PRESS_MARK) press_seen(h); return false; }
+    if (m == WM_RBUTTONUP) {
+        if ((long)GetMessageExtraInfo() == PRESS_MARK) return false;
+        if (g_press_due) { press_quick(); return false; }     // quicker than our own
+        if (g_real_up_msg) { g_real_up_msg = 0; return true; }
+        return false;
+    }
+    if (m != WM_INPUT) return false;
+    RAWINPUT ri;
+    UINT size = sizeof ri;
+    if (GetRawInputData((HRAWINPUT)l, RID_INPUT, &ri, &size, sizeof(RAWINPUTHEADER)) == (UINT)-1 || ri.header.dwType != RIM_TYPEMOUSE) return false;
+    USHORT flags = ri.data.mouse.usButtonFlags;
+    if ((flags & RI_MOUSE_RIGHT_BUTTON_DOWN) && ri.data.mouse.ulExtraInformation != PRESS_MARK) press_seen(h);
+    if ((flags & RI_MOUSE_RIGHT_BUTTON_UP) && ri.data.mouse.ulExtraInformation != PRESS_MARK) {
+        if (g_press_due) { press_quick(); return false; }
+        if (g_real_up_raw) { g_real_up_raw = 0; return true; }
+    }
+    return false;
+}
+
 static LRESULT CALLBACK wndproc(HWND h, UINT m, WPARAM w, LPARAM l) {
+    if ((m == WM_RBUTTONDOWN || m == WM_RBUTTONUP || m == WM_INPUT) && press_filter(h, m, l)) return m == WM_INPUT ? DefWindowProcW(h, m, w, l) : 0;
+    if (farshoot_blocks()) {             // past the gun's range through the sight: the shot does not reach the game
+        if (m == WM_LBUTTONDOWN || m == WM_LBUTTONDBLCLK) return 0;
+        if (m == WM_INPUT && raw_left_down(l)) return DefWindowProcW(h, m, w, l);
+    }
     if (g_ready) {
         if (panel_shown() || charts_shown() || music_shown() || prep_shown() || balance_shown() || online_shown() ||
             consent_shown() || login_shown() || about_shown() || g_integrity_click || g_pvp_drawn || g_chat_drawn || camo_shown() || g_card_open) {
@@ -132,11 +225,8 @@ static LRESULT CALLBACK wndproc(HWND h, UINT m, WPARAM w, LPARAM l) {
             // typing into our chat line: the keys are not the game's
             if (ImGui::GetIO().WantTextInput && ((m >= WM_KEYFIRST && m <= WM_KEYLAST) || (m == WM_INPUT && raw_keyboard(l))))
                 return m == WM_INPUT ? DefWindowProcW(h, m, w, l) : 0;
-            if (ImGui::GetIO().WantCaptureMouse) {
-                bool button = (m >= WM_LBUTTONDOWN && m <= WM_MOUSELAST && m != WM_MOUSEMOVE);
-                if (button) return 0;
-                if (m == WM_INPUT && raw_mouse_button(l)) return DefWindowProcW(h, m, w, l);
-            }
+            bool button = (m >= WM_LBUTTONDOWN && m <= WM_MOUSELAST && m != WM_MOUSEMOVE), raw = m == WM_INPUT && raw_mouse_button(l);
+            if ((button || raw) && mouse_is_ours(h)) return button ? 0 : DefWindowProcW(h, m, w, l);
         }
     }
     return CallWindowProcW(g_wndproc, h, m, w, l);
@@ -547,6 +637,8 @@ static void balance_window() {
         ImGui::TextDisabled("%s", TR("Германия, Оборонительная: т2 — 15 см NbW 41, т3 — 12 см sGrW 42", "Germany, Defensive: t2 — 15 cm NbW 41, t3 — 12 cm sGrW 42"));
         if (g_balance_locked) ImGui::TextDisabled("%s", TR("Идёт бой или реплей: переключить можно после него.", "A battle or replay is on: switch after it."));
         else ImGui::TextDisabled("%s", TR("Действует на следующий матч или реплей, который вы запустите.", "Applies to the next match or replay you start."));
+        bool run = g_autorun;
+        if (ImGui::Checkbox(TR("Автобег (тест): пехота бежит с одного ПКМ", "Auto-run (test): infantry runs on one right click"), &run)) g_autorun = run;
         ImGui::Text(TR("Версия баланса: %s", "Balance version: %s"), g_balance_tag);
         ImGui::PushStyleColor(ImGuiCol_Text, ACCENT);
         ImGui::TextWrapped("%s", TR("Игры это пока не сверяют: у всех игроков матча должны быть эта же версия и галочка, иначе рассинхрон или вылет.",
@@ -2528,6 +2620,43 @@ static bool make_rtv(IDXGISwapChain *sc) {
     return SUCCEEDED(hr);
 }
 
+// An order goes when the right button comes up, and a soldier moves some 100 ms later: the answer to the click is drawn at once, on
+// the frame of the button going down, where the mouse is.
+static void order_ring() {
+    static bool held;
+    static double at;
+    static ImVec2 where;
+    bool down = (GetAsyncKeyState(VK_RBUTTON) & 0x8000) != 0;
+    if (down && !held && pathing_wants() && g_live_match && GetForegroundWindow() == g_hwnd && !mouse_is_ours(g_hwnd)) {
+        POINT p;
+        if (GetCursorPos(&p) && ScreenToClient(g_hwnd, &p)) { where = ImVec2((float)p.x, (float)p.y); at = ImGui::GetTime(); }
+    }
+    held = down;
+    float age = at ? (float)(ImGui::GetTime() - at) / .28f : 1;
+    if (age >= 1) return;
+    float out = 1 - (1 - age) * (1 - age), k = ImGui::GetFontSize() / 18.f;
+    ImDrawList *dl = ImGui::GetForegroundDrawList();
+    int alpha = (int)(230 * (1 - age));
+    dl->AddCircle(where, (5 + 19 * out) * k, IM_COL32(0, 0, 0, alpha / 2), 32, 3.5f * k);
+    dl->AddCircle(where, (5 + 19 * out) * k, IM_COL32(150, 235, 130, alpha), 32, 2 * k);
+    dl->AddCircleFilled(where, 2.5f * k, IM_COL32(190, 245, 170, alpha));
+}
+
+// the shot's distance by the sight's mark
+static void farshoot_text() {
+    int tenths, beyond;
+    if (!farshoot_state(&tenths, &beyond)) return;
+    ImGuiIO &io = ImGui::GetIO();
+    char text[32];
+    if (tenths < 0) snprintf(text, sizeof text, TR(">%.1f м", ">%.1f m"), -tenths / 10.);
+    else snprintf(text, sizeof text, TR("%.1f м", "%.1f m"), tenths / 10.);
+    ImFont *font = g_game_font ? g_game_font : ImGui::GetFont();
+    ImDrawList *dl = ImGui::GetForegroundDrawList();
+    ImVec2 at(floorf(io.DisplaySize.x * .5f + 34), floorf(io.DisplaySize.y * .5f - font->FontSize / 2));     // the sight's mark is the screen's middle
+    dl->AddText(font, font->FontSize, ImVec2(at.x + 1, at.y + 1), IM_COL32(0, 0, 0, 200), text);
+    dl->AddText(font, font->FontSize, at, beyond ? IM_COL32(255, 70, 60, 255) : IM_COL32(245, 245, 240, 255), text);
+}
+
 static void draw(IDXGISwapChain *sc) {
     if (!make_rtv(sc)) return;
     ImGuiIO &io = ImGui::GetIO();
@@ -2536,6 +2665,9 @@ static void draw(IDXGISwapChain *sc) {
     ImGui::NewFrame();
     hotkeys();
     camo_draw(g_dev, g_hwnd);
+    farshoot_text();
+    order_ring();
+    press_frame();
     static long results_was;
     if (g_ms_results != results_was) {         // the results page opens the charts and takes them along when it goes
         results_was = g_ms_results;
@@ -2560,6 +2692,7 @@ static void draw(IDXGISwapChain *sc) {
         prep_window();
     }
     ImGui::Render();
+    hit_boxes();
     ImDrawData *dd = ImGui::GetDrawData();
     if (!dd->CmdListsCount) { g_rtv->Release(); g_rtv = nullptr; return; }
     ID3D11RenderTargetView *old_rtv = nullptr;
@@ -2586,7 +2719,11 @@ extern "C" void ui_present(void *device) {
         DXGI_SWAP_CHAIN_DESC d;
         if (SUCCEEDED(sc->GetDesc(&d)) && IsWindowVisible(d.OutputWindow)) init_imgui(sc);
     }
-    if (g_ready && sc == g_sc) draw(sc);
+    if (g_ready && sc == g_sc) {
+        double at = g_uistat_on ? uistat_now() : 0;
+        draw(sc);
+        if (g_uistat_on) { uistat_add(UISTAT_DRAW, at); uistat_frame(); }
+    }
 }
 
 extern "C" int g_ui_draw = 1;   // [debug] ui_draw=0 in goh_snapshots.ini: nothing drawn

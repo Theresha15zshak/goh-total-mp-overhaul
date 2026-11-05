@@ -191,6 +191,26 @@ void report_done(long long end_time);       // that match is dealt with (taken, 
 int replay_player_names(const char *rel, char names[][64], int max);
 void day_install(uint8_t *exe, void (*patch)(void *, const void *, size_t), int server);
 void day_publish(int on);                   // the host's Always Day, for the mission here and in the server
+// what the mod costs a frame ([debug] ui_stats=1), uistat.c
+enum { UISTAT_LOGIC, UISTAT_CAMO, UISTAT_DRAW, UISTAT_GAP, UISTAT_N };
+extern int g_uistat_on;
+double uistat_now(void);
+void uistat_add(int slot, double from);
+void uistat_frame(void);
+// no farshoot from first person (farshoot.c)
+void farshoot_init(uint8_t *exe);
+void farshoot_enable(int on);
+void farshoot_tick(void);
+int farshoot_state(int *tenths, int *beyond);
+int farshoot_blocks(void);
+// units' paths under the competitive balance, a test (pathing.c)
+void pathing_init(uint8_t *exe, const char *ini, int server);
+void pathing_tick(void);
+void pathing_install(uint8_t *exe, uint8_t *(*alloc)(size_t), void (*patch)(void *, const void *, size_t));
+int pathing_wants(void);
+int pathing_press_order(void);
+size_t pathing_edit(const char *name, uint8_t *b, size_t n, size_t cap);
+size_t pathing_more(void);
 void replays_open_folder(void);             // the Replays tab's button
 void replays_rename(const char *me);        // finished autoreplays get names of their own: mode_3v3_map_army_date
 
@@ -206,6 +226,10 @@ int chat_rect(float *x, float *y, float *w, float *h, float *root_w, float *root
 // its channel starts below the tabs, the right end of the tabs and each tab's place (game units, as pvp_rect)
 typedef struct { float x, y, w, h, body_y, tabs_r, root_w, root_h; int ntabs; float tab[8][4]; } ChatPanel;
 int chat_panel(ChatPanel *p);
+// what the look at the screen found (pvp.c): dialogs by their ids, for the game's thread; the number of the look
+enum { SCREEN_CAMO, SCREEN_REPLAYS, SCREEN_LOBBY, SCREEN_START, SCREEN_SETTINGS, SCREEN_OPTIONS_GAME, SCREEN_N };
+void *pvp_screen_named(int which);
+long pvp_screen_seq(void);
 int pvp_game_menu(void);                                    // the ESC menu of a battle or a replay is on screen
 // the lobbies of the game as Steam has them (steamlobby.c): kept fresh while the tab keeps asking
 #define LOBBY_LINES 200
