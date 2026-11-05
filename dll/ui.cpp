@@ -768,12 +768,16 @@ static const char *ABOUT_EN[] = {
     "Sign in through Steam: the mod gets only your SteamID, no password",
 };
 static const char *NEWS_RU[] = {
-    "Камуфляж и наклейки больше не пересвечены: картинки приводятся к яркости техники",
-    "Ползунки яркости для камуфляжа и каждой наклейки",
+    "Несколько камуфляжей на одной технике: каждый на свою часть — весь танк, борт, корпус или башню",
+    "Камуфляж больше не копируется с борта на борт, отражение по горизонтали и вертикали у каждого слоя",
+    "Перед добавлением картинки можно выбрать её часть: она сохранится отдельной картинкой",
+    "Камуфляж и наклейки больше не пересвечены, у них появились ползунки яркости",
 };
 static const char *NEWS_EN[] = {
-    "Camouflage and stickers are no longer overexposed: pictures are brought to the vehicles' brightness",
-    "Brightness sliders for camouflage and for each sticker",
+    "Several camouflages on one vehicle, each on its own part: the whole vehicle, a side, the hull or the turret",
+    "Camouflage is no longer copied from side to side; each layer can be mirrored horizontally and vertically",
+    "Before a picture goes on, a part of it can be chosen: it is saved as a picture of its own",
+    "Camouflage and stickers are no longer overexposed and have brightness sliders",
 };
 
 // which news the player has read: by their text, so a build with the same news stays quiet

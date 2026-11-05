@@ -2,6 +2,8 @@
 #pragma once
 #include <math.h>
 #include <stdint.h>
+// The whole vehicle, the hull and the turret take one sheet from side to side; a side takes the whole picture for itself.
+enum { CAMO_ALL, CAMO_LEFT, CAMO_RIGHT, CAMO_HULL, CAMO_TURRET };
 struct CamoSettings {
     float offset[2] = {0, 0};
     float scale = 5, rotation = 0, opacity = 1;
@@ -9,11 +11,23 @@ struct CamoSettings {
     int mode = 0;                                   // 0 one picture on the vehicle (camo.cpp), 1 a pattern over the texture
     int repeat = 1;                                 // mode 0: the picture goes on mirrored beyond its edges
     float size = 1;                                 // mode 0: 1 = the smallest picture that covers the whole vehicle
-    int through = 0;                                // mode 0: 0 both sides alike, mirrored along the roof; 1 one sheet over it all
+    int part = 0;                                   // mode 0: where it goes, CAMO_ above
     int flip_x = 0, flip_y = 0;                     // mode 0: the picture turned over
     float dim = 1;                                  // the picture's level, in plain blending (camo.cpp, picture_level); not a setting
     float bright = 1;                               // the player's brightness over that level
 };
+// The pixels a selection holds, corners 0 to 1 either way round: left, top, right, bottom. False: the whole picture, or too little
+// to be a selection.
+static bool camo_crop_rect(float ax, float ay, float bx, float by, int w, int h, int r[4]) {
+    r[0] = (int)floorf(fminf(ax, bx) * w + .5f); r[2] = (int)floorf(fmaxf(ax, bx) * w + .5f);
+    r[1] = (int)floorf(fminf(ay, by) * h + .5f); r[3] = (int)floorf(fmaxf(ay, by) * h + .5f);
+    if (r[0] < 0) r[0] = 0;
+    if (r[1] < 0) r[1] = 0;
+    if (r[2] > w) r[2] = w;
+    if (r[3] > h) r[3] = h;
+    if (r[2] - r[0] < 2 || r[3] - r[1] < 2) return false;
+    return r[0] > 0 || r[1] > 0 || r[2] < w || r[3] < h;
+}
 // one texel of the picture between its pixels, the picture repeating
 static void camo_sample(const uint8_t *pattern, int w, int h, float u, float v, float out[4]) {
     float x = (u - floorf(u)) * w - .5f, y = (v - floorf(v)) * h - .5f;
