@@ -3,8 +3,8 @@
 // Its replay.ss is the session card in the game's text format: game type, army selection mode, map, start and
 // end time, every member (type, name, team a/b, army, SteamID), which team is Axis or Allies, and
 // battleInfoTotal, whose "info" block (base64 of zlib) holds the winning team's letter (re/NOTES.md).
-// A match that counts (Axis vs Allies, Battle Zones or Domination, no mods, equal human sides of 1..4, a winner,
-// us in it) becomes a report; online.c sends it. Only replay.ss is read, not the whole replay.
+// A match that counts (Axis vs Allies, Battle Zones or Domination, equal human sides of 1..4, a winner, us in
+// it) becomes a report; online.c sends it. Only replay.ss is read, not the whole replay.
 #include <windows.h>
 #include <shlobj.h>
 #include <shellapi.h>
@@ -143,10 +143,6 @@ static int make_report(const char *ss, const char *me, const char *key, char *bo
     if (!field(ss, stop, "armySelectionMode", sel, sizeof sel) || strcmp(sel, "alliance")) { *why = "not Axis vs Allies"; return 0; }
     field(ss, stop, "bots", bots, sizeof bots);
     if (strcmp(bots, "0")) { *why = "bots"; return 0; }
-    // {mods ""} in a plain game, the workshop's mods of the lobby otherwise ("mod_3295913567:0"). What a mod changes the card does
-    // not say, so any of them keeps a match out of the ratings. A list too long for this is a list all the same.
-    char mods[64];
-    if (strstr(ss, "{mods ") && (!field(ss, stop, "mods", mods, sizeof mods) || mods[0])) { *why = "mods"; return 0; }
     if (!field(ss, stop, "map", map, sizeof map)) map[0] = 0;
     // which team is which side
     const char *teams = strstr(ss, "{teams {"), *alliances = teams ? strstr(teams, "{alliances") : NULL;
