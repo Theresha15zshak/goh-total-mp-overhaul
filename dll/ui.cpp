@@ -870,6 +870,8 @@ static const char *NEWS_RU[] = {
     "Компетитив: пехота снова разводится обычным ПКМ, как в оригинальной игре, без Alt",
     "Компетитив: убрано зелёное кольцо при клике ПКМ",
     "Компетитив: солдаты больше не приседают и не замирают на бегу",
+    "Компетитив: исправлен вылет сервера хоста в бою",
+    "Рейтинг: игра идёт в зачёт, только если открылся экран итогов",
 };
 static const char *NEWS_EN[] = {
     "Competitive: infantry answers orders much faster, groups turn together",
@@ -878,6 +880,8 @@ static const char *NEWS_EN[] = {
     "Competitive: infantry is laid out with a plain right drag again, as in the original game, no Alt",
     "Competitive: the green ring on a right click is gone",
     "Competitive: soldiers no longer squat and freeze on the run",
+    "Competitive: fixed a crash of the host's server in battle",
+    "Rating: a match counts only if its results screen opened",
 };
 
 // which news the player has read: by their text, so a build with the same news stays quiet

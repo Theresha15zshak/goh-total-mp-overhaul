@@ -375,6 +375,32 @@ static long long last_end(void) {
     return now - BACKLOG_S;      // the first start: the last two weeks' matches go in too
 }
 
+// For now only a match that reached its results screen goes to the server. The card alone cannot tell: it has a winner after a match
+// closed early too, and when the host's server fell (2026-11-06) each player's card said his own side lost. The moments the screen
+// opened are kept in goh_online.ini, so a report held over to the next start still finds its own.
+#define FINISHED_KEEP 8
+#define FINISHED_AFTER_S 180        // the card's end is when we left; the clock of a match may lag ours a little
+void report_finished(void) {
+    char v[160], out[160];
+    GetPrivateProfileStringA("reports", "finished", "", v, sizeof v, g_ini);
+    int n = 0;
+    char *times[FINISHED_KEEP + 1], *next = NULL;
+    for (char *t = strtok_s(v, " ", &next); t && n < FINISHED_KEEP + 1; t = strtok_s(NULL, " ", &next)) times[n++] = t;
+    int from = n >= FINISHED_KEEP ? n - FINISHED_KEEP + 1 : 0, o = 0;
+    for (int i = from; i < n; i++) o += snprintf(out + o, sizeof out - o, "%s ", times[i]);
+    snprintf(out + o, sizeof out - o, "%lld", (long long)time(NULL));
+    WritePrivateProfileStringA("reports", "finished", out, g_ini);
+}
+static int match_finished(long long start, long long end) {
+    char v[160], *next = NULL;
+    GetPrivateProfileStringA("reports", "finished", "", v, sizeof v, g_ini);
+    for (char *t = strtok_s(v, " ", &next); t; t = strtok_s(NULL, " ", &next)) {
+        long long at = _atoi64(t);
+        if (at >= start && at <= end + FINISHED_AFTER_S) return 1;
+    }
+    return 0;
+}
+
 void report_done(long long end_time) {
     char v[32];
     snprintf(v, sizeof v, "%lld", end_time);
@@ -417,7 +443,10 @@ int report_next(const char *me, const char *key, char *body, size_t n, long long
     if (!ss) return 0;
     const char *why = "";
     int ok = make_report(ss, me, key, body, n, end_time, &why);
+    char start[24] = "0";
+    field(ss, ss + strlen(ss), "gameStartTime", start, sizeof start);
     free(ss);
+    if (ok && !match_finished(_atoi64(start), best_end)) { ok = 0; why = "no results screen: it crashed or was closed early"; }
     if (!ok) {
         rc_log("report: match ending %lld not rated here (%s)", best_end, why);
         report_done(best_end);

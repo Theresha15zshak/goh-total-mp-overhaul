@@ -64,8 +64,9 @@ static const Watch WATCH[] = {
     {"stats_event",  0xd24380, 5, {0x48, 0x89, 0x5c, 0x24, 0x08}},  // eCompetitiveGame/eGuerrillaGame::HandleStatsEvent(game, ev)
     {"stats_event2", 0xd13ba0, 7, {0x40, 0x55, 0x53, 0x41, 0x56, 0x41, 0x57}},  // the same for frontline, battle zones and the rest
     {"present",      0x4fc010, 6, {0x40, 0x53, 0x48, 0x83, 0xec, 0x20}},  // eRenderDevice present: swapchain [+0xa8]->Present
+    {"game_result",  0x299100, 5, {0x48, 0x89, 0x5c, 0x24, 0x08}},  // opens eGUI_PageGameResult (Show's page is in a lambda: not seen there)
 };
-enum { W_LOAD = 1, W_TICK = 2, W_SPAWN = 4, W_PAGE_SHOW = 5, W_PAGE_CLOSE = 6, W_STATS_EVENT = 7, W_STATS_EVENT2 = 8, W_PRESENT = 9 };
+enum { W_LOAD = 1, W_TICK = 2, W_SPAWN = 4, W_PAGE_SHOW = 5, W_PAGE_CLOSE = 6, W_STATS_EVENT = 7, W_STATS_EVENT2 = 8, W_PRESENT = 9, W_RESULT = 10 };
 #define NWATCH (sizeof(WATCH) / sizeof(WATCH[0]))
 
 Ctl g_ctl;
@@ -419,6 +420,11 @@ static void __cdecl watch_hit(uint32_t id, void *a1, void *a2) {
         g_battle_tick = GetTickCount();
         g_census_game = (uintptr_t)a1;
         stats_event((uintptr_t)a2);
+        return;
+    }
+    if (id == W_RESULT) {                       // a match played to its end: its report may go (report.c)
+        rc_log("the results screen opens, in a replay: %d", replay_core() != 0);
+        if (!replay_core()) report_finished();
         return;
     }
     if (id == W_PAGE_SHOW) {

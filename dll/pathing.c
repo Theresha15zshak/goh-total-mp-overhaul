@@ -430,6 +430,10 @@ static const char *const FIGHT_RULES[] = {"hide_check", "injured_by_enemy", "ene
 #define NFIGHT (sizeof FIGHT_RULES / sizeof FIGHT_RULES[0])
 #define NBEFORE 2                   // the first ones hold before he moves too
 #define BRAIN_ALARM 0x3da
+// The alarm's rule goes by his enemy without looking (75ead7 on the server: the enemy's +0x28, his place). The game sets the alarm with
+// an enemy there and the rule takes it at once; one kept aside can outlive him, and with no enemy that rule read 0x28: the server fell
+// in a 3v3 (2026-11-06), every player thrown out with his own side the loser. So it comes back only to a man who still has an enemy.
+#define BRAIN_ENEMY 0x3b8
 static volatile long g_held[NFIGHT], g_alarms, g_alarms_back, g_hot_clash;
 #define HOT_REST_MS 700
 #define RULE_STOP 0x400000
@@ -442,7 +446,7 @@ static int told(uint8_t *brain) {
     int moving = chassis && *(const int *)(chassis + 0x64) >= 2;
     // he has a moment after the order to set off, and after each step to take the next
     if ((int32_t)(now - h->until) >= 0 || (!moving && now - h->went > HOT_REST_MS)) {
-        if (h->alarm) { brain[BRAIN_ALARM] = 1; g_alarms_back++; }
+        if (h->alarm && *(void **)(brain + BRAIN_ENEMY)) { brain[BRAIN_ALARM] = 1; g_alarms_back++; }
         h->brain = 0;
         return 0;
     }
@@ -460,6 +464,7 @@ static void hot_quant(const uint8_t *a) {
 static uint8_t rule_check(uint8_t *state, const char *name) {
     uint8_t *brain = *(uint8_t **)(state + 0x30);
     int how = g_hot_ms && g_balance_on ? told(brain) : 0;
+    if (g_hot_ms && g_balance_on && brain[BRAIN_ALARM] && !*(void **)(brain + BRAIN_ENEMY)) brain[BRAIN_ALARM] = 0;
     if (how) {
         if (brain[BRAIN_ALARM] && !strcmp(name, "enemy_alarm")) {
             g_hot[((uintptr_t)brain >> 4) % 2048].alarm = 1;

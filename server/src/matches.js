@@ -103,17 +103,21 @@ export async function report(req, env) {
     al.forEach((i, j) => (after[k][i] = b[j]));
     after[k] = after[k].map((x, i) => ({ mu: t[i][k].mu + f * (x.mu - t[i][k].mu), sigma: x.sigma }));
   }
-  const ins = await env.DB.prepare(
-    `INSERT INTO matches (fp, mode, map, size, ladder, duration_s, winner, ended_at, status, reports, pkey)
-     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, 'rated', 1, ?9)`
-  ).bind(fp, r.mode, r.map, r.size, ladder, r.duration, r.winner, r.end, pkey).run();
-  const id = ins.meta.last_row_id;
+  // One batch is one transaction, and fp is unique: of two reports of a match at the same moment one gets in whole, the other is
+  // turned back here and goes on as a second report. Apart, both were rated as new matches (97 and 98).
+  const matchId = '(SELECT id FROM matches WHERE fp = ?1)';
   const put = (pid, nation, x, won) => env.DB.prepare(
     `INSERT INTO ratings (steam_id, ladder, nation, mu, sigma, games, wins, last_at) VALUES (?1, ?2, ?3, ?4, ?5, 1, ?6, ?7)
      ON CONFLICT(steam_id, ladder, nation) DO UPDATE SET mu = ?4, sigma = ?5, games = games + 1, wins = wins + ?6,
        last_at = max(coalesce(last_at, 0), ?7)`
   ).bind(pid, ladder, nation, x.mu, x.sigma, won, r.end);
-  const st = [env.DB.prepare('INSERT INTO reports (match_id, reporter, winner, at) VALUES (?1, ?2, ?3, ?4)').bind(id, r.reporter, r.winner, now)];
+  const st = [
+    env.DB.prepare(
+      `INSERT INTO matches (fp, mode, map, size, ladder, duration_s, winner, ended_at, status, reports, pkey)
+       VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, 'rated', 1, ?9)`
+    ).bind(fp, r.mode, r.map, r.size, ladder, r.duration, r.winner, r.end, pkey),
+    env.DB.prepare(`INSERT INTO reports (match_id, reporter, winner, at) VALUES (${matchId}, ?2, ?3, ?4)`).bind(fp, r.reporter, r.winner, now),
+  ];
   r.players.forEach((p, i) => {
     const won = p.side === r.winner ? 1 : 0;
     st.push(env.DB.prepare(
@@ -122,11 +126,17 @@ export async function report(req, env) {
     st.push(put(p.id, 'all', after.all[i], won), put(p.id, p.nation, after.nat[i], won));
     st.push(env.DB.prepare(
       `INSERT INTO match_players (match_id, steam_id, name, nation, side, won, mu_a0, sg_a0, mu_a1, sg_a1, mu_n0, sg_n0, mu_n1, sg_n1)
-       VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)`
-    ).bind(id, p.id, p.name, p.nation, p.side, won, t[i].all.mu, t[i].all.sigma, after.all[i].mu, after.all[i].sigma,
+       VALUES (${matchId}, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)`
+    ).bind(fp, p.id, p.name, p.nation, p.side, won, t[i].all.mu, t[i].all.sigma, after.all[i].mu, after.all[i].sigma,
       t[i].nat.mu, t[i].nat.sigma, after.nat[i].mu, after.nat[i].sigma));
   });
-  await env.DB.batch(st);
+  try {
+    await env.DB.batch(st);
+  } catch (e) {
+    const first = /UNIQUE/i.test(String(e)) && await env.DB.prepare('SELECT * FROM matches WHERE fp = ?1 ORDER BY id DESC LIMIT 1').bind(fp).first();
+    if (!first) throw e;
+    return [200, await again(env, first, r, now)];
+  }
   return [200, 'rated'];
 }
 
