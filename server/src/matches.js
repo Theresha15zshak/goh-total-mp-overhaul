@@ -14,6 +14,7 @@
 //
 // The same match comes from several players: it is found again by its mode, map, start time and players.
 // Reports that disagree on the winner make it disputed, and its rating changes are taken back out.
+// A match an admin took out has status 'removed': out of the ratings and the histories, and kept, so that a late report of it is not rated anew.
 // Rating: rating.js; uncertainty grows with time away, and the same players again within a day count for less.
 import { rate, drift, repeatFactor, mmr, MU, SIGMA } from './rating.js';
 
@@ -174,7 +175,7 @@ export async function player(url, env) {
   const { results: rs } = await env.DB.prepare('SELECT ladder, nation, mu, games, wins FROM ratings WHERE steam_id = ?1 AND games > 0').bind(id).all();
   const { results: ms } = await env.DB.prepare(
     `SELECT m.id, m.ended_at, m.mode, m.map, m.size, m.status, mp.nation, mp.side, mp.won, mp.mu_a0, mp.mu_a1
-     FROM match_players mp JOIN matches m ON m.id = mp.match_id WHERE mp.steam_id = ?1 ORDER BY m.id DESC LIMIT ${HISTORY}`
+     FROM match_players mp JOIN matches m ON m.id = mp.match_id WHERE mp.steam_id = ?1 AND m.status != 'removed' ORDER BY m.id DESC LIMIT ${HISTORY}`
   ).bind(id).all();
   let out = tsv('P', prof ? prof.name : '');
   for (const r of rs) out += r.nation === 'all' ? tsv('L', r.ladder, mmr(r.mu), r.games, r.wins) : tsv('N', r.ladder, r.nation, mmr(r.mu), r.games, r.wins);
@@ -197,7 +198,7 @@ export async function leaderboard(url, env) {
   const ladder = url.searchParams.get('ladder') === '1v1' ? '1v1' : 'team';
   const { results } = await env.DB.prepare(
     `SELECT r.steam_id, coalesce(p.name, '?') AS name, r.mu, r.games, r.wins FROM ratings r LEFT JOIN profiles p ON p.steam_id = r.steam_id
-     WHERE r.ladder = ?1 AND r.nation = 'all' AND r.games > 0 ORDER BY r.mu DESC LIMIT 100`
+     WHERE r.ladder = ?1 AND r.nation = 'all' AND r.games > 0 ORDER BY r.mu DESC`
   ).bind(ladder).all();
   return results.map((r, i) => tsv(i + 1, r.steam_id, r.name, mmr(r.mu), r.games, r.wins)).join('');
 }

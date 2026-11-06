@@ -768,16 +768,12 @@ static const char *ABOUT_EN[] = {
     "Sign in through Steam: the mod gets only your SteamID, no password",
 };
 static const char *NEWS_RU[] = {
-    "Наклейки и камуфляж в бою намного чётче: текстура техники с наклейкой вдвое больше",
-    "Галочка «На стволе» у камуфляжей и наклеек",
-    "Камуфляж без шва посередине танка, старый вид можно вернуть галочкой",
-    "Башенки и люки пулемётов красятся как обычные части",
+    "Матчи с модами из мастерской больше не идут в рейтинг",
+    "Таблица лидеров теперь показывает не только первую сотню",
 };
 static const char *NEWS_EN[] = {
-    "Stickers and camouflage are much sharper in battle: a vehicle texture with a sticker is twice as big",
-    "An On the barrel box for camouflages and stickers",
-    "Camouflage has no seam along the middle of the vehicle; a box brings the old look back",
-    "Machine gun cupolas and hatches take paint like other parts",
+    "Matches with Workshop mods no longer count for the ratings",
+    "The leaderboard now goes beyond the top hundred",
 };
 
 // which news the player has read: by their text, so a build with the same news stays quiet
