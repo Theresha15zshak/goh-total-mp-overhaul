@@ -69,10 +69,10 @@ static int swap_all(uint8_t *b, size_t n, const char *from, const char *to) {
 }
 int pathing_wants(void) { return g_test && g_balance_on; }
 // An order goes when the right button comes up. Measured, a squad answers 12 to 60 ms after that, at full speed: most of what is
-// felt is the click itself. So in a battle the button comes up for the game at once; Alt held keeps the drag of a line formation.
+// felt is the click itself. So in a battle the button comes up for the game at once, Alt or no Alt: a line formation is not drawn.
 // Not in direct control, where the button is held on purpose.
 int pathing_press_order(void) {
-    if (!g_test || !g_press || !g_balance_on || !g_live_match || (GetAsyncKeyState(VK_MENU) & 0x8000)) return 0;
+    if (!g_test || !g_press || !g_balance_on || !g_live_match) return 0;
     // the window's thread, not the game's: a read that cannot fault
     uintptr_t owner = 0, manual = 0;
     uint8_t on = 0;

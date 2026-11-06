@@ -872,11 +872,13 @@ static const char *NEWS_RU[] = {
     "Компетитив: пехота отзывается на приказы намного быстрее, группы разворачиваются вместе",
     "Компетитив работает и в мультиплеере: у всех игроков матча должна быть эта версия и галочка",
     "Автобег в окне Shift+F7: пехота бежит с одного ПКМ",
+    "Компетитив: Alt больше не разводит пехоту в линию",
 };
 static const char *NEWS_EN[] = {
     "Competitive: infantry answers orders much faster, groups turn together",
     "Competitive works in multiplayer too: every player of the match needs this version and the box on",
     "Auto-run in the Shift+F7 window: infantry runs on a single right click",
+    "Competitive: Alt no longer spreads infantry into a line",
 };
 
 // which news the player has read: by their text, so a build with the same news stays quiet
