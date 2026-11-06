@@ -3125,7 +3125,7 @@ extern "C" void camo_draw(ID3D11Device *device, void *window) {
     replays_button();
     lobby_button();
     day_setting();
-    farshoot_setting();
+    // farshoot_setting(): put aside for now
     static bool was;
     bool key = GetForegroundWindow() == owner && (GetAsyncKeyState(VK_SHIFT)&0x8000) && (GetAsyncKeyState(VK_F11)&0x8000);
     if (key && !was) floating = !floating; was = key;

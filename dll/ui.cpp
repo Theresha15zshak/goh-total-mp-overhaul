@@ -869,12 +869,14 @@ static const char *ABOUT_EN[] = {
     "Sign in through Steam: the mod gets only your SteamID, no password",
 };
 static const char *NEWS_RU[] = {
-    "Исправлена серая текстура на технике с камуфляжем при модах с собственными текстурами",
-    "Новые камуфляжи и наклейки отражаются по горизонтали по умолчанию",
+    "Компетитив: пехота отзывается на приказы намного быстрее, группы разворачиваются вместе",
+    "Компетитив работает и в мультиплеере: у всех игроков матча должна быть эта версия и галочка",
+    "Автобег в окне Shift+F7: пехота бежит с одного ПКМ",
 };
 static const char *NEWS_EN[] = {
-    "Fixed the grey texture on camouflaged vehicles with mods that bring their own textures",
-    "New camouflages and stickers are mirrored horizontally by default",
+    "Competitive: infantry answers orders much faster, groups turn together",
+    "Competitive works in multiplayer too: every player of the match needs this version and the box on",
+    "Auto-run in the Shift+F7 window: infantry runs on a single right click",
 };
 
 // which news the player has read: by their text, so a build with the same news stays quiet
