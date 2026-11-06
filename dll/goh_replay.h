@@ -156,8 +156,6 @@ void online_start(const char *dir);
 void online_set_consent(int yes);
 int online_copy(OnlinePlayer *out, int max, int *state);   // state 0 nothing yet, 1 list, 2 server unreachable
 const char *online_my_id(void);
-const char *online_my_key(void);
-void camo_reload_skins(void);               // other players' camouflages, all again
 int steam_id_ok(const char *s);             // 17 digits of a SteamID             // "" until Steam is up
 // texts of the rating server (server/src/matches.js), fetched while the panel asks for them each frame
 enum { DOC_PLAYER, DOC_BOARD_1V1, DOC_BOARD_TEAM, DOC_RATINGS, DOC_LOBBY, DOC_CHAT, DOC_CARD, DOC_N };   // DOC_RATINGS: the online tab,

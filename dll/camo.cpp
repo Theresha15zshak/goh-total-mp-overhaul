@@ -14,8 +14,6 @@
 #define STB_DXT_IMPLEMENTATION
 #define STB_DXT_STATIC
 #include "../third_party/stb/stb_dxt.h"
-#include <winhttp.h>
-#include "skin_pack.h"
 #include "dds_mips.h"
 #include "imgui.h"
 #include "goh_replay.h"
@@ -93,12 +91,7 @@ constexpr uintptr_t FN_MOD_NEW = 0x556310, FN_MOD_FREE = 0x5564e0;
 // which keeps textures by name. A second name, gohcamoid<crc of the model>, is only on the vehicle's main textures: a
 // skeleton that has it is that vehicle (small textures are shared between vehicles). What the other threads may use of
 // the camouflages is in `published`, under its lock.
-// owner: the number of another player of the match, -1 for our own; ready: all painted, it can go on
-struct Published { std::string token, id_token; std::vector<Coat> coats; std::string model; std::vector<std::string> all, main; std::vector<Sticker> stickers; int owner = -1; bool ready = true; };
-void add_remote(std::vector<Published> &list);
-bool remote_vehicle(unsigned char *actor, uintptr_t skeleton);
-std::shared_ptr<struct Pattern> remote_picture(int id);
-constexpr int REMOTE_PICTURE = 1000000;               // other players' pictures have numbers from here
+struct Published { std::string token, id_token; std::vector<Coat> coats; std::string model; std::vector<std::string> all, main; std::vector<Sticker> stickers; };
 std::vector<Published> published;
 SRWLOCK published_lock = SRWLOCK_INIT;
 struct Vec { unsigned char *begin, *end, *cap; };
@@ -177,7 +170,7 @@ struct StickerImage {
     std::vector<float> chosen, levels, stretch;
 };
 // px, w, h, s: one picture, the first camouflage where there is no model to lay them on
-struct Pattern { std::vector<unsigned char> px; int w = 0, h = 0; CamoSettings s; std::string model; std::vector<CoatImage> coats; std::vector<StickerImage> stickers; bool remote = false; };
+struct Pattern { std::vector<unsigned char> px; int w = 0, h = 0; CamoSettings s; std::string model; std::vector<CoatImage> coats; std::vector<StickerImage> stickers; };
 struct VehicleMap;
 void free_projection(VehicleMap *);
 Pattern test_pattern() {
@@ -385,7 +378,6 @@ float picture_level(const std::vector<unsigned char> &px) {
     return mean > VEHICLE_LEVEL ? VEHICLE_LEVEL / mean : 1;
 }
 std::shared_ptr<Pattern> load_picture(int id) {
-    if (id >= REMOTE_PICTURE) return remote_picture(id);
     wchar_t path[MAX_PATH];
     std::vector<unsigned char> bytes;
     int c, w, h;
@@ -465,7 +457,7 @@ Pattern pattern_of(const std::string &token) {
     std::vector<Coat> coats;
     std::vector<Sticker> stickers;
     AcquireSRWLockShared(&published_lock);
-    for (auto &e : published) if (e.token == token) { coats = e.coats; p.model = e.model; stickers = e.stickers; known = true; p.remote = e.owner >= 0; }
+    for (auto &e : published) if (e.token == token) { coats = e.coats; p.model = e.model; stickers = e.stickers; known = true; }
     ReleaseSRWLockShared(&published_lock);
     for (const Sticker &s : stickers) if (auto pic = load_picture(s.picture)) p.stickers.push_back(sticker_image(s, softened(pic, s.soft)));
     for (const Coat &c : coats) if (auto pic = load_picture(c.picture)) {
@@ -503,7 +495,7 @@ Painted *painted_of(const std::string &name, const std::string &token, const uns
         if (!tracks && !dds_add_mips(r->data)) rc_log("camo: %s: no mips can be made for it", key.c_str());
         // A vehicle's texture is spread thin: a sticker a metre wide gets about 200 texels of it, whatever the picture has. A texture
         // that takes a sticker is made bigger for it. Not the damaged ones: they are seen for a moment, and take memory all the same.
-        if (pr && !p.remote && !p.stickers.empty() && undamaged(stem_of(name.c_str(), name.size())) == stem_of(name.c_str(), name.size()))
+        if (pr && !p.stickers.empty() && undamaged(stem_of(name.c_str(), name.size())) == stem_of(name.c_str(), name.size()))
             for (int k = 1; k < sticker_scale && map_w(*pr) * k * 2 <= 8192 && map_h(*pr) * k * 2 <= 8192 && camo_double_dds(r->data); k *= 2) {}
         bool ok = tracks || paint_dds(r->data.data(), r->data.size(), p, pr);
         free_projection(pr);
@@ -535,28 +527,23 @@ void set_texmod(uintptr_t skeleton, const char *name) {
 // Every actor passes here on its turn in the game's thread (eActor's slot 23). One of the local player's vehicles with
 // a camouflage set for it gets it, once: a wreck's own #burned comes after. a464f0 is the game's "local player".
 constexpr uintptr_t VT_ACTOR = 0x10de138, FN_ACTOR_QUANT = 0x7efd10, G_LOCAL_PLAYER = 0x1487a88, GAME_MODE_OBJ = 0x159c760;
-volatile LONG battle_number, published_count, skins_again;
+volatile LONG battle_number, published_count;
 void *(*actor_quant_real)(void *);
 void camouflage(unsigned char *actor) {
     static std::vector<uintptr_t> done;               // sorted skeletons; this thread only
     static LONG battle;
     static int logged;
-    if (battle != battle_number || InterlockedExchange(&skins_again, 0)) { battle = battle_number; done.clear(); }
-    if (!published_count || !(actor[0x30] & 2)) return;
+    if (battle != battle_number) { battle = battle_number; done.clear(); }
+    if (!published_count || actor[0xda8] != *(unsigned char *)(base + G_LOCAL_PLAYER) || !(actor[0x30] & 2)) return;
     uintptr_t skeleton = *(uintptr_t *)(actor + 0xb0);
     if (!skeleton) return;
     auto at = std::lower_bound(done.begin(), done.end(), skeleton);
     if (at != done.end() && *at == skeleton) return;
-    if (actor[0xda8] != *(unsigned char *)(base + G_LOCAL_PLAYER)) {
-        // another player's: false as long as it may still get something
-        if (remote_vehicle(actor, skeleton)) { at = std::lower_bound(done.begin(), done.end(), skeleton); done.insert(at, skeleton); }
-        return;
-    }
     done.insert(at, skeleton);
     // has_mod comes back to tex_mods, which takes the lock: not under it
     AcquireSRWLockShared(&published_lock);
     std::vector<std::pair<std::string, std::string>> list;
-    for (const auto &e : published) if (e.owner < 0) list.push_back({e.id_token, e.token});
+    for (const auto &e : published) list.push_back({e.id_token, e.token});
     ReleaseSRWLockShared(&published_lock);
     std::string token;
     for (const auto &e : list) if (has_mod(skeleton, e.first.c_str())) { token = e.second; break; }
@@ -592,13 +579,9 @@ uint32_t fnv(const void *data, size_t n, uint32_t h = 2166136261u) {
     for (size_t i = 0; i < n; i++) h = (h ^ b[i]) * 16777619u;
     return h;
 }
-volatile LONG skins_on = -1;                           // other players' camouflages: -1 not asked yet, 0 off, 1 on
-volatile bool skins_window;                            // Shift+F5: the switch and the button, in a battle too
 volatile LONG warm_needed;                             // camouflages changed: paint them ahead of the battle
-volatile LONG skins_changed = 1, skins_in_battle;      // ours are to go to the server again; a battle is on
 void publish() {
     InterlockedExchange(&warm_needed, 1);
-    InterlockedExchange(&skins_changed, 1);
     std::vector<Published> list;
     for (const auto &a : assigns) {
         uint32_t id = fnv(a.model.data(), a.model.size()), crc = id;
@@ -609,7 +592,6 @@ void publish() {
         snprintf(id_token, sizeof id_token, "gohcamoid%08x", id);
         list.push_back({token, id_token, a.coats, a.model, a.all, a.main, a.stickers});
     }
-    add_remote(list);
     AcquireSRWLockExclusive(&published_lock);
     published = std::move(list);
     InterlockedExchange(&published_count, (LONG)published.size());
@@ -745,7 +727,6 @@ void accept_import() {
     presets.push_back({{}, r.name, id}); selected = (int)presets.size()-1; imported = true; save();
 }
 }
-void skins_start();
 extern "C" void camo_init(const char *dir) {
     base = (uintptr_t)GetModuleHandleW(nullptr);
     wchar_t path[MAX_PATH]; MultiByteToWideChar(CP_ACP, 0, dir, -1, path, MAX_PATH);
@@ -776,7 +757,6 @@ extern "C" void camo_init(const char *dir) {
         fclose(f);
     }
     publish();
-    skins_start();
     rc_log("camo: editor initialized, %u presets", (unsigned)presets.size());
 }
 extern "C" void camo_page(void *) {}
@@ -800,7 +780,7 @@ extern "C" void camo_tick() {
     uintptr_t mode = q(base + GAME_MODE_OBJ);
     unsigned char on = 0;
     if (mode) read(mode + 0x908, &on, 1);
-    if ((on == 1) != in_game) { in_game = on == 1; InterlockedIncrement(&battle_number); InterlockedExchange(&skins_in_battle, in_game); }
+    if ((on == 1) != in_game) { in_game = on == 1; InterlockedIncrement(&battle_number); }
     { char path[MAX_PATH]; snprintf(path, sizeof path, "%ls\\..\\goh_snapshots.ini", folder); sticker_scale = GetPrivateProfileIntA("debug", "camo_sticker_scale", 2, path); camo_selftest_tick(path); lobby_dump_tick(path); }
     // our tab, wherever the page is: looked for a few times a second, it is a walk through the screen's dialogs
     static DWORD next;
@@ -842,7 +822,7 @@ extern "C" void camo_tick() {
     from_lobby_close = from_lobby_close || in_game;
     if (warm_needed && !in_game && !drawn) warm_start();   // not while sliders move: each new setting is a new texture
 }
-extern "C" int camo_shown() { return drawn || floating || replays_list.shown || lobby_open || skins_on < 0 || skins_window; }
+extern "C" int camo_shown() { return drawn || floating || replays_list.shown || lobby_open; }
 namespace {
 // A name of ours has to be a file of the game's repository: textures are found (62f990), kept and opened by their
 // entry there, and a name without one gives the checker dummy or "Resource not found". So the first time the game
@@ -1964,7 +1944,7 @@ DWORD WINAPI warm_thread(LPVOID) {
     ReleaseSRWLockShared(&published_lock);
     DWORD t0 = GetTickCount();
     int done = 0;
-    for (const Published &e : list) if (e.owner < 0) for (const std::string &stem : e.all) {
+    for (const Published &e : list) for (const std::string &stem : e.all) {
         if (is_track(stem)) continue;
         for (const char *end : {"", "_x", "_xx"}) {
             std::string file = texture_file("/texture/common/" + stem + end);
@@ -1986,401 +1966,6 @@ void warm_start() {
     InterlockedExchange(&warm_needed, 0);
     HANDLE h = CreateThread(nullptr, 1 << 20, warm_thread, nullptr, 0, nullptr);
     if (h) CloseHandle(h); else InterlockedExchange(&warming, 0);
-}
-// ---- other players' camouflages ------------------------------------------------------------------------------------------
-// With the player's yes our camouflages go to the server (dll/skin_pack.h, server/src/skins.js), and in a match each player with the
-// mod says there which number it has in that lobby. A vehicle's owner is its number (actor +0xda8), so that is all it takes: nothing of
-// this touches the simulation, a vehicle of someone else only gets another texture on this computer. A vehicle coming in asks for
-// its camouflage; pictures are fetched and textures painted by a thread of ours, and it gets them when they are ready. What
-// fails stays a plain vehicle; Shift+F5 tries again.
-struct RemotePicture { std::string hash; std::shared_ptr<Pattern> pic; bool tried = false; };
-std::vector<RemotePicture> remote_pictures;            // id - REMOTE_PICTURE is the place here
-struct RemoteSet { int number; std::string steam, hash; std::vector<Published> vehicles; };
-std::vector<RemoteSet> remote_sets;
-std::vector<std::string> remote_wanted;                // tokens a vehicle has asked for
-SRWLOCK remote_lock = SRWLOCK_INIT;
-volatile LONG skins_retry;
-wchar_t skins_ini[MAX_PATH];
-namespace {
-void add_remote(std::vector<Published> &list) {
-    AcquireSRWLockShared(&remote_lock);
-    for (const RemoteSet &s : remote_sets) for (const Published &e : s.vehicles) list.push_back(e);
-    ReleaseSRWLockShared(&remote_lock);
-}
-std::shared_ptr<Pattern> remote_picture(int id) {
-    AcquireSRWLockShared(&remote_lock);
-    std::shared_ptr<Pattern> r;
-    size_t at = (size_t)(id - REMOTE_PICTURE);
-    if (at < remote_pictures.size()) r = remote_pictures[at].pic;
-    ReleaseSRWLockShared(&remote_lock);
-    return r;
-}
-bool remote_vehicle(unsigned char *actor, uintptr_t skeleton) {
-    if (skins_on != 1) return true;
-    struct Wait { uintptr_t skeleton; DWORD at; int misses; };
-    static std::vector<Wait> waits;                    // the game's thread only: a look a second at each vehicle that waits
-    const DWORD now = GetTickCount();
-    Wait *w = nullptr;
-    for (auto &e : waits) if (e.skeleton == skeleton) w = &e;
-    if (w && now - w->at < 1000) return false;
-    if (!w) { if (waits.size() > 256) waits.clear(); waits.push_back({skeleton, now, 0}); w = &waits.back(); }
-    w->at = now;
-    const int number = actor[0xda8];
-    struct Entry { std::string id, token; bool ready; };
-    std::vector<Entry> list;
-    AcquireSRWLockShared(&published_lock);
-    for (const auto &e : published) if (e.owner == number) list.push_back({e.id_token, e.token, e.ready});
-    ReleaseSRWLockShared(&published_lock);
-    if (list.empty()) return false;                    // that player has told nothing yet
-    for (const Entry &e : list) {
-        if (!has_mod(skeleton, e.id.c_str())) continue;
-        if (e.ready) { set_texmod(skeleton, e.token.c_str()); rc_log("camo: %s on a vehicle of player %d", e.token.c_str(), number); return true; }
-        AcquireSRWLockExclusive(&remote_lock);
-        if (std::find(remote_wanted.begin(), remote_wanted.end(), e.token) == remote_wanted.end()) remote_wanted.push_back(e.token);
-        ReleaseSRWLockExclusive(&remote_lock);
-        return false;
-    }
-    return ++w->misses >= 20;                          // no camouflage for this vehicle, it seems; a vehicle just in may not have its textures yet
-}
-}
-// one request of the thread below; 0 = no answer
-HINTERNET skin_net;
-int skin_http(const wchar_t *verb, const wchar_t *path, const void *body, size_t n, std::vector<unsigned char> &out, bool signed_in) {
-    out.clear();
-    if (!skin_net) skin_net = WinHttpOpen(L"goh-mod", WINHTTP_ACCESS_TYPE_AUTOMATIC_PROXY, WINHTTP_NO_PROXY_NAME, WINHTTP_NO_PROXY_BYPASS, 0);
-    HINTERNET c = skin_net ? WinHttpConnect(skin_net, L"goh-online.goh-mod.workers.dev", INTERNET_DEFAULT_HTTPS_PORT, 0) : nullptr;
-    HINTERNET r = c ? WinHttpOpenRequest(c, verb, path, nullptr, WINHTTP_NO_REFERER, WINHTTP_DEFAULT_ACCEPT_TYPES, WINHTTP_FLAG_SECURE) : nullptr;
-    int status = 0;
-    wchar_t head[300] = L"";
-    if (signed_in) swprintf(head, 300, L"x-steam: %hs\r\nx-key: %hs\r\n", online_my_id(), online_my_key());
-    if (r && WinHttpSendRequest(r, head[0] ? head : WINHTTP_NO_ADDITIONAL_HEADERS, head[0] ? (DWORD)-1L : 0, (void *)body, (DWORD)n, (DWORD)n, 0) && WinHttpReceiveResponse(r, nullptr)) {
-        DWORD st = 0, sz = sizeof st, got = 0;
-        WinHttpQueryHeaders(r, WINHTTP_QUERY_STATUS_CODE | WINHTTP_QUERY_FLAG_NUMBER, nullptr, &st, &sz, nullptr);
-        status = (int)st;
-        unsigned char chunk[16384];
-        while (out.size() < SKIN_MAX_BYTES + 4096 && WinHttpReadData(r, chunk, sizeof chunk, &got) && got) out.insert(out.end(), chunk, chunk + got);
-    }
-    if (r) WinHttpCloseHandle(r);
-    if (c) WinHttpCloseHandle(c);
-    return status;
-}
-std::string text_of(const std::vector<unsigned char> &v) { return std::string(v.begin(), v.end()); }
-// ours to the server: each picture once (a picture's number is never given again, so its hash stays), then the list
-struct Sent { int id; std::string hash; };
-std::vector<Sent> sent_pictures;
-void read_sent() {
-    wchar_t path[MAX_PATH]; swprintf(path, MAX_PATH, L"%s\\sent.txt", folder);
-    FILE *f = _wfopen(path, L"rb");
-    if (!f) return;
-    char line[128], hash[80]; int id;
-    while (fgets(line, sizeof line, f)) if (sscanf(line, "%d %70s", &id, hash) == 2 && skin_hash_ok(hash)) sent_pictures.push_back({id, hash});
-    fclose(f);
-}
-std::string send_picture(int id) {
-    for (const Sent &s : sent_pictures) if (s.id == id) return s.hash;
-    auto pic = load_picture(id);
-    std::vector<unsigned char> pack, out;
-    if (!pic || !skin_encode(pic->px.data(), pic->w, pic->h, pack)) return "";
-    int st = skin_http(L"POST", L"/skin/pic", pack.data(), pack.size(), out, true);
-    std::string hash = text_of(out);
-    if (st != 200 || !skin_hash_ok(hash)) { rc_log("skins: picture %d not taken: %d %.60s", id, st, hash.c_str()); return ""; }
-    sent_pictures.push_back({id, hash});
-    wchar_t path[MAX_PATH]; swprintf(path, MAX_PATH, L"%s\\sent.txt", folder);
-    if (FILE *f = _wfopen(path, L"ab")) { fprintf(f, "%d %s\n", id, hash.c_str()); fclose(f); }
-    rc_log("skins: picture %d sent, %u bytes", id, (unsigned)pack.size());
-    return hash;
-}
-std::string joined_with(const std::vector<std::string> &v) {
-    std::string r;
-    for (const auto &s : v) { if (!r.empty()) r += '|'; r += s; }
-    return r;
-}
-bool send_mine() {
-    std::vector<Assign> mine;
-    AcquireSRWLockShared(&published_lock);
-    for (const auto &e : published) if (e.owner < 0) mine.push_back({e.model, e.coats, e.all, e.main, e.stickers});
-    ReleaseSRWLockShared(&published_lock);
-    std::string list = "GOHSKIN1\n", pics;
-    std::vector<std::string> hashes;
-    auto index = [&](int id) {
-        std::string h = send_picture(id);
-        if (h.empty()) return -1;
-        size_t at = std::find(hashes.begin(), hashes.end(), h) - hashes.begin();
-        if (at == hashes.size()) hashes.push_back(h);
-        return (int)at;
-    };
-    std::string body;
-    char line[400];
-    for (const Assign &a : mine) {
-        if (body.size() > 48000 || !skin_model_ok(a.model)) continue;
-        body += "V\t" + a.model + "\t" + joined_with(a.all) + "\t" + joined_with(a.main) + "\n";
-        for (const Coat &c : a.coats) {
-            int i = index(c.picture);
-            if (i < 0) continue;
-            const CamoSettings &k = c.s;
-            snprintf(line, sizeof line, "C %d %.6g %.6g %.6g %.6g %d %d %.6g 1 %d %d %.6g %d %d %d\n", i, k.offset[0], k.offset[1], k.rotation, k.opacity, k.blend, k.repeat, k.size, k.flip_x, k.flip_y, k.bright, k.part, k.gun, k.seam);
-            body += line;
-        }
-        for (const Sticker &s : a.stickers) {
-            int i = index(s.picture);
-            if (i < 0) continue;
-            snprintf(line, sizeof line, "S %d %.7g %.7g %.7g %.7g %.7g %.7g %.7g %.7g %.7g %.7g %.7g %d %d %.6g %d\n", i, s.c[0], s.c[1], s.c[2], s.n[0], s.n[1], s.n[2], s.size, s.rotation, s.opacity, s.soft, s.wear, s.flip_x, s.flip_y, s.bright, s.gun);
-            body += line;
-        }
-    }
-    for (size_t i = 0; i < hashes.size(); i++) list += "P " + hashes[i] + "\n";
-    list += body;
-    std::vector<unsigned char> out;
-    int st = skin_http(L"POST", L"/skin/set", list.data(), list.size(), out, true);
-    rc_log("skins: our list sent: %d, %u vehicles, %u pictures", st, (unsigned)mine.size(), (unsigned)hashes.size());
-    return st == 200;
-}
-// A list of another player: everything in it checked, as it could say anything
-void read_list(RemoteSet &set, const std::string &text) {
-    std::vector<int> ids;                              // the list's pictures, as numbers of ours
-    size_t at = 0;
-    Published *v = nullptr;
-    int stickers = 0;
-    while (at < text.size() && set.vehicles.size() <= 64) {
-        size_t end = text.find('\n', at);
-        if (end == std::string::npos) end = text.size();
-        std::string line = text.substr(at, end - at);
-        at = end + 1;
-        if (line.size() > 4000 || line.size() < 3) continue;
-        if (line[0] == 'P' && line[1] == ' ' && ids.size() < 96) {
-            std::string h = line.substr(2);
-            if (!skin_hash_ok(h)) { ids.push_back(-1); continue; }
-            AcquireSRWLockExclusive(&remote_lock);
-            size_t i = 0;
-            while (i < remote_pictures.size() && remote_pictures[i].hash != h) i++;
-            if (i == remote_pictures.size()) remote_pictures.push_back({h, nullptr, false});
-            ReleaseSRWLockExclusive(&remote_lock);
-            ids.push_back(REMOTE_PICTURE + (int)i);
-        } else if (line[0] == 'V' && line[1] == '\t') {
-            size_t a = line.find('\t', 2), b = a == std::string::npos ? a : line.find('\t', a + 1);
-            v = nullptr;
-            if (b == std::string::npos) continue;
-            std::string model = line.substr(2, a - 2);
-            std::vector<std::string> all = split(line.substr(a + 1, b - a - 1)), main = split(line.substr(b + 1));
-            // a vehicle also has textures of a machine gun or a net ("model/mg34", "_military/netting"): those take no paint, it does
-            auto keep = [](std::vector<std::string> &v) { v.erase(std::remove_if(v.begin(), v.end(), [](const std::string &s) { return !skin_stem_ok(s); }), v.end()); };
-            keep(all); keep(main);
-            if (!skin_model_ok(model) || all.size() > 24 || main.size() > 24 || main.empty()) { rc_log("skins: a vehicle of player %d left out: %.80s", set.number, model.c_str()); continue; }
-            Published e;
-            e.model = model; e.all = all; e.main = main; e.owner = set.number; e.ready = false;
-            set.vehicles.push_back(e);
-            v = &set.vehicles.back();
-            stickers = 0;
-        } else if (line[0] == 'C' && line[1] == ' ' && v && v->coats.size() < MAX_COATS) {
-            Coat c = {-1, CamoSettings()};
-            if (read_coat(line.c_str() + 2, c) >= 11 && coat_ok(c.s) && c.picture >= 0 && c.picture < (int)ids.size() && ids[c.picture] >= 0) { c.picture = ids[c.picture]; v->coats.push_back(c); }
-        } else if (line[0] == 'S' && line[1] == ' ' && v && stickers < 32) {
-            Sticker k = {};
-            k.bright = 1;
-            if (sscanf(line.c_str() + 2, "%d %f %f %f %f %f %f %f %f %f %f %f %d %d %f %d", &k.picture, &k.c[0], &k.c[1], &k.c[2], &k.n[0], &k.n[1], &k.n[2], &k.size, &k.rotation, &k.opacity, &k.soft, &k.wear, &k.flip_x, &k.flip_y, &k.bright, &k.gun) < 15) continue;
-            bool ok = k.picture >= 0 && k.picture < (int)ids.size() && ids[k.picture] >= 0 && isfinite(k.size) && k.size > 0 && k.size < 1000 && isfinite(k.rotation) && isfinite(k.opacity) && k.opacity >= 0 && k.opacity <= 1 && isfinite(k.soft) && k.soft >= 0 && k.soft <= 1 && isfinite(k.wear) && k.wear >= 0 && k.wear <= 1;
-            for (int i = 0; i < 3; i++) ok = ok && isfinite(k.c[i]) && fabsf(k.c[i]) < 10000 && isfinite(k.n[i]) && fabsf(k.n[i]) <= 1.01f;
-            if (!ok) continue;
-            k.bright = bright_ok(k.bright);
-            k.picture = ids[k.picture];
-            v->stickers.push_back(k);
-            stickers++;
-        }
-    }
-    for (Published &e : set.vehicles) {
-        uint32_t id = fnv(e.model.data(), e.model.size()), crc = fnv(set.hash.data(), set.hash.size(), id);
-        char token[48], id_token[48];
-        snprintf(token, sizeof token, "gohcamo%dx%08x", set.number + 900, crc);
-        snprintf(id_token, sizeof id_token, "gohcamoid%08x", id);
-        e.token = token; e.id_token = id_token;
-    }
-}
-bool fetch_picture(int id) {
-    size_t at = (size_t)(id - REMOTE_PICTURE);
-    std::string hash;
-    AcquireSRWLockShared(&remote_lock);
-    bool have = at >= remote_pictures.size() || remote_pictures[at].pic;
-    if (!have) hash = remote_pictures[at].hash;
-    ReleaseSRWLockShared(&remote_lock);
-    if (have) return at < remote_pictures.size();
-    wchar_t path[120]; swprintf(path, 120, L"/skin/pic?h=%hs", hash.c_str());
-    std::vector<unsigned char> out, px;
-    int w = 0, h = 0;
-    if (skin_http(L"GET", path, nullptr, 0, out, false) != 200 || !skin_decode(out.data(), out.size(), px, w, h)) { rc_log("skins: picture %.12s not read", hash.c_str()); return false; }
-    auto r = std::make_shared<Pattern>();
-    r->w = w; r->h = h; r->px.swap(px); r->s.dim = picture_level(r->px);
-    AcquireSRWLockExclusive(&remote_lock);
-    remote_pictures[at].pic = r;
-    ReleaseSRWLockExclusive(&remote_lock);
-    return true;
-}
-// a vehicle's pictures and textures, then it can go on
-void make_ready(const std::string &token) {
-    Published e;
-    bool found = false;
-    AcquireSRWLockShared(&published_lock);
-    for (const auto &p : published) if (p.token == token) { e = p; found = true; }
-    ReleaseSRWLockShared(&published_lock);
-    if (!found || e.ready) return;
-    bool ok = true;
-    for (const Coat &c : e.coats) ok = fetch_picture(c.picture) && ok;
-    for (const Sticker &s : e.stickers) ok = fetch_picture(s.picture) && ok;
-    if (!ok) return;
-    for (const std::string &stem : e.all) {
-        if (is_track(stem)) continue;
-        for (const char *end : {"", "_x", "_xx"}) {
-            std::string file = texture_file("/texture/common/" + stem + end);
-            std::vector<unsigned char> bytes;
-            if (!file.empty() && read_game_file(file, bytes)) painted_of(file, e.token, bytes.data(), bytes.size());
-        }
-    }
-    AcquireSRWLockExclusive(&remote_lock);
-    for (RemoteSet &s : remote_sets) for (Published &p : s.vehicles) if (p.token == token) p.ready = true;
-    ReleaseSRWLockExclusive(&remote_lock);
-    AcquireSRWLockExclusive(&published_lock);
-    for (Published &p : published) if (p.token == token) p.ready = true;
-    ReleaseSRWLockExclusive(&published_lock);
-    rc_log("skins: %s ready", token.c_str());
-}
-void rooms_poll(uint64_t room, int number) {
-    wchar_t path[80]; swprintf(path, 80, L"/skin/room?room=%llu", (unsigned long long)room);
-    std::vector<unsigned char> out;
-    if (skin_http(L"GET", path, nullptr, 0, out, false) != 200) return;
-    std::string t = text_of(out);
-    bool changed = false;
-    for (size_t at = 0; at < t.size();) {
-        size_t end = t.find('\n', at);
-        if (end == std::string::npos) break;
-        char steam[24], hash[80]; int n;
-        std::string line = t.substr(at, end - at);
-        at = end + 1;
-        if (sscanf(line.c_str(), "%d %20s %70s", &n, steam, hash) != 3 || n == number || n < 0 || n > 31 || !skin_hash_ok(hash)) continue;
-        bool have = false;
-        AcquireSRWLockShared(&remote_lock);
-        for (const RemoteSet &s : remote_sets) have |= s.number == n && s.hash == hash;
-        ReleaseSRWLockShared(&remote_lock);
-        if (have) continue;
-        wchar_t p2[80]; swprintf(p2, 80, L"/skin/set?id=%hs", steam);
-        std::vector<unsigned char> list;
-        if (skin_http(L"GET", p2, nullptr, 0, list, false) != 200) continue;
-        RemoteSet set = {n, steam, hash, {}};
-        read_list(set, text_of(list));
-        rc_log("skins: player %d: %u vehicles", n, (unsigned)set.vehicles.size());
-        AcquireSRWLockExclusive(&remote_lock);
-        remote_sets.erase(std::remove_if(remote_sets.begin(), remote_sets.end(), [&](const RemoteSet &s) { return s.number == n; }), remote_sets.end());
-        remote_sets.push_back(std::move(set));
-        ReleaseSRWLockExclusive(&remote_lock);
-        changed = true;
-    }
-    if (changed) publish();
-}
-DWORD WINAPI skins_thread(LPVOID) {
-    SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_BELOW_NORMAL);
-    read_sent();
-    bool battle = false, told = false;
-    DWORD began = 0, polled = 0;
-    for (;;) {
-        Sleep(1000);
-        if (skins_on != 1 || !online_my_id()[0] || !online_my_key()[0]) continue;
-        const bool now_battle = skins_in_battle != 0;
-        if (now_battle != battle) {
-            battle = now_battle; told = false; began = GetTickCount(); polled = 0;
-            AcquireSRWLockExclusive(&remote_lock);
-            remote_sets.clear(); remote_wanted.clear();
-            ReleaseSRWLockExclusive(&remote_lock);
-            if (!battle) publish();
-        }
-        if (!battle) {
-            if (InterlockedExchange(&skins_changed, 0) && !send_mine()) InterlockedExchange(&skins_changed, 1);
-            continue;
-        }
-        const uint64_t room = steam_lobby_now();
-        if (!room) continue;
-        const int number = *(unsigned char *)(base + G_LOCAL_PLAYER);
-        if (GetTickCount() - began < 3000) continue;   // the number is the game's by then
-        const bool again = InterlockedExchange(&skins_retry, 0) != 0;
-        if (again) {                                   // the lists anew: someone may have changed theirs, or it came in part
-            AcquireSRWLockExclusive(&remote_lock);
-            remote_sets.clear(); remote_wanted.clear();
-            for (RemotePicture &p : remote_pictures) if (!p.pic) p.tried = false;
-            ReleaseSRWLockExclusive(&remote_lock);
-        }
-        if (!told || again) {
-            char body[48];
-            snprintf(body, sizeof body, "%llu\n%d", (unsigned long long)room, number);
-            std::vector<unsigned char> out;
-            told = skin_http(L"POST", L"/skin/room", body, strlen(body), out, true) == 200;
-            rc_log("skins: in room %llu as player %d: %s", (unsigned long long)room, number, told ? "ok" : "no answer");
-        }
-        const DWORD gap = GetTickCount() - began < 180000 ? 5000 : 30000;
-        if (again || !polled || GetTickCount() - polled > gap) { polled = GetTickCount(); rooms_poll(room, number); }
-        std::string token;
-        AcquireSRWLockExclusive(&remote_lock);
-        if (!remote_wanted.empty()) { token = remote_wanted.front(); remote_wanted.erase(remote_wanted.begin()); }
-        ReleaseSRWLockExclusive(&remote_lock);
-        if (!token.empty()) make_ready(token);
-    }
-}
-void skins_set(bool on) {
-    InterlockedExchange(&skins_on, on);
-    InterlockedExchange(&skins_changed, 1);
-    if (FILE *f = _wfopen(skins_ini, L"wb")) { fprintf(f, "%d\n", on ? 1 : 0); fclose(f); }
-    rc_log("skins: other players' camouflages %s", on ? "on" : "off");
-}
-void skins_start() {
-    swprintf(skins_ini, MAX_PATH, L"%s\\others.txt", folder);
-    if (FILE *f = _wfopen(skins_ini, L"rb")) {
-        int v = -1;
-        if (fscanf(f, "%d", &v) == 1 && (v == 0 || v == 1)) skins_on = v;
-        fclose(f);
-    }
-    HANDLE h = CreateThread(nullptr, 1 << 20, skins_thread, nullptr, 0, nullptr);
-    if (h) CloseHandle(h);
-}
-// Shift+F5 and the button: every player's list and pictures again, every vehicle looked at again
-extern "C" void camo_reload_skins(void) {
-    InterlockedExchange(&skins_retry, 1);
-    InterlockedExchange(&skins_again, 1);
-    InterlockedExchange(&skins_changed, 1);
-    rc_log("skins: loading them all again");
-}
-// each frame: the question, once, and the window of Shift+F5
-void skins_frame() {
-    static bool was;
-    bool key = GetForegroundWindow() == owner && (GetAsyncKeyState(VK_SHIFT) & 0x8000) && (GetAsyncKeyState(VK_F5) & 0x8000);
-    if (key && !was) skins_window = !skins_window;
-    was = key;
-    if (skins_window) {
-        ImGuiIO &io = ImGui::GetIO();
-        ImGui::SetNextWindowPos(ImVec2(io.DisplaySize.x / 2, io.DisplaySize.y / 3), ImGuiCond_FirstUseEver, ImVec2(.5f, .5f));
-        bool open = true;
-        if (ImGui::Begin(TR("Камуфляжи других игроков###goh_skins_win", "Other players' camouflages###goh_skins_win"), &open, ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoSavedSettings)) {
-            bool on = skins_on == 1;
-            if (ImGui::Checkbox(TR("Показывать камуфляжи других игроков", "Show other players' camouflages"), &on)) skins_set(on);
-            if (on && ImGui::Button(TR("Загрузить все скины", "Load all skins"))) camo_reload_skins();
-            ImGui::TextDisabled("%s", TR("Shift+F5 — скрыть", "Shift+F5 — hide"));
-        }
-        ImGui::End();
-        if (!open) skins_window = false;
-    }
-    if (skins_on >= 0 || skins_in_battle) return;
-    ImGuiIO &io = ImGui::GetIO();
-    ImGui::SetNextWindowPos(ImVec2(io.DisplaySize.x / 2, io.DisplaySize.y / 2), ImGuiCond_Always, ImVec2(.5f, .5f));
-    ImGui::SetNextWindowSize(ImVec2(560, 0));
-    ImGui::SetNextWindowFocus();
-    if (ImGui::Begin(TR("Камуфляжи других игроков###goh_skins_ask", "Other players' camouflages###goh_skins_ask"), nullptr, ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoSavedSettings)) {
-        ImGui::TextWrapped("%s", TR("Показывать камуфляжи и наклейки других игроков с модом?", "Show the camouflages and stickers of other players with the mod?"));
-        ImGui::Spacing();
-        ImGui::TextWrapped("%s", TR("Их делают сами игроки, мод их не проверяет. Включая, ты берёшь на себя ответственность: можешь увидеть любой контент. Твои камуфляжи тоже будут отправляться на сервер и видны другим игрокам, у которых это включено.",
-                                    "Players make them themselves and the mod does not check them. By turning this on you take responsibility for possibly seeing any content. Your camouflages will also be sent to the server and seen by other players who have this on."));
-        ImGui::Spacing();
-        ImGui::TextWrapped("%s", TR("Изменить выбор можно на вкладке камуфляжа.", "You can change this on the camouflage tab."));
-        ImGui::Spacing();
-        if (ImGui::Button(TR("Показывать", "Show them"), ImVec2(250, 0))) skins_set(true);
-        ImGui::SameLine();
-        if (ImGui::Button(TR("Не показывать", "Do not show them"), ImVec2(250, 0))) skins_set(false);
-    }
-    ImGui::End();
 }
 // [debug] camo_selftest=1 in goh_snapshots.ini: in the menu, what a vehicle would do with our variant, without a battle
 void selftest() {
@@ -3264,9 +2849,6 @@ void crop_window(ID3D11Device *device) {
     ImGui::EndPopup();
 }
 void vehicle_settings() {
-    bool others = skins_on == 1;
-    if (ImGui::Checkbox(TR("Показывать камуфляжи других игроков", "Show other players' camouflages"), &others)) skins_set(others);
-    if (others && ImGui::Button(TR("Загрузить все скины", "Load all skins"), ImVec2(-1, 0))) camo_reload_skins();
     const bool disable_import = importing || presets.size() >= 256;
     if (disable_import) ImGui::BeginDisabled();
     if (ImGui::Button(TR("Загрузить PNG", "Import PNG"), ImVec2(-1,0))) {
@@ -3484,7 +3066,6 @@ extern "C" void camo_draw(ID3D11Device *device, void *window) {
     static bool was;
     bool key = GetForegroundWindow() == owner && (GetAsyncKeyState(VK_SHIFT)&0x8000) && (GetAsyncKeyState(VK_F11)&0x8000);
     if (key && !was) floating = !floating; was = key;
-    skins_frame();
     accept_import();
     if (importing == 0 && import_sticker && !imported) import_sticker = false;      // the file window was closed
     if (imported) {

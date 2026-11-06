@@ -42,7 +42,6 @@ static int g_count, g_state;
 static volatile long g_beat_now;   // consent just given: send at once
 
 const char *online_my_id(void) { return g_id; }
-const char *online_my_key(void) { return g_key; }
 
 // ---- the language: the ini's if set, else the game's in Steam, else Windows' ---------------------------------
 static volatile long g_lang = -1;              // 0 Russian, 1 English, -1 not decided yet
