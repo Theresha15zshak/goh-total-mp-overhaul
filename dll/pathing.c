@@ -16,11 +16,11 @@ typedef struct {
     uint32_t async;                                 // paths on the pather's thread; set at a scene's start
     uint32_t now;                                   // game time, ms
     uint32_t site_entity, debug_stack, ec_get, ec_exec;
-    uint32_t vt_human, vt_brain, add_order, set_beo, message, rule;
+    uint32_t vt_human, vt_brain, add_order, set_beo, message, rule, follow, squad_tick, squad_range, squad_ahead, squad_ahead2;
 } Where;
 static const Where WHERE[2] = {
-    {0x1482260, 0x1482290, 0x1482580, 0x1482598, 0x1483008, 0x14822b0, 0x1556e48, 0xa1c497, 0x5e4190, 0xb90d0, 0x14d080, 0x10ebdd8, 0x10ec7c8, 0x9053e0, 0x9052f0, 0x9424f0, 0x9121c0},
-    {0x10ee430, 0x10ee460, 0x10ee750, 0x10ee768, 0x10ef1d8, 0x10ee480, 0x11a1328, 0x8310fb, 0x3fa1e0, 0x8d620, 0xee990, 0xdee9b8, 0xdef378, 0x71a480, 0x71a390, 0x7574d0, 0x7273b0},
+    {0x1482260, 0x1482290, 0x1482580, 0x1482598, 0x1483008, 0x14822b0, 0x1556e48, 0xa1c497, 0x5e4190, 0xb90d0, 0x14d080, 0x10ebdd8, 0x10ec7c8, 0x9053e0, 0x9052f0, 0x9424f0, 0x9121c0, 0x951530, 0x93107b, 0x9311e2, 0x933ada, 0x933b97},
+    {0x10ee430, 0x10ee460, 0x10ee750, 0x10ee768, 0x10ef1d8, 0x10ee480, 0x11a1328, 0x8310fb, 0x3fa1e0, 0x8d620, 0xee990, 0xdee9b8, 0xdef378, 0x71a480, 0x71a390, 0x7574d0, 0x7273b0, 0x766510, 0x74626b, 0x7463d2, 0x748cca, 0x748d87},
 };
 static const Where *W = &WHERE[0];
 static int g_server;
@@ -324,6 +324,35 @@ static void add_order(void *brain, void *order, void *params) {
 // off a follower at once and he has nothing until he next thinks, standing, for up to a third of a second: measured 137 to 343 ms,
 // the leader 40. So a soldier who has just lost his order thinks every quant until he has one again.
 #define BRAIN_THINK 0x2000000
+// A squad told something looks at its commander in that same quant, not at its next tick (+0x160: when, 0 = now). And how long its men
+// take is measured here, on the server, where it counts: from the commander's order to each man's own.
+typedef struct { uintptr_t brain; uint32_t at; } ManDone;
+static ManDone g_man_done[2048];
+typedef struct { uintptr_t squad; uint32_t at, last; int men; } SquadOrder;
+static SquadOrder g_squads[256];
+static volatile long g_sq_orders, g_sq_men, g_sq_first, g_sq_last, g_sq_worst;
+static void squad_ordered(uint8_t *brain) {
+    uint8_t *squad = *(uint8_t **)(brain + 0x100);
+    if (!squad || *(void **)(squad + 0xa8) != *(void **)(brain + 0x38)) return;
+    *(uint32_t *)(squad + 0x160) = 0;
+    SquadOrder *o = &g_squads[((uintptr_t)squad >> 4) % 256];
+    if (o->squad == (uintptr_t)squad && o->men) { g_sq_orders++; g_sq_last += o->last; }
+    o->squad = (uintptr_t)squad; o->at = *(const uint32_t *)(g_exe + W->now); o->last = 0; o->men = 0;
+}
+static void squad_man(uint8_t *brain) {
+    const uint8_t *squad = *(const uint8_t *const *)(brain + 0x100);
+    if (!squad || *(void *const *)(squad + 0xa8) == *(void *const *)(brain + 0x38)) return;
+    SquadOrder *o = &g_squads[((uintptr_t)squad >> 4) % 256];
+    if (o->squad != (uintptr_t)squad) return;
+    uint32_t took = *(const uint32_t *)(g_exe + W->now) - o->at;
+    ManDone *d = &g_man_done[((uintptr_t)brain >> 4) % 2048];
+    if (took > 5000 || (d->brain == (uintptr_t)brain && d->at == o->at)) return;     // his first order after this one only
+    d->brain = (uintptr_t)brain; d->at = o->at;
+    if (!o->men++) g_sq_first += took;
+    o->last = took;
+    g_sq_men++;
+    if ((long)took > g_sq_worst) g_sq_worst = took;
+}
 typedef struct { uintptr_t brain; uint32_t until; } Hurry;
 static Hurry g_hurry[2048];
 static volatile long g_hurried;
@@ -335,7 +364,7 @@ static void set_beo(void *brain, void *order) {
         if (order && rule) event('R', brain_actor(brain), rule, 0, 0);
     }
     g_beo_real(brain, order);
-    if (order) ordered(brain);
+    if (order) { ordered(brain); squad_man(brain); }
     if (!order && g_hurry_ms && g_balance_on) {
         Hurry *h = &g_hurry[((uintptr_t)brain >> 4) % 2048];
         h->brain = (uintptr_t)brain;
@@ -344,9 +373,35 @@ static void set_beo(void *brain, void *order) {
         g_hurried++;
     }
 }
+// A follower runs to his place beside the leader, and takes a new way only when that place has moved by more than 0.7 of what is left
+// of his way (951530). Told to run back he is already at it, so the leader goes and he stays, for a second and more, until the leader
+// is far enough. For a while after an order he goes by the first half of that test alone, four times a second, and thinks every quant.
+typedef struct { uintptr_t brain; uint32_t from, last; } Follow;
+static Follow g_follow[2048];
+static volatile long g_followed;
+#define FOLLOW_MS 800                      // thinking every quant costs: at 2.5 s the server fell from 50 quants a second to 35
+#define FOLLOW_EVERY_MS 250
+static uint8_t (*g_follow_real)(uint8_t *state);
+static uint8_t follow_check(uint8_t *state) {
+    uint8_t r = g_follow_real(state);
+    if (r || !g_balance_on) return r;
+    const uint8_t *brain = *(const uint8_t *const *)(state + 0x30);
+    Follow *f = &g_follow[((uintptr_t)brain >> 4) % 2048];
+    if (f->brain != (uintptr_t)brain) return 0;
+    const uint32_t now = *(const uint32_t *)(g_exe + W->now);
+    if (now - f->from > FOLLOW_MS) { f->brain = 0; return 0; }
+    if (now - f->last < FOLLOW_EVERY_MS) return 0;
+    const float dx = *(const float *)(state + 0x3cc) - *(const float *)(brain + 0x138), dy = *(const float *)(state + 0x3d0) - *(const float *)(brain + 0x13c);
+    if (dx * dx + dy * dy <= 40) return 0;              // the game's own least: 20 x 2
+    f->last = now;
+    g_followed++;
+    return 1;
+}
 static void hurry_quant(const uint8_t *a) {
     uint8_t *brain = *(uint8_t *const *)(a + 0xdc8);
     if (!brain) return;
+    const Follow *f = &g_follow[((uintptr_t)brain >> 4) % 2048];
+    if (f->brain == (uintptr_t)brain && g_balance_on) *(uint32_t *)(brain + 0x39c) |= BRAIN_THINK;
     Hurry *h = &g_hurry[((uintptr_t)brain >> 4) % 2048];
     if (h->brain != (uintptr_t)brain) return;
     if (*(void *const *)(brain + 0xf0) || (int32_t)(*(const uint32_t *)(g_exe + W->now) - h->until) >= 0) { h->brain = 0; return; }
@@ -415,7 +470,10 @@ static void held_report(void) {
     int n = 0;
     for (size_t i = 0; i < NFIGHT; i++) if (g_held[i]) { n += snprintf(line + n, sizeof line - n, " %s %ld", FIGHT_RULES[i], g_held[i]); g_held[i] = 0; }
     if (n || g_alarms) rc_log("pathing: alarms put aside %ld, rules held back:%s", g_alarms, n ? line : " none");
-    g_alarms = 0;
+    if (g_followed) rc_log("pathing: %ld new ways for followers", g_followed);
+    if (g_sq_orders) rc_log("pathing: squads: %ld orders, %ld men, first man after %ld ms, last after %ld ms on average, worst %ld ms", g_sq_orders, g_sq_men,
+                            g_sq_first / g_sq_orders, g_sq_last / g_sq_orders, g_sq_worst);
+    g_alarms = 0; g_followed = 0; g_sq_orders = g_sq_men = g_sq_first = g_sq_last = g_sq_worst = 0;
 }
 static void *brain_message(void *brain, long code, void *x, void *y) {
     if (!g_server) event('M', brain_actor(brain), "", (int)code, 0);
@@ -427,6 +485,9 @@ static void *brain_message(void *brain, long code, void *x, void *y) {
         h->from = now;
         h->until = now + g_hot_ms;
         h->alarm = 0;
+        Follow *f = &g_follow[((uintptr_t)brain >> 4) % 2048];
+        f->brain = (uintptr_t)brain; f->from = now; f->last = now - FOLLOW_EVERY_MS;
+        squad_ordered(brain);
     }
     return r;
 }
@@ -541,7 +602,21 @@ static void squad_report(void) {
 // A quant takes its commands in (sqi:exec), works the actors (entity_1) and only then applies the commands (ecexec, 14d080): an order
 // reaches the units a whole quant late. So here they are applied before the actors too; the step at the end finds nothing left.
 // The way in is the call just before entity_1, 5e4190 (the debug stack, no arguments), through a stub near the code.
+// How a squad's order reaches its men (eSquad's quant, 930ca7). Only the commander gets it. The squad looks at him every 0.3 s: its
+// target is the point 4 m along his way (933a50), and only when that is more than 3 m from the squad's centre does the centre move,
+// the places of the men with it (933100), and then they are told (902b20). So a man hears of an order 0.3 s late at best, and later
+// when the commander has to get going first. With the competitive balance the squad looks every 0.05 s and goes by 1 m. Both are
+// floats the code reads through its own address: it reads ours instead.
+// The men stand 8 m behind the commander (squads.set, placerCommanderAhead). Told to run back, he comes towards them, and a point 4 m
+// along his way is where they already are: they have no reason to move until he has run past them, a second and more. Measured on
+// the server: the first man 56 to 359 ms after the order, the last over a second. So the squad looks 16 m along his way: past the
+// men, whichever way he goes; near the end of his way it is the end of it, so they still come to him.
+static float *g_squad;
+#define SQUAD_TICK_S 0.1f
+#define SQUAD_RANGE_M 1.0f
+#define SQUAD_AHEAD_M 16.0f
 static void settings(int on) {
+    if (g_squad) { g_squad[0] = on ? SQUAD_TICK_S : 0.3f; g_squad[1] = on ? SQUAD_RANGE_M : 3.0f; g_squad[2] = on ? SQUAD_AHEAD_M : 4.0f; }
     *(int *)(g_exe + W->stat) = on ? g_stat : 0;
     *(int *)(g_exe + W->smooth) = on ? g_smooth : 0;
     *(uint8_t *)(g_exe + W->idle) = on && g_no_idle;
@@ -661,6 +736,36 @@ brain:;
         patch(exe + W->rule, jump, 5);
         rc_log("pathing: the rules are ours");
     } else rc_log("pathing: the rules are not as expected");
+    static const uint8_t LOAD_FLOAT[4] = {0xf3, 0x0f, 0x10, 0x05}, MUL_FLOAT[4] = {0xf3, 0x0f, 0x59, 0x15};
+    static const uint8_t MUL_FLOAT1[4] = {0xf3, 0x0f, 0x59, 0x0d};
+    g_squad = (float *)alloc(16);
+    if (g_squad && !memcmp(exe + W->squad_tick, LOAD_FLOAT, 4) && !memcmp(exe + W->squad_range, MUL_FLOAT, 4) &&
+        !memcmp(exe + W->squad_ahead, MUL_FLOAT1, 4) && !memcmp(exe + W->squad_ahead2, MUL_FLOAT1, 4)) {
+        g_squad[0] = 0.3f; g_squad[1] = 3.0f; g_squad[2] = 4.0f;
+        int32_t ahead = (int32_t)((uint8_t *)&g_squad[2] - (exe + W->squad_ahead + 8)), ahead2 = (int32_t)((uint8_t *)&g_squad[2] - (exe + W->squad_ahead2 + 8));
+        patch(exe + W->squad_ahead + 4, &ahead, 4);
+        patch(exe + W->squad_ahead2 + 4, &ahead2, 4);
+        int32_t tick = (int32_t)((uint8_t *)&g_squad[0] - (exe + W->squad_tick + 8)), range = (int32_t)((uint8_t *)&g_squad[1] - (exe + W->squad_range + 8));
+        patch(exe + W->squad_tick + 4, &tick, 4);
+        patch(exe + W->squad_range + 4, &range, 4);
+        rc_log("pathing: squads are ours");
+    } else { g_squad = NULL; rc_log("pathing: the squads' quant is not as expected"); }
+    // the follower's test: twelve bytes of plain moves first, kept in a stub that goes on to the rest of it
+    static const uint8_t FOLLOW_HEAD[12] = {0x48, 0x8b, 0x51, 0x30, 0xf3, 0x0f, 0x10, 0xa1, 0xd0, 0x03, 0x00, 0x00};
+    uint8_t *to_ours = alloc(16), *old = alloc(32);
+    if (to_ours && old && !memcmp(exe + W->follow, FOLLOW_HEAD, 12)) {
+        static const uint8_t JUMP[6] = {0xff, 0x25, 0, 0, 0, 0};
+        uint64_t ours = (uint64_t)(uintptr_t)follow_check, back = (uint64_t)(uintptr_t)(exe + W->follow + 12);
+        memcpy(old, FOLLOW_HEAD, 12);
+        memcpy(old + 12, JUMP, 6); memcpy(old + 18, &back, 8);
+        memcpy(to_ours, JUMP, 6); memcpy(to_ours + 6, &ours, 8);
+        g_follow_real = (uint8_t (*)(uint8_t *))(void *)old;
+        uint8_t jump[5] = {0xe9};
+        int32_t d = (int32_t)(to_ours - (exe + W->follow + 5));
+        memcpy(jump + 1, &d, 4);
+        patch(exe + W->follow, jump, 5);
+        rc_log("pathing: followers are ours");
+    } else rc_log("pathing: the followers' test is not as expected");
     rc_log("pathing: eHuman's quant is %llx", (unsigned long long)((uint8_t *)slot - exe));
     g_human_real = (void *(*)(void *))slot;
     patch(exe + W->vt_human + 8 * 23, &ours, 8);
