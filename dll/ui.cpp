@@ -777,14 +777,14 @@ static const char *ABOUT_EN[] = {
     "Sign in through Steam: the mod gets only your SteamID, no password",
 };
 static const char *NEWS_RU[] = {
-    "Реплеи: исправлен вылет при выходе из реплея",
-    "Реплеи: перемотка меньше нагружает игру, при нехватке памяти выключается сама",
-    "Кнопка «Перемотка» на панели реплея, если реплей лагает",
+    "Камуфляжи других игроков: видны в бою, если включить. Shift+F5 — окно с настройкой и загрузкой всех скинов",
+    "Исправлена серая текстура на технике с камуфляжем при модах с собственными текстурами",
+    "Новые камуфляжи и наклейки отражаются по горизонтали по умолчанию",
 };
 static const char *NEWS_EN[] = {
-    "Replays: fixed a crash on leaving a replay",
-    "Replays: rewind is lighter on the game and turns itself off when memory is short",
-    "A Rewind button on the replay panel, for when a replay stutters",
+    "Other players' camouflages: seen in battle if you turn them on. Shift+F5 opens the switch and reloads all skins",
+    "Fixed the grey texture on camouflaged vehicles with mods that bring their own textures",
+    "New camouflages and stickers are mirrored horizontally by default",
 };
 
 // which news the player has read: by their text, so a build with the same news stays quiet

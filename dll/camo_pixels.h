@@ -16,7 +16,7 @@ struct CamoSettings {
     int part = 0;                                   // mode 0: where it goes, CAMO_ above
     int gun = 0;                                    // mode 0: 1 the barrels take it too
     int seam = 0;                                   // mode 0: 1 the old cover, torn along the middle of the vehicle
-    int flip_x = 0, flip_y = 0;                     // mode 0: the picture turned over
+    int flip_x = 1, flip_y = 0;                     // mode 0: the picture turned over; left to right is how it reads right from the front
     float dim = 1;                                  // the picture's level, in plain blending (camo.cpp, picture_level); not a setting
     float bright = 1;                               // the player's brightness over that level
 };

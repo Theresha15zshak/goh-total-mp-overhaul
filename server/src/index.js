@@ -20,6 +20,7 @@ import * as verify from './verify.js';
 import { anonName } from './verify.js';
 import * as versions from './versions.js';
 import * as admin from './admin.js';
+import * as skins from './skins.js';
 
 const ONLINE_S = 300;          // seen within the last 5 minutes = online
 const MAX_LIST = 200;
@@ -124,6 +125,10 @@ export default {
   async fetch(req, env) {
     const url = new URL(req.url);
     if (await limited(req, env)) return text('too many requests', 429);
+    if (url.pathname.startsWith('/skin/')) {
+      const r = await skins.handle(req, env, url);
+      if (r) return r;
+    }
     if (url.pathname === '/hb' && req.method === 'POST') return heartbeat(req, env);
     if (url.pathname === '/report' && req.method === 'POST') {
       const [status, msg] = await report(req, env);
@@ -164,5 +169,6 @@ export default {
   },
   async scheduled(event, env) {
     await chat.wipe(env);
+    await skins.clean(env);
   },
 };
