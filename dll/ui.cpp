@@ -280,7 +280,16 @@ static void panel() {
             fmt_time(b, sizeof b, c.snap_to_ms / 1000);
             ImGui::SameLine(0, 10 * k);
             ImGui::TextDisabled(TR("· мгновенно %s–%s, %d МБ", "· instant %s–%s, %d MB"), a, b, c.snap_mb);
+        } else if (c.snap_state == 3) {
+            ImGui::SameLine(0, 10 * k);
+            ImGui::TextDisabled("%s", TR("· мало памяти: перемотка назад выключена", "· low memory: instant jumps are off"));
         }
+    }
+    if (c.snap_state) {
+        const bool on = c.snap_state != 4;
+        ImGui::SameLine(ImGui::GetWindowWidth() - 500 * k);
+        if (ImGui::SmallButton(on ? TR("Перемотка: вкл", "Rewind: on") : TR("Перемотка: выкл", "Rewind: off"))) rewind_setting(!on);
+        if (ImGui::IsItemHovered()) ImGui::SetTooltip("%s", TR("Мгновенная перемотка назад. Выключи, если реплей лагает", "Instant jumps back. Turn it off if a replay stutters"));
     }
     ImGui::SameLine(ImGui::GetWindowWidth() - 345 * k);
     if (ImGui::SmallButton(TR("Музыка (Shift+F10)", "Music (Shift+F10)"))) g_music_win = !g_music_win;

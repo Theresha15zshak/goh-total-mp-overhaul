@@ -78,6 +78,10 @@ void music_open_folder(void);
 int snap_install(uint8_t *exe);              // DllMain, before the game's CRT starts
 int snap_owns(const void *p);
 void snap_stats(uint64_t *committed, uint64_t *used, int64_t *live_bytes, int64_t *live_blocks);
+void snap_set_rewind(int on);                // the player's switch for snapshots in replays
+int snap_rewind(void);
+void snap_new_replay(void);                  // a replay is over: the next one may try again
+void rewind_setting(int on);                 // the switch, kept in goh_snapshots.ini
 int snap_session_start(int game_ms);         // logic thread, a replay is on: base snapshot starts (1 = started)
 void snap_session_end(void);                 // logic thread, the replay is over
 void snap_tick(int game_ms);                 // logic thread, every frame: base done, a snapshot every 15 s

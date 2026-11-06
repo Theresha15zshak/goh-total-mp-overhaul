@@ -770,6 +770,14 @@ static void test_compare(void) {
 
 static int game_mode(void);
 
+void rewind_setting(int on) {
+    char ini[MAX_PATH];
+    snap_set_rewind(on);
+    snprintf(ini, sizeof ini, "%sgoh_snapshots.ini", g_dir);
+    WritePrivateProfileStringA("snapshots", "rewind", on ? "1" : "0", ini);
+    rc_log("snapshots: rewind %s by the player", on ? "on" : "off");
+}
+
 // logic thread, every frame
 static void snapshots_tick(void) {
     static int active;
@@ -777,8 +785,10 @@ static void snapshots_tick(void) {
     uintptr_t core = replay_core();
     if (!core) {
         if (active) { snap_session_end(); active = 0; }
+        snap_new_replay();
         return;
     }
+    if (active && !snap_rewind()) { snap_session_end(); active = 0; }
     if (!active) {
         if (!game_mode() || !snap_session_start(game_ms())) return;
         active = 1;
@@ -1527,6 +1537,7 @@ static void startup(HMODULE self) {
         int ok = snap_install(g_base);
         rc_log("snapshots: game heap %s", ok ? "in our range" : "NOT moved (import slots not found)");
         g_snapshots = ok;
+        snap_set_rewind(GetPrivateProfileIntA("snapshots", "rewind", 1, ini));
         g_snap_test = ok && GetPrivateProfileIntA("snapshots", "test", 0, ini);
         g_auto_prep = ok && GetPrivateProfileIntA("snapshots", "prepare_v2", 0, ini);   // off for now (2026-11-02)
         g_profile = ok && GetPrivateProfileIntA("snapshots", "profile", 0, ini);

@@ -718,7 +718,8 @@ static int put_stacks(void) {
 #define ARENA_CHUNK     (256ull << 20)
 #define MAX_CHUNKS      256
 #define XOR_KEEP        1024                // a XOR version bigger than this starts a new full version
-#define HELPERS         4
+#define HELPERS         2                   // two, under the game's own threads: a replay on a 6 core CPU stuttered with four
+#define JOB_CLOSED      0x40000000          // far below the top: helpers keep adding to it, and past 2^31 it would turn into a page number
 #define MAX_VERSIONS    (64ull << 20)
 
 uint32_t lz_pack(const uint8_t *src, uint32_t n, uint8_t *dst);
@@ -876,13 +877,14 @@ static uint32_t ver_at(uint32_t p, int j) {
 
 static DWORD WINAPI helper(LPVOID _) {
     (void)_;
+    SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_BELOW_NORMAL);
     uint8_t tmp[PAGE], out[PAGE + 64];
     for (;;) {
         WaitForSingleObject(g_job_sem, INFINITE);
         InterlockedIncrement(&g_job.working);
         for (;;) {
             LONG i = InterlockedExchangeAdd(&g_job.next, 64);
-            if (i >= g_job.n) break;
+            if (i < 0 || i >= g_job.n) break;
             LONG e = i + 64 < g_job.n ? i + 64 : g_job.n;
             for (LONG k = i; k < e; k++) {
                 if (g_job.base) encode((uint32_t)k, 0, g_r + (uint64_t)k * PAGE, tmp, out);
@@ -896,7 +898,7 @@ static DWORD WINAPI helper(LPVOID _) {
 }
 
 static void post_job(int base, uint32_t snap, LONG n) {
-    g_job.next = 0x7fffffff;                // closed while it is filled in
+    g_job.next = JOB_CLOSED;                // closed while it is filled in
     MemoryBarrier();
     g_job.n = n; g_job.snap = snap; g_job.base = base; g_job.left = n;
     MemoryBarrier();
@@ -919,10 +921,25 @@ const char *snap_busy(void) { return g_busy; }
 
 int snap_ready(void) { return g_sess == 2; }
 
+// The player's switch; and a replay too big for the memory free gets no snapshots: the store is about three quarters of the game's
+// memory, in a file the system caches. With 16 GB and a 3 vs 3 of 8 GB that left nothing, and the replay crawled (2026-11-06).
+static int g_rewind = 1, g_refused, g_low_logged;
+static uint64_t g_stage_warm;               // bytes of g_stage touched, ahead of the first snapshot
+static DWORD g_first_at;                    // the first snapshot waits for the base's writes to settle
+#define STAGE_WARM      (512ull << 20)
+void snap_set_rewind(int on) { g_rewind = on; }
+int snap_rewind(void) { return g_rewind; }
+void snap_new_replay(void) { g_refused = 0; g_low_logged = 0; }
+static uint64_t memory_free(void) {
+    MEMORYSTATUSEX m;
+    m.dwLength = sizeof m;
+    return GlobalMemoryStatusEx(&m) ? m.ullAvailPhys : ~0ull;
+}
+
 // replay over: everything goes
 void snap_session_end(void) {
     if (!g_sess && !g_ver) return;
-    g_job.next = 0x7fffffff;
+    g_job.next = JOB_CLOSED;
     while (g_job.working) Sleep(1);
     for (int c = 0; c < MAX_CHUNKS; c++) {
         if (g_chunk_map[c]) { UnmapViewOfFile(g_chunk[c]); CloseHandle(g_chunk_map[c]); }
@@ -935,7 +952,7 @@ void snap_session_end(void) {
     if (g_lists) real_VirtualFree(g_lists, 0, MEM_RELEASE);
     if (g_stage) real_VirtualFree(g_stage, 0, MEM_RELEASE);
     g_ver = NULL; g_head = NULL; g_lists = NULL; g_stage = NULL;
-    g_arena_used = 0; g_nver = 0; g_ver_committed = 0; g_nlist = 0; g_lists_committed = 0; g_stage_committed = 0;
+    g_arena_used = 0; g_nver = 0; g_ver_committed = 0; g_nlist = 0; g_lists_committed = 0; g_stage_committed = 0; g_stage_warm = 0;
     g_nsnap = 0; g_cur = -1; g_sess = 0; g_job_pending = 0; g_job.left = 0; g_job.n = 0;
     g_nhome = 0;
     keep_end();
@@ -945,6 +962,15 @@ void snap_session_end(void) {
 // logic thread, a replay is on: snapshot 0 starts (1 = started)
 int snap_session_start(int game_ms) {
     if (!g_on || g_sess) return g_sess != 0;
+    if (!g_rewind || g_refused) return 0;
+    uint64_t game = g_st->top, free_now = memory_free(), need = game / 4 * 3 + (1ull << 30);
+    if (free_now < need) {
+        g_refused = 1;
+        lstrcpynA(g_busy, "not enough free memory for snapshots", sizeof g_busy);
+        rc_log("snapshots: off for this replay: game %llu MB, free %llu MB, they would take %llu MB", (unsigned long long)(game >> 20),
+               (unsigned long long)(free_now >> 20), (unsigned long long)(need >> 20));
+        return 0;
+    }
     if (!g_data) find_sections();
     if (!g_tls_index) find_tls();
     if (!g_job_sem) {
@@ -1034,10 +1060,17 @@ static uint64_t store_mb(void) { return (g_arena_used + (uint64_t)g_nver * sizeo
 
 // logic thread, every frame of a replay: the base finishing, snapshots every SNAP_EVERY_MS of game time
 void snap_tick(int game_ms) {
+    // the first snapshot copies a lot with the game stopped (4.3 s in a big match, 2026-11-06): its pages are made real ahead of it,
+    // a little each frame, while the base is at work
+    if (g_sess == 1 && g_stage_warm < STAGE_WARM && ensure(g_stage, &g_stage_committed, g_stage_warm + (16ull << 20), 64ull << 20)) {
+        for (uint64_t at = g_stage_warm; at < g_stage_warm + (16ull << 20); at += PAGE) g_stage[at] = 0;
+        g_stage_warm += 16ull << 20;
+    }
     if (!g_sess || job_busy()) return;
     if (g_sess == 1) {
         g_nsnap = 1;
         g_sess = 2;
+        g_first_at = GetTickCount() + 5000;
         rc_log("snapshots: base of %llu MB done in %.1f s, stored in %llu MB", (unsigned long long)(g_snaps[0].top >> 20),
                (GetTickCount() - g_base_t0) / 1000.0, (unsigned long long)store_mb());
     }
@@ -1050,6 +1083,11 @@ void snap_tick(int game_ms) {
     }
     // the first one right after the base: it makes everything the base caught half-written exact
     if (g_nsnap >= MAX_SNAPS || (g_nsnap > 1 && game_ms < g_snaps[g_nsnap - 1].ms + SNAP_EVERY_MS)) return;
+    if (g_nsnap == 1 && (LONG)(GetTickCount() - g_first_at) < 0) return;
+    if (memory_free() < (768ull << 20)) {   // what is kept stays; no more of it
+        if (!g_low_logged++) rc_log("snapshots: memory is short, no more of them for now");
+        return;
+    }
     int k = g_nsnap;
     bits_clear();
     if (g_cur != k - 1) mark_between(g_cur, k - 1);   // after a restore: whatever differs from the last snapshot
@@ -1104,7 +1142,7 @@ static int snap_find(int target_ms) {
 int snap_best(int target_ms) { int k = snap_find(target_ms); return k < 0 ? -1 : g_snaps[k].ms; }
 
 void snap_info(int *from_ms, int *to_ms, int *mb, int *state) {
-    *state = g_sess;
+    *state = g_sess ? g_sess : !g_rewind ? 4 : g_refused ? 3 : 0;      // 3 not enough memory, 4 turned off
     *from_ms = g_sess == 2 && g_nsnap > 1 ? g_snaps[1].ms : -1;
     *to_ms = g_sess == 2 && g_nsnap > 1 ? g_snaps[g_nsnap - 1].ms : -1;
     *mb = g_sess ? (int)store_mb() : 0;
