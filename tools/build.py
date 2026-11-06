@@ -20,7 +20,7 @@ if VARIANT == 'competitive':
     CFLAGS.append('-DCOMPETITIVE_ONLY')
 
 C_SRC = ['dll/goh_replay.c', 'dll/proxy_iphlpapi.c', 'dll/snap.c', 'dll/keep.c', 'dll/lz.c', 'dll/prof.c', 'dll/balance.c',
-         'dll/online.c', 'dll/pvp.c', 'dll/always_day.c', 'dll/census.c', 'dll/report.c', 'dll/steamlobby.c', 'dll/update.c']
+         'dll/online.c', 'dll/pvp.c', 'dll/always_day.c', 'dll/farshoot.c', 'dll/pathing.c', 'dll/uistat.c', 'dll/census.c', 'dll/report.c', 'dll/steamlobby.c', 'dll/update.c']
 CPP_SRC = ['dll/ui.cpp', 'dll/music.cpp'] + [os.path.join(IMGUI, f) for f in
                             ('imgui.cpp', 'imgui_draw.cpp', 'imgui_tables.cpp', 'imgui_widgets.cpp',
                              'backends/imgui_impl_dx11.cpp', 'backends/imgui_impl_win32.cpp')]
@@ -242,6 +242,7 @@ def ui_header():
         out.append('};')
         rows.append('    {"%s", "%s", 0x%08xu, %du, UI_DATA_%d},' % (pak, path, info.CRC, info.file_size, i))
     out += ['static const UiFile UI_FILES[] = {'] + rows + ['};', '']
+    subprocess.run([sys.executable, os.path.join(ROOT, 'tools', 'vehicle_ranges.py'), os.path.join(OBJ, 'vehicle_ranges.h')], check=True)
     h = os.path.join(OBJ, 'ui_files.h')
     text = chr(10).join(out)
     if not os.path.exists(h) or open(h).read() != text:
@@ -252,7 +253,7 @@ def balance_tag(data_text):
     """version of the switch shown to players: the same for every build (full or competitive) made from the
     same dll/balance.c and the same copies, so equal tags mean the games agree on every purchase"""
     import zlib
-    src = open(os.path.join(ROOT, 'dll', 'balance.c'), 'rb').read().replace(b'\r\n', b'\n')
+    src = b''.join(open(os.path.join(ROOT, 'dll', f), 'rb').read().replace(b'\r\n', b'\n') for f in ('balance.c', 'pathing.c'))
     return '%04X' % (zlib.crc32(src + data_text.encode()) & 0xffff)
 
 

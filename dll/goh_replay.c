@@ -827,6 +827,9 @@ static void snapshots_tick(void) {
 
 static volatile DWORD g_logic_tid;
 
+// test: the camera at each click in a battle
+static void rmb_probe(void);
+
 static void __cdecl main_tick(void) {
     static int logged;
     if (!logged) { logged = 1; rc_log("main_tick runs here"); g_logic_tid = GetCurrentThreadId(); }
@@ -834,9 +837,15 @@ static void __cdecl main_tick(void) {
     if (g_snapshots) snapshots_tick();
     if (g_pov_on && g_rw == RW_NONE) apply_pov();
     if (g_media_ok && InterlockedExchange(&g_music_stop_vanilla, 0)) stop_game_music();
+    double stat_at = g_uistat_on ? uistat_now() : 0;
+    if (g_uistat_on) rmb_probe();
     pvp_gui_tick();
     lobby_list_tick();
+    if (g_uistat_on) { uistat_add(UISTAT_LOGIC, stat_at); stat_at = uistat_now(); }
     camo_tick();
+    if (g_uistat_on) uistat_add(UISTAT_CAMO, stat_at);
+    farshoot_tick();
+    pathing_tick();
     switch (g_rw) {
     case RW_EXIT: {
         struct { void *vt; uint32_t id, pad; uint64_t rest[5]; } ev;
@@ -983,6 +992,19 @@ static int third_person(void) {
     uintptr_t t = rdq((uintptr_t)g_base + TPC_CAMERA), c = t ? rdq(t + 0x3b0) : 0;
     uint8_t on = 0;
     return c && rd((void *)(c + 0x10), &on, 1) && on;
+}
+
+static void rmb_probe(void) {
+    static int was[2], told;
+    for (int i = 0; i < 2; i++) {
+        int down = (GetAsyncKeyState(i ? VK_RBUTTON : VK_LBUTTON) & 0x8000) != 0;
+        if (down && !was[i] && g_live_match && told++ < 80) {
+            CamSample c;
+            if (read_camera(&c))
+                rc_log("probe: %s click, camera pitch %.3f yaw %.3f fov %.3f dist %.1f at %.1f %.1f %.1f, direct control %d", i ? "right" : "left", c.pitch, c.yaw, c.fov, c.dist, c.x, c.y, c.z, third_person());
+        }
+        was[i] = down;
+    }
 }
 
 static int overview(const CamSample *c) { return c->dist >= 300.f && c->fov >= 0.5f; }
@@ -1514,8 +1536,12 @@ static void startup(HMODULE self) {
     if (server) {
         AddVectoredExceptionHandler(1, fault_log);
         if (!near_page()) { rc_log("server: no memory near its code, nothing patched"); return; }
+        char server_ini[MAX_PATH];
+        snprintf(server_ini, sizeof server_ini, "%sgoh_snapshots.ini", g_dir);
+        pathing_init(g_base, server_ini, 1);
         balance_install(g_base, g_dir, page_alloc, patch, 1);
         day_install(g_base, patch, 1);
+        pathing_install(g_base, page_alloc, patch);
         rc_log("server: loaded at %p", self);
         return;
     }
@@ -1529,6 +1555,8 @@ static void startup(HMODULE self) {
     census_init(g_base, g_dir, GetPrivateProfileIntA("debug", "census_after", 0, ini));
     camo_init(g_dir);
     g_census_auto = GetPrivateProfileIntA("debug", "census", 0, ini);
+    g_uistat_on = GetPrivateProfileIntA("debug", "ui_stats", 0, ini);
+    pathing_init(g_base, ini, 0);
 #ifdef COMPETITIVE_ONLY
     if (0) {
 #else

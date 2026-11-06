@@ -89,11 +89,39 @@ static int names_file(const char *s, size_t n, const char *ours) {
     return n == k || ours[k - n - 1] == '/';
 }
 
+// the units' answers (pathing.c) in the server's files: in a player's game pvp.c does this. A file as the game is about to read it
+static void tuned_file(const char *s, size_t n, uint8_t *st) {
+    static const char *const FILES[][2] = {{"properties/human.ext", "human.ext"}, {"properties/mobility.inc", "mobility.inc"},
+                                           {"properties/human_fsm/request.inc", "request.inc"}, {"properties/human_fsm/switch.inc", "switch.inc"}};
+    for (int i = 0; i < 4; i++) {
+        if (!names_file(s, n, FILES[i][0])) continue;
+        uintptr_t vt = *(uintptr_t *)st - (uintptr_t)g_base;
+        uint8_t *b = *(uint8_t **)(st + 8), *e = *(uint8_t **)(st + 0x28);
+        if (!b || e <= b || *(uint64_t *)(st + 0x20) || *(uint8_t **)(st + 0x30) != b) { rc_log("pathing: %s: the stream is not as expected", FILES[i][1]); return; }
+        size_t size = (size_t)(e - b);
+        size_t cap = size;
+        if (vt == L->vt_buffer_stream) {
+            cap = size + pathing_more();
+            uint8_t *c = malloc(cap);                     // lives as long as the game may read it
+            if (!c) return;
+            memcpy(c, b, size);
+            b = c;
+        } else if (vt != L->vt_zip_stream) { rc_log("pathing: %s: a stream of kind %llx", FILES[i][1], (unsigned long long)vt); return; }
+        size = pathing_edit(FILES[i][1], b, size, cap);
+        if (vt == L->vt_buffer_stream) {
+            *(uint8_t **)(st + 8) = b; *(uint8_t **)(st + 0x10) = b + size; *(uint64_t *)(st + 0x18) = size;
+            *(uint8_t **)(st + 0x30) = b; *(uint8_t **)(st + 0x28) = b + size;
+        }
+        return;
+    }
+}
+
 static void *open_hook(void *path, uint32_t mode) {
     void *r = g_open(path, mode);
     const char *s;
     size_t n;
     if (!r || !str_view(path, &s, &n)) return r;
+    if (L == &LAYOUTS[1] && pathing_wants()) tuned_file(s, n, r);
     for (size_t i = 0; i < NFILES; i++) {
         if (!names_file(s, n, BALANCE_FILES[i].path)) continue;
         const BalanceFile *f = &BALANCE_FILES[i];
