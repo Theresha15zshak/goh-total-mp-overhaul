@@ -69,7 +69,7 @@ static int swap_all(uint8_t *b, size_t n, const char *from, const char *to) {
 }
 int pathing_wants(void) { return g_test && g_balance_on; }
 // An order goes when the right button comes up. Measured, a squad answers 12 to 60 ms after that, at full speed: most of what is
-// felt is the click itself. So in a battle the button comes up for the game at once, Alt or no Alt: a line formation is not drawn.
+// felt is the click itself. The button itself stays the game's: a click cannot be told from a drag before it comes up (ui.cpp). This says when auto-run may add its click.
 // Not in direct control, where the button is held on purpose.
 int pathing_press_order(void) {
     if (!g_test || !g_press || !g_balance_on || !g_live_match) return 0;
@@ -415,20 +415,23 @@ static void hurry_quant(const uint8_t *a) {
 // Why a soldier told to run lies down first: between the order taken off him and the next (a follower has none for a few quants) the
 // first rule of "outdoors" (949aa0) is enemy_alarm: byte +0x3da of the brain, set when his enemy changes (941d43); in one stance (0xc00 of +0x398) it calls Hide, and with
 // nothing to hide behind eCover's table says open_lie, terrain_lie, bush_lie. He leaves that only when his eMove starts (898c50).
-// Here the check is ours. For a soldier told to go (0x407: his orders cleared for a new one), until he has arrived or g_hot_ms have
-// gone:
+// Here the check is ours. For a soldier told to go (0x407: his orders cleared for a new one), until he has stood for HOT_REST_MS, or
+// g_hot_ms have gone without a step. Counted from his last step, not from the order: 15 s is only some 50 m of a run, and between two
+// legs of his way he has no move for a few quants, the more so with a squad that looks ten times a second. With the alarm given back
+// there, a man on the run squatted to hide, stood through that chain, and ran on.
 // - the alarm is put aside, not stopped at: below it are the rules that give a follower his order (following, move_follow), so the
 //   list has to go on. He gets it back when he is done.
 // - before he moves, hide_check and injured_by_enemy stop the list, as the rule of his order would. Nothing he needs is below them.
 // - going, the rest of what the fight wants stops the list too. Fire, grenades, being run over still come first.
-typedef struct { uintptr_t brain; uint32_t from, until; uint8_t alarm; } Hot;
+typedef struct { uintptr_t brain; uint32_t went, until; uint8_t alarm; } Hot;
 static Hot g_hot[2048];
 static const char *const FIGHT_RULES[] = {"hide_check", "injured_by_enemy", "enemy_alarm", "board_cannon", "stop_advance", "stop_detour", "stop_fight", "reload_if_low",
                                           "healing_stop", "healing_restore"};
 #define NFIGHT (sizeof FIGHT_RULES / sizeof FIGHT_RULES[0])
 #define NBEFORE 2                   // the first ones hold before he moves too
 #define BRAIN_ALARM 0x3da
-static volatile long g_held[NFIGHT], g_alarms;
+static volatile long g_held[NFIGHT], g_alarms, g_alarms_back, g_hot_clash;
+#define HOT_REST_MS 700
 #define RULE_STOP 0x400000
 // 0 not told, 1 told and not moving yet, 2 going
 static int told(uint8_t *brain) {
@@ -437,13 +440,22 @@ static int told(uint8_t *brain) {
     uint32_t now = *(const uint32_t *)(g_exe + W->now);
     const uint8_t *actor = *(const uint8_t *const *)(brain + 0x38), *chassis = actor ? *(const uint8_t *const *)(actor + 0xde0) : NULL;
     int moving = chassis && *(const int *)(chassis + 0x64) >= 2;
-    // he has a moment after the order to set off
-    if ((int32_t)(now - h->until) >= 0 || (!moving && now - h->from > 700)) {
-        if (h->alarm) brain[BRAIN_ALARM] = 1;
+    // he has a moment after the order to set off, and after each step to take the next
+    if ((int32_t)(now - h->until) >= 0 || (!moving && now - h->went > HOT_REST_MS)) {
+        if (h->alarm) { brain[BRAIN_ALARM] = 1; g_alarms_back++; }
         h->brain = 0;
         return 0;
     }
     return moving ? 2 : 1;
+}
+// every quant, not when he thinks: he may think seldom
+static void hot_quant(const uint8_t *a) {
+    const uint8_t *brain = *(const uint8_t *const *)(a + 0xdc8), *chassis = *(const uint8_t *const *)(a + 0xde0);
+    if (!brain || !chassis) return;
+    Hot *h = &g_hot[((uintptr_t)brain >> 4) % 2048];
+    if (h->brain != (uintptr_t)brain || *(const int *)(chassis + 0x64) != 2) return;
+    h->went = *(const uint32_t *)(g_exe + W->now);
+    h->until = h->went + g_hot_ms;
 }
 static uint8_t rule_check(uint8_t *state, const char *name) {
     uint8_t *brain = *(uint8_t **)(state + 0x30);
@@ -469,11 +481,12 @@ static void held_report(void) {
     char line[320];
     int n = 0;
     for (size_t i = 0; i < NFIGHT; i++) if (g_held[i]) { n += snprintf(line + n, sizeof line - n, " %s %ld", FIGHT_RULES[i], g_held[i]); g_held[i] = 0; }
-    if (n || g_alarms) rc_log("pathing: alarms put aside %ld, rules held back:%s", g_alarms, n ? line : " none");
+    if (n || g_alarms) rc_log("pathing: alarms put aside %ld, given back %ld, rules held back:%s", g_alarms, g_alarms_back, n ? line : " none");
+    if (g_hot_clash) rc_log("pathing: %ld soldiers lost their place among the told", g_hot_clash);
     if (g_followed) rc_log("pathing: %ld new ways for followers", g_followed);
     if (g_sq_orders) rc_log("pathing: squads: %ld orders, %ld men, first man after %ld ms, last after %ld ms on average, worst %ld ms", g_sq_orders, g_sq_men,
                             g_sq_first / g_sq_orders, g_sq_last / g_sq_orders, g_sq_worst);
-    g_alarms = 0; g_followed = 0; g_sq_orders = g_sq_men = g_sq_first = g_sq_last = g_sq_worst = 0;
+    g_alarms = g_alarms_back = g_hot_clash = 0; g_followed = 0; g_sq_orders = g_sq_men = g_sq_first = g_sq_last = g_sq_worst = 0;
 }
 static void *brain_message(void *brain, long code, void *x, void *y) {
     if (!g_server) event('M', brain_actor(brain), "", (int)code, 0);
@@ -481,8 +494,9 @@ static void *brain_message(void *brain, long code, void *x, void *y) {
     if (code == 0x407 && g_hot_ms && g_balance_on) {
         Hot *h = &g_hot[((uintptr_t)brain >> 4) % 2048];
         uint32_t now = *(const uint32_t *)(g_exe + W->now);
+        if (h->brain && h->brain != (uintptr_t)brain) g_hot_clash++;
         h->brain = (uintptr_t)brain;
-        h->from = now;
+        h->went = now;
         h->until = now + g_hot_ms;
         h->alarm = 0;
         Follow *f = &g_follow[((uintptr_t)brain >> 4) % 2048];
@@ -502,6 +516,7 @@ static int move_exec(void *move, int phase) {
 static void *human_quant(void *self) {
     const uint8_t *a = self;
     if (g_hurry_ms) hurry_quant(a);
+    if (g_hot_ms) hot_quant(a);
     if (!g_server && a[0xda8] == g_exe[G_LOCAL_PLAYER]) {
         Track *t = &g_tracks[((uintptr_t)self >> 4) % 2048];
         float x = *(const float *)(a + 0x74), y = *(const float *)(a + 0x78);

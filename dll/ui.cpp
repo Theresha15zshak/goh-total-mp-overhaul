@@ -160,11 +160,13 @@ static bool mouse_is_ours(HWND h) {
     return ours;
 }
 
-// The order on the press (pathing.c): the game gets the button's going up a frame or two after it went down, ours, marked; the
-// real one then stays away from it.
+// The right button is the game's, as it comes: a drag lays the men out from the very point of the press, and a press held still and
+// then dragged is a drag too, so nothing can tell a click before the button comes up.
+// Auto-run, a test: one click is two. The game runs a squad on a double click, so a click that did not move is followed by ours, marked.
 #define PRESS_MARK 0x474f4850
-static volatile long g_press_due, g_real_up_raw, g_real_up_msg, g_double_due;
-// Auto-run, a test: one click is two. The game runs a squad on a double click, so ours follows the first, marked too.
+#define PRESS_MOVE_PX 5
+static volatile long g_watch, g_double_due;
+static POINT g_watch_pos;
 static volatile bool g_autorun;
 static void send_right(DWORD flag) {
     INPUT in = {};
@@ -173,47 +175,40 @@ static void send_right(DWORD flag) {
     in.mi.dwExtraInfo = PRESS_MARK;
     SendInput(1, &in, sizeof in);
 }
-static void press_seen(HWND h) {
-    if (g_press_due || g_double_due || !pathing_press_order() || mouse_is_ours(h)) return;
-    g_real_up_raw = g_real_up_msg = 1;
-    g_press_due = 1;
+static void press_down(HWND h) {
+    if (g_watch || g_double_due || !g_autorun || !pathing_press_order() || mouse_is_ours(h)) return;
+    GetCursorPos(&g_watch_pos);
+    g_watch = 1;
+}
+static void press_up() {
+    if (!g_watch) return;                              // the same button by the other way in
+    g_watch = 0;
+    POINT now;
+    GetCursorPos(&now);
+    if (abs(now.x - g_watch_pos.x) < PRESS_MOVE_PX && abs(now.y - g_watch_pos.y) < PRESS_MOVE_PX) g_double_due = 2;
 }
 static void press_frame() {
     if (g_double_due) send_right(--g_double_due ? MOUSEEVENTF_RIGHTDOWN : MOUSEEVENTF_RIGHTUP);
-    if (!g_press_due || --g_press_due) return;
-    send_right(MOUSEEVENTF_RIGHTUP);
-    if (g_autorun) g_double_due = 2;
 }
-// the real button came up before ours went
-static void press_quick() {
-    g_press_due = 0;
-    g_real_up_raw = g_real_up_msg = 0;
-    if (g_autorun) g_double_due = 2;
-}
-// true: not for the game
-static bool press_filter(HWND h, UINT m, LPARAM l) {
-    if (m == WM_RBUTTONDOWN) { if ((long)GetMessageExtraInfo() != PRESS_MARK) press_seen(h); return false; }
-    if (m == WM_RBUTTONUP) {
-        if ((long)GetMessageExtraInfo() == PRESS_MARK) return false;
-        if (g_press_due) { press_quick(); return false; }     // quicker than our own
-        if (g_real_up_msg) { g_real_up_msg = 0; return true; }
-        return false;
+// only looks: everything goes on to the game
+static void press_watch(HWND h, UINT m, LPARAM l) {
+    if (m == WM_RBUTTONDOWN || m == WM_RBUTTONUP) {
+        if ((long)GetMessageExtraInfo() == PRESS_MARK) return;
+        if (m == WM_RBUTTONDOWN) press_down(h);
+        else press_up();
+        return;
     }
-    if (m != WM_INPUT) return false;
     RAWINPUT ri;
     UINT size = sizeof ri;
-    if (GetRawInputData((HRAWINPUT)l, RID_INPUT, &ri, &size, sizeof(RAWINPUTHEADER)) == (UINT)-1 || ri.header.dwType != RIM_TYPEMOUSE) return false;
+    if (GetRawInputData((HRAWINPUT)l, RID_INPUT, &ri, &size, sizeof(RAWINPUTHEADER)) == (UINT)-1 || ri.header.dwType != RIM_TYPEMOUSE) return;
+    if (ri.data.mouse.ulExtraInformation == PRESS_MARK) return;
     USHORT flags = ri.data.mouse.usButtonFlags;
-    if ((flags & RI_MOUSE_RIGHT_BUTTON_DOWN) && ri.data.mouse.ulExtraInformation != PRESS_MARK) press_seen(h);
-    if ((flags & RI_MOUSE_RIGHT_BUTTON_UP) && ri.data.mouse.ulExtraInformation != PRESS_MARK) {
-        if (g_press_due) { press_quick(); return false; }
-        if (g_real_up_raw) { g_real_up_raw = 0; return true; }
-    }
-    return false;
+    if (flags & RI_MOUSE_RIGHT_BUTTON_DOWN) press_down(h);
+    if (flags & RI_MOUSE_RIGHT_BUTTON_UP) press_up();
 }
 
 static LRESULT CALLBACK wndproc(HWND h, UINT m, WPARAM w, LPARAM l) {
-    if ((m == WM_RBUTTONDOWN || m == WM_RBUTTONUP || m == WM_INPUT) && press_filter(h, m, l)) return m == WM_INPUT ? DefWindowProcW(h, m, w, l) : 0;
+    if (m == WM_RBUTTONDOWN || m == WM_RBUTTONUP || m == WM_INPUT) press_watch(h, m, l);
     if (farshoot_blocks()) {             // past the gun's range through the sight: the shot does not reach the game
         if (m == WM_LBUTTONDOWN || m == WM_LBUTTONDBLCLK) return 0;
         if (m == WM_INPUT && raw_left_down(l)) return DefWindowProcW(h, m, w, l);
@@ -872,13 +867,17 @@ static const char *NEWS_RU[] = {
     "Компетитив: пехота отзывается на приказы намного быстрее, группы разворачиваются вместе",
     "Компетитив работает и в мультиплеере: у всех игроков матча должна быть эта версия и галочка",
     "Автобег в окне Shift+F7: пехота бежит с одного ПКМ",
-    "Компетитив: Alt больше не разводит пехоту в линию",
+    "Компетитив: пехота снова разводится обычным ПКМ, как в оригинальной игре, без Alt",
+    "Компетитив: убрано зелёное кольцо при клике ПКМ",
+    "Компетитив: солдаты больше не приседают и не замирают на бегу",
 };
 static const char *NEWS_EN[] = {
     "Competitive: infantry answers orders much faster, groups turn together",
     "Competitive works in multiplayer too: every player of the match needs this version and the box on",
     "Auto-run in the Shift+F7 window: infantry runs on a single right click",
-    "Competitive: Alt no longer spreads infantry into a line",
+    "Competitive: infantry is laid out with a plain right drag again, as in the original game, no Alt",
+    "Competitive: the green ring on a right click is gone",
+    "Competitive: soldiers no longer squat and freeze on the run",
 };
 
 // which news the player has read: by their text, so a build with the same news stays quiet
@@ -2623,28 +2622,6 @@ static bool make_rtv(IDXGISwapChain *sc) {
     return SUCCEEDED(hr);
 }
 
-// An order goes when the right button comes up, and a soldier moves some 100 ms later: the answer to the click is drawn at once, on
-// the frame of the button going down, where the mouse is.
-static void order_ring() {
-    static bool held;
-    static double at;
-    static ImVec2 where;
-    bool down = (GetAsyncKeyState(VK_RBUTTON) & 0x8000) != 0;
-    if (down && !held && pathing_wants() && g_live_match && GetForegroundWindow() == g_hwnd && !mouse_is_ours(g_hwnd)) {
-        POINT p;
-        if (GetCursorPos(&p) && ScreenToClient(g_hwnd, &p)) { where = ImVec2((float)p.x, (float)p.y); at = ImGui::GetTime(); }
-    }
-    held = down;
-    float age = at ? (float)(ImGui::GetTime() - at) / .28f : 1;
-    if (age >= 1) return;
-    float out = 1 - (1 - age) * (1 - age), k = ImGui::GetFontSize() / 18.f;
-    ImDrawList *dl = ImGui::GetForegroundDrawList();
-    int alpha = (int)(230 * (1 - age));
-    dl->AddCircle(where, (5 + 19 * out) * k, IM_COL32(0, 0, 0, alpha / 2), 32, 3.5f * k);
-    dl->AddCircle(where, (5 + 19 * out) * k, IM_COL32(150, 235, 130, alpha), 32, 2 * k);
-    dl->AddCircleFilled(where, 2.5f * k, IM_COL32(190, 245, 170, alpha));
-}
-
 // the shot's distance by the sight's mark
 static void farshoot_text() {
     int tenths, beyond;
@@ -2669,7 +2646,6 @@ static void draw(IDXGISwapChain *sc) {
     hotkeys();
     camo_draw(g_dev, g_hwnd);
     farshoot_text();
-    order_ring();
     press_frame();
     static long results_was;
     if (g_ms_results != results_was) {         // the results page opens the charts and takes them along when it goes
