@@ -2,6 +2,8 @@
 #pragma once
 #include <math.h>
 #include <stdint.h>
+#include <string.h>
+#include <vector>
 // The whole vehicle, the hull and the turret take one sheet from side to side; a side takes the whole picture for itself.
 enum { CAMO_ALL, CAMO_LEFT, CAMO_RIGHT, CAMO_HULL, CAMO_TURRET };
 struct CamoSettings {
@@ -12,6 +14,8 @@ struct CamoSettings {
     int repeat = 1;                                 // mode 0: the picture goes on mirrored beyond its edges
     float size = 1;                                 // mode 0: 1 = the smallest picture that covers the whole vehicle
     int part = 0;                                   // mode 0: where it goes, CAMO_ above
+    int gun = 0;                                    // mode 0: 1 the barrels take it too
+    int seam = 0;                                   // mode 0: 1 the old cover, torn along the middle of the vehicle
     int flip_x = 0, flip_y = 0;                     // mode 0: the picture turned over
     float dim = 1;                                  // the picture's level, in plain blending (camo.cpp, picture_level); not a setting
     float bright = 1;                               // the player's brightness over that level
@@ -27,6 +31,54 @@ static bool camo_crop_rect(float ax, float ay, float bx, float by, int w, int h,
     if (r[3] > h) r[3] = h;
     if (r[2] - r[0] < 2 || r[3] - r[1] < 2) return false;
     return r[0] > 0 || r[1] > 0 || r[2] < w || r[3] < h;
+}
+// A DXT1 or DXT5 file twice as big each way, with a new biggest mip on top of the ones it has. A block's four quarters become four
+// blocks with its colours, each texel twice over: what is not painted on looks as it did. False: not a file this can do.
+static bool camo_double_dds(std::vector<unsigned char> &f) {
+    if (f.size() < 128 || memcmp(f.data(), "DDS ", 4)) return false;
+    uint32_t h, w, mips, four;
+    memcpy(&h, &f[12], 4); memcpy(&w, &f[16], 4); memcpy(&mips, &f[28], 4); memcpy(&four, &f[84], 4);
+    const size_t size = four == 0x31545844 ? 8 : four == 0x35545844 ? 16 : 0;
+    if (!size || !w || !h || w % 4 || h % 4) return false;
+    const size_t bw = w / 4, bh = h / 4;
+    if (f.size() < 128 + bw * bh * size) return false;
+    std::vector<unsigned char> o(128 + bw * bh * 4 * size + (f.size() - 128));
+    memcpy(o.data(), f.data(), 128);
+    const uint32_t nw = w * 2, nh = h * 2, linear = (uint32_t)(bw * bh * 4 * size), more = (mips ? mips : 1) + 1, flags = 0x20000 | 0x80000;
+    uint32_t have; memcpy(&have, &o[8], 4); have |= flags;
+    memcpy(&o[8], &have, 4); memcpy(&o[12], &nh, 4); memcpy(&o[16], &nw, 4); memcpy(&o[20], &linear, 4); memcpy(&o[28], &more, 4);
+    for (size_t y = 0; y < bh * 2; y++) for (size_t x = 0; x < bw * 2; x++) {
+        const unsigned char *s = &f[128 + ((y / 2) * bw + x / 2) * size];
+        unsigned char *d = &o[128 + (y * bw * 2 + x) * size];
+        const int qx = (int)(x & 1) * 2, qy = (int)(y & 1) * 2;
+        if (size == 16) {
+            uint64_t from = 0, to = 0;
+            memcpy(&from, s + 2, 6);
+            for (int i = 0; i < 16; i++) to |= (from >> (3 * ((qy + (i >> 3)) * 4 + qx + ((i & 3) >> 1))) & 7) << (3 * i);
+            d[0] = s[0]; d[1] = s[1];
+            memcpy(d + 2, &to, 6);
+            s += 8; d += 8;
+        }
+        uint32_t from, to = 0;
+        memcpy(d, s, 4);
+        memcpy(&from, s + 4, 4);
+        for (int i = 0; i < 16; i++) to |= (from >> (2 * ((qy + (i >> 3)) * 4 + qx + ((i & 3) >> 1))) & 3) << (2 * i);
+        memcpy(d + 4, &to, 4);
+    }
+    memcpy(&o[128 + bw * bh * 4 * size], &f[128], f.size() - 128);
+    f.swap(o);
+    return true;
+}
+// How far across the vehicle a place is on a sheet from side to side, y from the middle, drop down from the top of the vehicle. The
+// cover goes over the top and down the sides, but at the middle the drop has to be nothing: a roof lies well below the top of a
+// turret, and counted in full the drop puts the two halves of the roof that far apart, with a tear along the vehicle. So it comes
+// in with the distance from the middle, all of it at the sides.
+static float camo_across(float y, float drop, float half) {
+    float d = fabsf(y), k = half > 0 ? d / half : 1;
+    k = k > 1 ? 1 : k;
+    k = k * k * (3 - 2 * k);
+    float b = d + drop * k;
+    return y < 0 ? -b : b;
 }
 // one texel of the picture between its pixels, the picture repeating
 static void camo_sample(const uint8_t *pattern, int w, int h, float u, float v, float out[4]) {

@@ -11,6 +11,9 @@
 #define STB_IMAGE_WRITE_STATIC
 #define STBI_WRITE_NO_STDIO
 #include "../third_party/stb/stb_image_write.h"
+#define STB_DXT_IMPLEMENTATION
+#define STB_DXT_STATIC
+#include "../third_party/stb/stb_dxt.h"
 #include "imgui.h"
 #include "goh_replay.h"
 #include "camo.h"
@@ -38,7 +41,7 @@ int next_picture;                                      // a deleted picture's nu
 // A vehicle's camouflage: its picture (a preset's file) and how it lies, with the vehicle's textures, as found in its
 // model: all of them take the picture, the main ones tell the vehicle in a battle.
 // A sticker: one picture at one place on the vehicle, a projector from outside onto the surface around that point.
-struct Sticker { int picture; float c[3], n[3], size, rotation, opacity, soft, wear; int flip_x, flip_y; float bright; };
+struct Sticker { int picture; float c[3], n[3], size, rotation, opacity, soft, wear; int flip_x, flip_y; float bright; int gun; };
 constexpr float BRIGHT_MIN = .2f, BRIGHT_MAX = 5;     // 1 is the vehicles' level; 5 brings even a white picture back to itself
 float bright_ok(float b) { return isfinite(b) && b >= BRIGHT_MIN && b <= BRIGHT_MAX ? b : 1; }
 // A vehicle's camouflages, each a picture and how it lies, the last one over the others.
@@ -151,7 +154,7 @@ void *tex_mods(void *map, void *key) {
 
 // the pattern on the textures: for now a test pattern of three colours
 struct Pattern;
-struct Placement { float cx, cy, top, width, height, ca, sa, ox, oy; bool through, repeat, flip_x, flip_y; };
+struct Placement { float cx, cy, top, width, height, ca, sa, ox, oy, half; bool through, repeat, flip_x, flip_y, seam; };
 // a camouflage ready to paint: s holds the picture's level
 struct CoatImage { std::shared_ptr<Pattern> pic; CamoSettings s; };
 // A sticker: a projector at its point, looking straight onto the surface there. Over the picture lies a grid: `chosen` is the
@@ -160,7 +163,7 @@ struct CoatImage { std::shared_ptr<Pattern> pic; CamoSettings s; };
 struct StickerImage {
     std::shared_ptr<Pattern> pic;
     float c[3], n[3], e1[3], e2[3], half_w, half_h, opacity, wear, bright = 1;
-    bool flip_x = false, flip_y = false;
+    bool flip_x = false, flip_y = false, gun = false;
     int gx = 0, gy = 0;
     float cell = 1;
     std::vector<float> chosen, levels, stretch;
@@ -182,17 +185,18 @@ Pattern test_pattern() {
     return p;
 }
 void rgb_of(uint16_t c, int o[3]) { o[0] = (c >> 11) * 255 / 31; o[1] = ((c >> 5) & 63) * 255 / 63; o[2] = (c & 31) * 255 / 31; }
-uint16_t c565(const int c[3]) { return (uint16_t)(((c[0] * 31 + 127) / 255) << 11 | ((c[1] * 63 + 127) / 255) << 5 | ((c[2] * 31 + 127) / 255)); }
-// one 8-byte colour block: pattern over its 16 pixels, written back
 struct VehicleMap;
 Placement place_picture(const float lo[3], const float hi[3], int pw, int ph, const CamoSettings &s);
 bool on_picture(const Placement &l, const float *P, float &u, float &v);
 const float *texel_place(const VehicleMap &pr, size_t at);
-void stick(const VehicleMap &pr, size_t at, const std::vector<StickerImage> &list, uint8_t io[4]);
+void stick(const VehicleMap &pr, size_t at, const std::vector<StickerImage> &list, uint8_t io[4], const float *place = nullptr, float step = 1);
+void place_between(const VehicleMap &pr, size_t at, int x, int y, int w, int h, float out[3]);
+int map_w(const VehicleMap &pr);
+int map_h(const VehicleMap &pr);
 std::vector<Placement> place_on(const VehicleMap &pr, const Pattern &p);
-void paint_coats(const VehicleMap &pr, size_t at, const std::vector<CoatImage> &coats, const std::vector<Placement> &places, uint8_t io[4]);
+void paint_coats(const VehicleMap &pr, size_t at, const std::vector<CoatImage> &coats, const std::vector<Placement> &places, uint8_t io[4], bool fine, const float *place = nullptr, float step = 1);
 bool texel(const VehicleMap &pr, int x, int y, int w, int h, size_t &at);
-void paint_pixel(const int rgb[3], int x, int y, int w, int h, const Pattern &p, float average, const VehicleMap *pr, const std::vector<Placement> &pl, int o[3]) {
+bool paint_pixel(const int rgb[3], int x, int y, int w, int h, const Pattern &p, float average, const VehicleMap *pr, const std::vector<Placement> &pl, int o[3]) {
     float lum = rgb[0] * .3f + rgb[1] * .59f + rgb[2] * .11f, keep = lum / average;
     keep = keep < .45f ? .45f : keep > 1.6f ? 1.6f : keep;
     uint8_t flat[4], out[4];
@@ -202,49 +206,21 @@ void paint_pixel(const int rgb[3], int x, int y, int w, int h, const Pattern &p,
         size_t at;
         memcpy(out, flat, 4);
         if (texel(*pr, x, y, w, h, at)) {
-            paint_coats(*pr, at, p.coats, pl, out);
-            stick(*pr, at, p.stickers, out);
+            // a texture bigger than the map: the place of a pixel lies between those of the texels
+            float between[3];
+            const float *place = nullptr, step = (float)map_w(*pr) / w;
+            if (w > map_w(*pr)) { place_between(*pr, at, x, y, w, h, between); place = between; }
+            paint_coats(*pr, at, p.coats, pl, out, true, place, step);
+            stick(*pr, at, p.stickers, out, place, step);
         }
+        if (!memcmp(out, flat, 3)) { memcpy(o, rgb, 3 * sizeof(int)); return false; }
     } else if (p.w) camo_pixel(p.px.data(), p.w, p.h, (x + .5f) / w, (y + .5f) / h, flat, p.s, out);
     else memcpy(out, flat, 4);
     for (int c = 0; c < 3; c++) {
         int v = (int)(out[c] * keep);
         o[c] = v < 0 ? 0 : v > 255 ? 255 : v;
     }
-}
-void block(unsigned char *b, int bx, int by, int w, int h, const Pattern &p, float average, const VehicleMap *pr, const std::vector<Placement> &pl) {
-    uint16_t c0 = b[0] | b[1] << 8, c1 = b[2] | b[3] << 8;
-    uint32_t bits = b[4] | b[5] << 8 | b[6] << 16 | (uint32_t)b[7] << 24;
-    int pal[4][3];
-    rgb_of(c0, pal[0]); rgb_of(c1, pal[1]);
-    for (int i = 0; i < 3; i++) {
-        if (c0 > c1) { pal[2][i] = (2 * pal[0][i] + pal[1][i]) / 3; pal[3][i] = (pal[0][i] + 2 * pal[1][i]) / 3; }
-        else { pal[2][i] = (pal[0][i] + pal[1][i]) / 2; pal[3][i] = 0; }
-    }
-    int px[16][3], lo[3] = {255, 255, 255}, hi[3] = {0, 0, 0};
-    for (int i = 0; i < 16; i++) {
-        int k = bits >> (2 * i) & 3, x = bx + (i & 3), y = by + (i >> 2);
-        paint_pixel(pal[k], x, y, w, h, p, average, pr, pl, px[i]);
-        for (int c = 0; c < 3; c++) {
-            if (px[i][c] < lo[c]) lo[c] = px[i][c];
-            if (px[i][c] > hi[c]) hi[c] = px[i][c];
-        }
-    }
-    uint16_t a = c565(hi), z = c565(lo);
-    if (a <= z) { uint32_t none = 0; b[0] = a & 255; b[1] = a >> 8; b[2] = z & 255; b[3] = z >> 8; memcpy(b + 4, &none, 4); return; }
-    int e0[3], e1[3], d[3], len = 0;
-    rgb_of(a, e0); rgb_of(z, e1);
-    for (int c = 0; c < 3; c++) { d[c] = e1[c] - e0[c]; len += d[c] * d[c]; }
-    uint32_t out = 0;
-    for (int i = 0; i < 16; i++) {
-        int dot = 0;
-        for (int c = 0; c < 3; c++) dot += (px[i][c] - e0[c]) * d[c];
-        int step = len ? (dot * 3 + len / 2) / len : 0;
-        step = step < 0 ? 0 : step > 3 ? 3 : step;
-        static const int INDEX[4] = {0, 2, 3, 1};
-        out |= (uint32_t)INDEX[step] << (2 * i);
-    }
-    b[0] = a & 255; b[1] = a >> 8; b[2] = z & 255; b[3] = z >> 8; memcpy(b + 4, &out, 4);
+    return true;
 }
 // a mod's texture can be plain 32 bit pixels; each mask says where a colour is
 int shift_of(uint32_t mask) { int s = 0; while (mask && !(mask & 1)) { mask >>= 1; s++; } return s; }
@@ -302,25 +278,86 @@ bool paint_dds(unsigned char *f, size_t n, const Pattern &p, const VehicleMap *p
     float average = blocks && sum > blocks * 8.0 ? (float)(sum / blocks) : 90.f;
     std::vector<Placement> pl;
     if (pr) pl = place_on(*pr, p);
+    // The biggest mip is painted pixel by pixel, each smaller one is the one above it averaged: painted one by one they would each
+    // be points picked out of the picture, which is all that shows from any distance. Only blocks with something new on them are
+    // written, with a real encoder: a block has two colours and what lies between them, and colours like pink on violet want them
+    // chosen with care. What is left alone keeps the game's own bytes.
+    std::vector<unsigned char> img((size_t)w * h * 3), changed((size_t)w * h, 0);
+    auto is_cut = [&](const unsigned char *b) {                              // DXT1's holes: left alone
+        uint16_t c0 = b[0] | b[1] << 8, c1 = b[2] | b[3] << 8;
+        uint32_t index; memcpy(&index, b + 4, 4);
+        if (size != 8 || c0 > c1) return false;
+        for (int i = 0; i < 16; i++) if ((index >> (2 * i) & 3) == 3) return true;
+        return false;
+    };
+    auto encode = [&](unsigned char *b, int bx, int by, uint32_t iw, uint32_t ih) {
+        unsigned char rgba[64];
+        for (int i = 0; i < 16; i++) {
+            uint32_t x = bx + (i & 3), y = by + (i >> 2);
+            if (x >= iw) x = iw - 1;
+            if (y >= ih) y = ih - 1;
+            memcpy(rgba + i * 4, &img[((size_t)y * iw + x) * 3], 3);
+            rgba[i * 4 + 3] = 255;
+        }
+        stb_compress_dxt_block(b, rgba, 0, STB_DXT_HIGHQUAL);
+    };
     size_t at = 128;
-    for (uint32_t m = 0; m < mips && w && h; m++) {
+    {
         uint32_t bw = (w + 3) / 4, bh = (h + 3) / 4;
-        if (at + (size_t)bw * bh * size > n) break;
-        for (uint32_t y = 0; y < bh; y++) for (uint32_t x = 0; x < bw; x++) {
-            unsigned char *b = f + at + ((size_t)y * bw + x) * size + (size - 8);
+        if (at + (size_t)bw * bh * size > n) return true;
+        for (uint32_t by = 0; by < bh; by++) for (uint32_t bx = 0; bx < bw; bx++) {
+            unsigned char *b = f + at + ((size_t)by * bw + bx) * size + (size - 8);
             uint16_t c0 = b[0] | b[1] << 8, c1 = b[2] | b[3] << 8;
-            uint32_t bits; memcpy(&bits, b + 4, 4);
-            bool cut = false;                                                // DXT1's holes: left alone
-            if (size == 8 && c0 <= c1) for (int i = 0; i < 16; i++) cut |= (bits >> (2 * i) & 3) == 3;
-            if (!cut) block(b, x * 4, y * 4, w, h, p, average, pr, pl);
+            uint32_t index; memcpy(&index, b + 4, 4);
+            int pal[4][3];
+            rgb_of(c0, pal[0]); rgb_of(c1, pal[1]);
+            for (int i = 0; i < 3; i++) {
+                if (c0 > c1 || size != 8) { pal[2][i] = (2 * pal[0][i] + pal[1][i]) / 3; pal[3][i] = (pal[0][i] + 2 * pal[1][i]) / 3; }
+                else { pal[2][i] = (pal[0][i] + pal[1][i]) / 2; pal[3][i] = 0; }
+            }
+            const bool cut = is_cut(b);
+            bool any = false;
+            for (int i = 0; i < 16; i++) {
+                uint32_t x = bx * 4 + (i & 3), y = by * 4 + (i >> 2);
+                if (x >= w || y >= h) continue;
+                const int *src = pal[index >> (2 * i) & 3];
+                int px[3] = {src[0], src[1], src[2]};
+                bool new_here = !cut && paint_pixel(src, x, y, w, h, p, average, pr, pl, px);
+                unsigned char *o = &img[((size_t)y * w + x) * 3];
+                o[0] = (unsigned char)px[0]; o[1] = (unsigned char)px[1]; o[2] = (unsigned char)px[2];
+                changed[(size_t)y * w + x] = new_here;
+                any |= new_here;
+            }
+            if (any) encode(b, bx * 4, by * 4, w, h);
         }
         at += (size_t)bw * bh * size;
-        w = w > 1 ? w / 2 : 1; h = h > 1 ? h / 2 : 1;
+    }
+    for (uint32_t m = 1; m < mips && (w > 1 || h > 1); m++) {
+        const uint32_t nw = w > 1 ? w / 2 : 1, nh = h > 1 ? h / 2 : 1;
+        std::vector<unsigned char> small((size_t)nw * nh * 3), small_changed((size_t)nw * nh, 0);
+        for (uint32_t y = 0; y < nh; y++) for (uint32_t x = 0; x < nw; x++) {
+            const uint32_t x0 = x * 2, y0 = y * 2, x1 = x0 + 1 < w ? x0 + 1 : x0, y1 = y0 + 1 < h ? y0 + 1 : y0;
+            const size_t q[4] = {(size_t)y0 * w + x0, (size_t)y0 * w + x1, (size_t)y1 * w + x0, (size_t)y1 * w + x1};
+            for (int c = 0; c < 3; c++)
+                small[((size_t)y * nw + x) * 3 + c] = (unsigned char)((img[q[0] * 3 + c] + img[q[1] * 3 + c] + img[q[2] * 3 + c] + img[q[3] * 3 + c] + 2) / 4);
+            small_changed[(size_t)y * nw + x] = changed[q[0]] | changed[q[1]] | changed[q[2]] | changed[q[3]];
+        }
+        img.swap(small); changed.swap(small_changed);
+        w = nw; h = nh;
+        uint32_t bw = (w + 3) / 4, bh = (h + 3) / 4;
+        if (at + (size_t)bw * bh * size > n) break;
+        for (uint32_t by = 0; by < bh; by++) for (uint32_t bx = 0; bx < bw; bx++) {
+            unsigned char *b = f + at + ((size_t)by * bw + bx) * size + (size - 8);
+            bool any = false;
+            for (uint32_t y = by * 4; y < by * 4 + 4 && y < h; y++) for (uint32_t x = bx * 4; x < bx * 4 + 4 && x < w; x++) any |= changed[(size_t)y * w + x] != 0;
+            if (any && !is_cut(b)) encode(b, bx * 4, by * 4, w, h);
+        }
+        at += (size_t)bw * bh * size;
     }
     return true;
 }
 SRWLOCK paint_lock = SRWLOCK_INIT;
-struct Painted { std::string name; std::vector<unsigned char> data; };
+struct Painted { std::string name; std::vector<unsigned char> data; size_t from; };   // from: the size of the game's file
 std::vector<Painted *> painted;
 void filename(int id, wchar_t *out);
 bool readfile(const wchar_t *path, std::vector<unsigned char> &out);
@@ -409,6 +446,7 @@ StickerImage sticker_image(const Sticker &s, std::shared_ptr<Pattern> pic) {
     r.opacity = s.opacity;
     r.wear = s.wear;
     r.bright = s.bright;
+    r.gun = s.gun != 0;
     r.flip_x = s.flip_x; r.flip_y = s.flip_y;
     return r;
 }
@@ -438,21 +476,26 @@ Pattern pattern_of(const std::string &token) {
     return test;
 }
 bool make_projection(const std::string &file, const unsigned char *f, size_t n, const std::string &model, std::vector<StickerImage> &stickers, VehicleMap *&out);
+int sticker_scale = 2;                                 // goh_snapshots.ini [debug] camo_sticker_scale: 1, 2 or 4
 Painted *painted_of(const std::string &name, const std::string &token, const unsigned char *f, size_t n) {
     AcquireSRWLockExclusive(&paint_lock);
     Painted *r = nullptr;
     std::string key = name + "#" + token;
-    for (auto *e : painted) if (e->name == key && e->data.size() == n) r = e;
+    for (auto *e : painted) if (e->name == key && e->from == n) r = e;
     if (!r) {
         DWORD t0 = GetTickCount();
         static std::string last;
         static Pattern p;
         if (last != token) { p = pattern_of(token); last = token; }
-        r = new Painted{key, std::vector<unsigned char>(f, f + n)};
+        r = new Painted{key, std::vector<unsigned char>(f, f + n), n};
         VehicleMap *pr = nullptr;
         bool tracks = !p.s.mode && is_track(name);     // nobody paints those
         if (!p.s.mode && !tracks) make_projection(name, f, n, p.model, p.stickers, pr);
-        bool ok = tracks || paint_dds(r->data.data(), n, p, pr);
+        // A vehicle's texture is spread thin: a sticker a metre wide gets about 200 texels of it, whatever the picture has. A texture
+        // that takes a sticker is made bigger for it. Not the damaged ones: they are seen for a moment, and take memory all the same.
+        if (pr && !p.stickers.empty() && undamaged(stem_of(name.c_str(), name.size())) == stem_of(name.c_str(), name.size()))
+            for (int k = 1; k < sticker_scale && map_w(*pr) * k * 2 <= 8192 && map_h(*pr) * k * 2 <= 8192 && camo_double_dds(r->data); k *= 2) {}
+        bool ok = tracks || paint_dds(r->data.data(), r->data.size(), p, pr);
         free_projection(pr);
         rc_log("camo: %s painted in %lu ms: %s", key.c_str(), GetTickCount() - t0, ok ? "ok" : "a kind of DDS not known, left as it is");
         painted.push_back(r);
@@ -576,16 +619,16 @@ void save_vehicles() {
         // the 1 is where a choice about the sides used to be
         const Coat none = {-1, CamoSettings()}, &first = a.coats.empty() ? none : a.coats[0];
         const CamoSettings &m = first.s;
-        fprintf(f, "%d %.9g %.9g %.9g %.9g %d %d %.9g 1 %d %d %.9g %d\t%s\t%s\t%s\n", first.picture,
-            m.offset[0], m.offset[1], m.rotation, m.opacity, m.blend, m.repeat, m.size, m.flip_x, m.flip_y, m.bright, m.part,
+        fprintf(f, "%d %.9g %.9g %.9g %.9g %d %d %.9g 1 %d %d %.9g %d %d %d\t%s\t%s\t%s\n", first.picture,
+            m.offset[0], m.offset[1], m.rotation, m.opacity, m.blend, m.repeat, m.size, m.flip_x, m.flip_y, m.bright, m.part, m.gun, m.seam,
             a.model.c_str(), joined(a.all).c_str(), joined(a.main).c_str());
         for (size_t i = 1; i < a.coats.size(); i++) {
             const CamoSettings &k = a.coats[i].s;
-            fprintf(f, "C %d %.9g %.9g %.9g %.9g %d %d %.9g 1 %d %d %.9g %d\n", a.coats[i].picture,
-                k.offset[0], k.offset[1], k.rotation, k.opacity, k.blend, k.repeat, k.size, k.flip_x, k.flip_y, k.bright, k.part);
+            fprintf(f, "C %d %.9g %.9g %.9g %.9g %d %d %.9g 1 %d %d %.9g %d %d %d\n", a.coats[i].picture,
+                k.offset[0], k.offset[1], k.rotation, k.opacity, k.blend, k.repeat, k.size, k.flip_x, k.flip_y, k.bright, k.part, k.gun, k.seam);
         }
-        for (const auto &s : a.stickers) fprintf(f, "S %d %.9g %.9g %.9g %.9g %.9g %.9g %.9g %.9g %.9g %.9g %.9g %d %d %.9g\n", s.picture,
-            s.c[0], s.c[1], s.c[2], s.n[0], s.n[1], s.n[2], s.size, s.rotation, s.opacity, s.soft, s.wear, s.flip_x, s.flip_y, s.bright);
+        for (const auto &s : a.stickers) fprintf(f, "S %d %.9g %.9g %.9g %.9g %.9g %.9g %.9g %.9g %.9g %.9g %.9g %d %d %.9g %d\n", s.picture,
+            s.c[0], s.c[1], s.c[2], s.n[0], s.n[1], s.n[2], s.size, s.rotation, s.opacity, s.soft, s.wear, s.flip_x, s.flip_y, s.bright, s.gun);
     }
     bool ok = !ferror(f); if (fclose(f)) ok = false;
     if (!ok || !MoveFileExW(tmp, vehicles_ini, MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)) status = TR("Не удалось сохранить настройки техники", "Cannot save vehicles");
@@ -593,8 +636,8 @@ void save_vehicles() {
 int read_coat(const char *line, Coat &c) {
     auto &s = c.s;
     int sides;                                        // no longer a choice: nothing is mirrored from one side to the other
-    return sscanf(line, "%d %f %f %f %f %d %d %f %d %d %d %f %d", &c.picture, &s.offset[0], &s.offset[1], &s.rotation, &s.opacity,
-                  &s.blend, &s.repeat, &s.size, &sides, &s.flip_x, &s.flip_y, &s.bright, &s.part);
+    return sscanf(line, "%d %f %f %f %f %d %d %f %d %d %d %f %d %d %d", &c.picture, &s.offset[0], &s.offset[1], &s.rotation, &s.opacity,
+                  &s.blend, &s.repeat, &s.size, &sides, &s.flip_x, &s.flip_y, &s.bright, &s.part, &s.gun, &s.seam);
 }
 bool coat_ok(CamoSettings &s) {
     s.bright = bright_ok(s.bright);
@@ -610,8 +653,8 @@ void load_vehicles() {
         if (line[0] == 'S' && line[1] == ' ') {
             Sticker k = {};
             k.bright = 1;
-            if (!assigns.empty() && assigns.back().stickers.size() < 64 && sscanf(line + 2, "%d %f %f %f %f %f %f %f %f %f %f %f %d %d %f", &k.picture, &k.c[0], &k.c[1], &k.c[2],
-                       &k.n[0], &k.n[1], &k.n[2], &k.size, &k.rotation, &k.opacity, &k.soft, &k.wear, &k.flip_x, &k.flip_y, &k.bright) >= 10 && isfinite(k.size) && k.size > 0 && isfinite(k.c[0]) &&
+            if (!assigns.empty() && assigns.back().stickers.size() < 64 && sscanf(line + 2, "%d %f %f %f %f %f %f %f %f %f %f %f %d %d %f %d", &k.picture, &k.c[0], &k.c[1], &k.c[2],
+                       &k.n[0], &k.n[1], &k.n[2], &k.size, &k.rotation, &k.opacity, &k.soft, &k.wear, &k.flip_x, &k.flip_y, &k.bright, &k.gun) >= 10 && isfinite(k.size) && k.size > 0 && isfinite(k.c[0]) &&
                 isfinite(k.c[1]) && isfinite(k.c[2]) && isfinite(k.n[0]) && isfinite(k.n[1]) && isfinite(k.n[2]) && isfinite(k.opacity) && isfinite(k.soft) && isfinite(k.wear)) {
                 k.bright = bright_ok(k.bright);
                 assigns.back().stickers.push_back(k);
@@ -736,7 +779,7 @@ extern "C" void camo_tick() {
     unsigned char on = 0;
     if (mode) read(mode + 0x908, &on, 1);
     if ((on == 1) != in_game) { in_game = on == 1; InterlockedIncrement(&battle_number); }
-    { char path[MAX_PATH]; snprintf(path, sizeof path, "%ls\\..\\goh_snapshots.ini", folder); camo_selftest_tick(path); lobby_dump_tick(path); }
+    { char path[MAX_PATH]; snprintf(path, sizeof path, "%ls\\..\\goh_snapshots.ini", folder); sticker_scale = GetPrivateProfileIntA("debug", "camo_sticker_scale", 2, path); camo_selftest_tick(path); lobby_dump_tick(path); }
     // our tab, wherever the page is: looked for a few times a second, it is a walk through the screen's dialogs
     static DWORD next;
     static Panel p, list, info, day;
@@ -915,7 +958,7 @@ void walk_bones(const Node &n, const Mat &parent, std::vector<View> &views, Side
                 if (same_key(v.key, "volumeview") && !v.values.empty()) { views.push_back({v.values[0], w, turret}); break; }   // the best one
     }
 }
-struct Triangle { float p[3][3], n[3][3], uv[3][2]; int layer; bool gun, skin, turret; };    // layer: which of the model's textures, -1 none
+struct Triangle { float p[3][3], n[3][3], uv[3][2]; int layer; bool gun, skin, turret, rod; };    // layer: which of the model's textures, -1 none
 // A barrel takes no sticker: gun.ply, gun2.ply, gun_lod1.ply, and the machine guns' mgun*.ply. Not the mantlet (gun_rot,
 // mantlet.ply), a shield or a gunner's hatch.
 bool is_barrel(std::string file) {
@@ -938,6 +981,7 @@ struct VehicleMap {
     std::vector<float> twin;                          // x, y, z of the second place of a texel that two parts on top of the vehicle share
     std::vector<unsigned char> twinned;               // two hatches of one texture: 1 where twin holds a place
     std::vector<unsigned char> turret;                // 1: the texel is on what turns with the turret
+    std::vector<unsigned char> gun;                   // 1: the texel is on a barrel itself: only what asks for barrels goes there
     float left = 1;                                   // which way along y the vehicle's left side is
     float lo[3] = {1e9f, 1e9f, 1e9f}, hi[3] = {-1e9f, -1e9f, -1e9f};
 };
@@ -1011,11 +1055,13 @@ void fill_triangle(VehicleMap &pr, const Triangle &t, bool gap_only) {
         int tx = ((px % pr.w) + pr.w) % pr.w, ty = ((py % pr.h) + pr.h) % pr.h;
         size_t at = (size_t)ty * pr.w + tx;
         if (t.gun) pr.both[at] = 1;
+        // what a barrel shares with another part belongs to that part: the camouflage must not lose a hatch to a barrel
+        if (t.rod && pr.kind[at] && !pr.gun[at]) continue;
         float q[3];
         for (int i = 0; i < 3; i++) q[i] = a * t.p[0][i] + b * t.p[1][i] + c * t.p[2][i];
         float *o = &pr.pos[at * 3];
-        if (!pr.kind[at]) {
-            memcpy(o, q, sizeof q); pr.kind[at] = 1; pr.owner[at] = area; pr.turret[at] = t.turret;
+        if (!pr.kind[at] || (pr.gun[at] && !t.rod)) {
+            memcpy(o, q, sizeof q); pr.kind[at] = 1; pr.owner[at] = area; pr.turret[at] = t.turret; pr.gun[at] = t.rod;
             for (int i = 0; i < 3; i++) {
                 float n = a * t.n[0][i] + b * t.n[1][i] + c * t.n[2][i];
                 pr.normal[at * 3 + i] = (signed char)(n < -1 ? -127 : n > 1 ? 127 : n * 127);
@@ -1023,6 +1069,7 @@ void fill_triangle(VehicleMap &pr, const Triangle &t, bool gap_only) {
             continue;
         }
         if (gap_only || a < 0 || b < 0 || c < 0) continue;      // the rim around a triangle, for the filtering
+        if (t.rod && pr.gun[at]) continue;            // a barrel goes round on few texels, its halves on the same ones: it shows on all of them
         // Copies of a part on top of the vehicle, hatches mostly: they keep the camouflage and can take a sticker, see stick()
         float nz = a * t.n[0][2] + b * t.n[1][2] + c * t.n[2][2];
         const float middle = (pr.lo[2] + pr.hi[2]) / 2;      // not the tops of road wheels
@@ -1037,7 +1084,7 @@ void fill_triangle(VehicleMap &pr, const Triangle &t, bool gap_only) {
             // surface keeps it: a detail reusing a bit of the hull's texture leaves no hole in the hull.
             float was = pr.owner[at];
             if (area > was * 1.05f) {
-                memcpy(o, q, sizeof q); pr.kind[at] = 1; pr.owner[at] = area; pr.turret[at] = t.turret;
+                memcpy(o, q, sizeof q); pr.kind[at] = 1; pr.owner[at] = area; pr.turret[at] = t.turret; pr.gun[at] = t.rod;
                 for (int i = 0; i < 3; i++) {
                     float n = a * t.n[0][i] + b * t.n[1][i] + c * t.n[2][i];
                     pr.normal[at * 3 + i] = (signed char)(n < -1 ? -127 : n > 1 ? 127 : n * 127);
@@ -1111,6 +1158,7 @@ void bake_layer(VehicleMap &pr, const Model &m, const std::vector<unsigned char>
     memcpy(pr.lo, m.lo, sizeof pr.lo); memcpy(pr.hi, m.hi, sizeof pr.hi);
     pr.left = m.left;
     pr.turret.assign((size_t)pr.w * pr.h, 0);
+    pr.gun.assign((size_t)pr.w * pr.h, 0);
     pr.pos.assign((size_t)pr.w * pr.h * 3, 0);
     pr.kind.assign((size_t)pr.w * pr.h, 0);
     pr.both.assign((size_t)pr.w * pr.h, 0);
@@ -1140,6 +1188,7 @@ void bake_layer(VehicleMap &pr, const Model &m, const std::vector<unsigned char>
             memcpy(&pr.normal[to * 3], &pr.normal[from * 3], 3);
             pr.both[to] = pr.both[from];
             pr.turret[to] = pr.turret[from];
+            pr.gun[to] = pr.gun[from];
             pr.twinned[to] = pr.twinned[from];
             memcpy(&pr.twin[to * 3], &pr.twin[from * 3], 3 * sizeof(float));
             pr.kind[to] = 1;
@@ -1187,6 +1236,7 @@ bool load_model(const std::string &mdl, Model &o) {
         Ply m;
         if (!read_game_file(dir + v.file, data) || !read_ply(data, m)) continue;
         const bool barrel = is_barrel(v.file);
+        const size_t first_of_view = o.all.size();
         if (m.skinned) {                              // tracks and suspensions lie where they are; a canvas and such follow their bones
             std::string name = v.file;
             for (auto &c : name) c = (char)tolower((unsigned char)c);
@@ -1220,6 +1270,7 @@ bool load_model(const std::string &mdl, Model &o) {
                 Triangle tr;
                 tr.layer = layer;
                 tr.gun = barrel;
+                tr.rod = false;
                 tr.turret = v.turret;
                 o.turret |= v.turret;
                 tr.skin = m.skinned;
@@ -1241,6 +1292,17 @@ bool load_model(const std::string &mdl, Model &o) {
                 if (good) o.all.push_back(tr);
             }
         }
+        // By its name a barrel's family is wide: mounts, rings, hatches of machine guns. What only a barrel is has its shape: long and thin.
+        if (barrel && o.all.size() > first_of_view) {
+            float lo[3] = {1e9f, 1e9f, 1e9f}, hi[3] = {-1e9f, -1e9f, -1e9f};
+            for (size_t i = first_of_view; i < o.all.size(); i++) for (int k = 0; k < 3; k++) for (int a = 0; a < 3; a++) {
+                lo[a] = fminf(lo[a], o.all[i].p[k][a]); hi[a] = fmaxf(hi[a], o.all[i].p[k][a]);
+            }
+            float d[3] = {hi[0] - lo[0], hi[1] - lo[1], hi[2] - lo[2]};
+            std::sort(d, d + 3);
+            const bool rod = d[2] >= 3 * d[1];
+            for (size_t i = first_of_view; i < o.all.size(); i++) o.all[i].rod = rod;
+        }
     }
     return !o.all.empty();
 }
@@ -1259,6 +1321,7 @@ Placement place_picture(const float lo[3], const float hi[3], int pw, int ph, co
     float angle = s.rotation * 0.017453292519943295f;
     l.ca = cosf(angle); l.sa = sinf(angle);
     l.ox = s.offset[0]; l.oy = s.offset[1];
+    l.half = (hi[1] - lo[1]) / 2; l.seam = s.seam != 0;
     l.repeat = s.repeat; l.flip_x = s.flip_x; l.flip_y = s.flip_y;
     return l;
 }
@@ -1288,7 +1351,7 @@ void sticker_lay(StickerImage &s, const Model &m, const std::vector<unsigned cha
     std::vector<unsigned char> count(cells, 0);
     std::vector<float> wall_lo(cells, 1e30f), wall_hi(cells, -1e30f);     // how far up and down a wall runs in a cell
     for (size_t i = 0; i < m.all.size(); i++) {
-        if (!seen[i] || m.all[i].gun || m.all[i].skin) continue;
+        if (!seen[i] || (m.all[i].gun && !s.gun) || m.all[i].skin) continue;
         const Triangle &t = m.all[i];
         float f[3];
         face_normal(t, f);
@@ -1518,16 +1581,79 @@ void sticker_pixel(const StickerImage &s, float u, float v, uint8_t io[4]) {
 }
 // Stickers over a texel, only those in one place of the vehicle: what both sides share would show it twice. A texel two
 // hatches share shows on both, so a sticker takes it only when it lies over both: a sticker on one hatch would appear on the other.
-void stick(const VehicleMap &pr, size_t at, const std::vector<StickerImage> &list, uint8_t io[4]) {
-    if (list.empty() || (pr.both[at] && !pr.twinned[at])) return;
-    const float *P = &pr.pos[at * 3];
+// A texel can cover several pixels of a picture, and one sample of it then jumps from texel to texel, on every hard edge. The texels
+// beside it say how far a step goes on the picture: as many samples as that takes, over the texel. Where the next texel is on
+// another part of the vehicle, or across a fold of the picture, there is nothing to go by and one sample does.
+template <class Where> bool texel_step(const VehicleMap &pr, size_t at, int dx, int dy, float u, float v, float d[2], Where where) {
+    const int x = (int)(at % pr.w), y = (int)(at / pr.w);
+    for (int sign : {1, -1}) {
+        const int nx = x + dx * sign, ny = y + dy * sign;
+        if (nx < 0 || ny < 0 || nx >= pr.w || ny >= pr.h) continue;
+        const size_t nb = (size_t)ny * pr.w + nx;
+        float a, b;
+        if (pr.kind[nb] != 1 || !where(&pr.pos[nb * 3], a, b) || fabsf(a - u) > .2f || fabsf(b - v) > .2f) continue;
+        d[0] = (a - u) * sign; d[1] = (b - v) * sign;
+        return true;
+    }
+    d[0] = d[1] = 0;
+    return false;
+}
+int samples_over(const float e1[2], const float e2[2], int pw, int ph) {
+    float f = fmaxf(fmaxf(fabsf(e1[0]), fabsf(e2[0])) * pw, fmaxf(fabsf(e1[1]), fabsf(e2[1])) * ph);
+    int n = (int)ceilf(f);
+    return n < 1 ? 1 : n > 4 ? 4 : n;
+}
+// paint(u, v, pixel) at n x n places over the texel, averaged
+template <class Paint> void over_texel(int n, float u, float v, const float e1[2], const float e2[2], uint8_t io[4], Paint paint) {
+    float sum[3] = {0, 0, 0};
+    for (int j = 0; j < n; j++) for (int i = 0; i < n; i++) {
+        float a = (i + .5f) / n - .5f, b = (j + .5f) / n - .5f;
+        uint8_t px[4] = {io[0], io[1], io[2], io[3]};
+        paint(u + a * e1[0] + b * e2[0], v + a * e1[1] + b * e2[1], px);
+        for (int c = 0; c < 3; c++) sum[c] += px[c];
+    }
+    for (int c = 0; c < 3; c++) io[c] = (uint8_t)(sum[c] / (n * n) + .5f);
+}
+int map_w(const VehicleMap &pr) { return pr.w; }
+int map_h(const VehicleMap &pr) { return pr.h; }
+void place_between(const VehicleMap &pr, size_t at, int x, int y, int w, int h, float out[3]) {
+    const float fx = (x + .5f) * pr.w / w - .5f, fy = (y + .5f) * pr.h / h - .5f;
+    const int x0 = (int)floorf(fx), y0 = (int)floorf(fy);
+    const float tx = fx - x0, ty = fy - y0, far_off = (pr.hi[0] - pr.lo[0]) * .02f;
+    const float *own = &pr.pos[at * 3];
+    float sum[3] = {0, 0, 0};
+    for (int k = 0; k < 4; k++) {
+        const int cx = x0 + (k & 1), cy = y0 + (k >> 1);
+        const float weight = (k & 1 ? tx : 1 - tx) * (k >> 1 ? ty : 1 - ty);
+        const float *q = own;                         // another part of the vehicle next to it on the texture does not count
+        if (cx >= 0 && cy >= 0 && cx < pr.w && cy < pr.h) {
+            const size_t nb = (size_t)cy * pr.w + cx;
+            const float *c = &pr.pos[nb * 3];
+            if (pr.kind[nb] == 1 && fabsf(c[0] - own[0]) + fabsf(c[1] - own[1]) + fabsf(c[2] - own[2]) < far_off) q = c;
+        }
+        for (int i = 0; i < 3; i++) sum[i] += weight * q[i];
+    }
+    memcpy(out, sum, sizeof sum);
+}
+void stick(const VehicleMap &pr, size_t at, const std::vector<StickerImage> &list, uint8_t io[4], const float *place, float step) {
+    if (list.empty() || (pr.both[at] && !pr.twinned[at] && !pr.gun[at])) return;
+    const float *own = &pr.pos[at * 3], *P = place ? place : own;
     const signed char *N = &pr.normal[at * 3];
     for (const StickerImage &s : list) {
+        if (pr.gun[at] && !s.gun) continue;
         float u, v, look = (N[0] * s.n[0] + N[1] * s.n[1] + N[2] * s.n[2]) / 127.f;
         if (!on_sticker(s, P, look, u, v)) continue;
         float u2, v2;
         if (pr.twinned[at] && !on_sticker(s, &pr.twin[at * 3], look, u2, v2)) continue;
-        sticker_pixel(s, u, v, io);
+        auto where = [&](const float *Q, float &a, float &b) { return on_sticker(s, Q, look, a, b); };
+        float e1[2], e2[2], tu = u, tv = v;
+        where(own, tu, tv);
+        texel_step(pr, at, 1, 0, tu, tv, e1, where);
+        texel_step(pr, at, 0, 1, tu, tv, e2, where);
+        for (int i = 0; i < 2; i++) { e1[i] *= step; e2[i] *= step; }
+        int n = s.pic ? samples_over(e1, e2, s.pic->w, s.pic->h) : 1;
+        if (n == 1) sticker_pixel(s, u, v, io);
+        else over_texel(n, u, v, e1, e2, io, [&](float a, float b, uint8_t px[4]) { sticker_pixel(s, a, b, px); });
     }
 }
 std::vector<Placement> place_on(const VehicleMap &pr, const Pattern &p) {
@@ -1538,6 +1664,7 @@ std::vector<Placement> place_on(const VehicleMap &pr, const Pattern &p) {
 bool on_picture(const Placement &l, const float *P, float &u, float &v) {
     float a = P[0] - l.cx, b = fabsf(P[1] - l.cy) + l.top - P[2];
     if (!l.through) b -= l.height / 2;
+    else if (!l.seam) b = camo_across(P[1] - l.cy, l.top - P[2], l.half);
     else if (P[1] < l.cy) b = -b;
     u = (l.ca * a - l.sa * b) / l.width + .5f + l.ox;
     v = (l.sa * a + l.ca * b) / l.height + .5f + l.oy;
@@ -1561,13 +1688,28 @@ bool on_part(const VehicleMap &pr, size_t at, int part) {
     return part == CAMO_LEFT ? side > 0 : side < 0;
 }
 // the camouflages over a texel, in their order
-void paint_coats(const VehicleMap &pr, size_t at, const std::vector<CoatImage> &coats, const std::vector<Placement> &places, uint8_t io[4]) {
+void paint_coats(const VehicleMap &pr, size_t at, const std::vector<CoatImage> &coats, const std::vector<Placement> &places, uint8_t io[4], bool fine, const float *place, float step) {
     for (size_t i = 0; i < coats.size() && i < places.size(); i++) {
         float u, v;
-        if (!on_part(pr, at, coats[i].s.part) || !on_picture(places[i], texel_place(pr, at), u, v)) continue;
-        uint8_t under[4] = {io[0], io[1], io[2], io[3]};
+        if ((pr.gun[at] && !coats[i].s.gun) || !on_part(pr, at, coats[i].s.part) || !on_picture(places[i], place ? place : texel_place(pr, at), u, v)) continue;
         const Pattern &pic = *coats[i].pic;
-        camo_blend(pic.px.data(), pic.w, pic.h, u, v, under, coats[i].s, io);
+        auto one = [&](float a, float b, uint8_t px[4]) {
+            uint8_t under[4] = {px[0], px[1], px[2], px[3]};
+            camo_blend(pic.px.data(), pic.w, pic.h, a, b, under, coats[i].s, px);
+        };
+        int n = 1;
+        float e1[2] = {0, 0}, e2[2] = {0, 0};
+        if (fine) {
+            auto where = [&](const float *Q, float &a, float &b) { return on_picture(places[i], Q, a, b); };
+            float tu = u, tv = v;
+            where(texel_place(pr, at), tu, tv);
+            texel_step(pr, at, 1, 0, tu, tv, e1, where);
+            texel_step(pr, at, 0, 1, tu, tv, e2, where);
+            for (int k = 0; k < 2; k++) { e1[k] *= step; e2[k] *= step; }
+            n = samples_over(e1, e2, pic.w, pic.h);
+        }
+        if (n == 1) one(u, v, io);
+        else over_texel(n, u, v, e1, e2, io, one);
     }
 }
 bool texel(const VehicleMap &pr, int x, int y, int w, int h, size_t &at) {
@@ -1610,6 +1752,13 @@ void *variant_open(unsigned char *self, unsigned mode) {
     Painted *p = painted_of(v->file, v->token, b, (size_t)(e - b));
     unsigned char *c = p->data.data();
     size_t n = p->data.size();
+    if (n != (size_t)(e - b)) {                       // bigger than the file: a stream of its own, as for a file on the disk
+        unsigned char *o = (unsigned char *)((void *(*)(size_t))(base + FN_NEW))(0x48);
+        if (!o) return r;
+        ((void *(*)(void *, void *, unsigned, int))(base + FN_BUF_STREAM))(o, c, (unsigned)n, -1);
+        (*(void (**)(void *, int))*(uintptr_t *)st)(st, 1);
+        return o;
+    }
     if (vt == VT_ZIP) memcpy(b, c, n);
     else {
         *(unsigned char **)(st + 8) = c; *(unsigned char **)(st + 0x10) = c + n; *(uint64_t *)(st + 0x18) = n;
@@ -2107,8 +2256,8 @@ DWORD WINAPI draw_band(LPVOID arg) {
                         for (int i = 0; i < 3; i++) { float f = e[i] / keep; flat[i] = (uint8_t)(f > 255 ? 255 : f); }
                         flat[3] = 255;
                         memcpy(out, flat, 4);
-                        paint_coats(l->map, m, *B.coats, *B.places, out);
-                        if (l->map.twinned[m]) stick(l->map, m, *B.stickers, out);
+                        paint_coats(l->map, m, *B.coats, *B.places, out, false);
+                        if (l->map.twinned[m] || l->map.gun[m]) stick(l->map, m, *B.stickers, out);
                         else if (!l->map.both[m] && !t.gun) for (const StickerImage &k : *B.stickers) {      // exact: per pixel, not per texel
                             float place[3], su, sv, look = (nx * k.n[0] + ny * k.n[1] + nz * k.n[2]) / nl;
                             for (int i = 0; i < 3; i++) place[i] = a * t.p[0][i] + b * t.p[1][i] + c * t.p[2][i];
@@ -2766,6 +2915,9 @@ void vehicle_settings() {
         if (ImGui::Checkbox(TR("Отразить по горизонтали", "Mirror horizontally"), &fx)) { s.flip_x = fx; changed = true; }
         if (ImGui::Checkbox(TR("Отразить по вертикали", "Mirror vertically"), &fy)) { s.flip_y = fy; changed = true; }
         if (ImGui::Checkbox(TR("Продолжать за краями картинки", "Go on beyond its edges"), &rep)) { s.repeat = rep; changed = true; }
+        bool barrel = s.gun, whole = !s.seam;
+        if (ImGui::Checkbox(TR("На стволе", "On the barrel"), &barrel)) { s.gun = barrel; changed = true; }
+        if (ImGui::Checkbox(TR("Без шва посередине", "No seam along the middle"), &whole)) { s.seam = !whole; changed = true; }
         ImGui::SeparatorText(TR("Цвет", "Colour"));
         changed |= ImGui::SliderFloat(TR("Непрозрачность", "Opacity"), &s.opacity, 0, 1, "%.2f");
         changed |= ImGui::SliderFloat(TR("Яркость", "Brightness"), &s.bright, BRIGHT_MIN, BRIGHT_MAX, "%.2f", ImGuiSliderFlags_Logarithmic);
@@ -2805,6 +2957,8 @@ void vehicle_settings() {
             changed |= ImGui::SliderFloat(TR("Яркость наклейки", "Sticker brightness"), &k.bright, BRIGHT_MIN, BRIGHT_MAX, "%.2f", ImGuiSliderFlags_Logarithmic);
             changed |= ImGui::SliderFloat(TR("Мягкие края", "Soft edges"), &k.soft, 0, 1, "%.2f");
             changed |= ImGui::SliderFloat(TR("Потёртость", "Wear"), &k.wear, 0, 1, "%.2f");
+            bool barrel = k.gun;
+            if (ImGui::Checkbox(TR("На стволе##sticker", "On the barrel##sticker"), &barrel)) { k.gun = barrel; changed = true; }
             bool fx = k.flip_x, fy = k.flip_y;
             if (ImGui::Checkbox(TR("Отразить наклейку слева направо", "Flip the sticker left to right"), &fx)) { k.flip_x = fx; changed = true; }
             if (ImGui::Checkbox(TR("Отразить наклейку сверху вниз", "Flip the sticker top to bottom"), &fy)) { k.flip_y = fy; changed = true; }

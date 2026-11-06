@@ -768,16 +768,16 @@ static const char *ABOUT_EN[] = {
     "Sign in through Steam: the mod gets only your SteamID, no password",
 };
 static const char *NEWS_RU[] = {
-    "Несколько камуфляжей на одной технике: каждый на свою часть — весь танк, борт, корпус или башню",
-    "Камуфляж больше не копируется с борта на борт, отражение по горизонтали и вертикали у каждого слоя",
-    "Перед добавлением картинки можно выбрать её часть: она сохранится отдельной картинкой",
-    "Камуфляж и наклейки больше не пересвечены, у них появились ползунки яркости",
+    "Наклейки и камуфляж в бою намного чётче: текстура техники с наклейкой вдвое больше",
+    "Галочка «На стволе» у камуфляжей и наклеек",
+    "Камуфляж без шва посередине танка, старый вид можно вернуть галочкой",
+    "Башенки и люки пулемётов красятся как обычные части",
 };
 static const char *NEWS_EN[] = {
-    "Several camouflages on one vehicle, each on its own part: the whole vehicle, a side, the hull or the turret",
-    "Camouflage is no longer copied from side to side; each layer can be mirrored horizontally and vertically",
-    "Before a picture goes on, a part of it can be chosen: it is saved as a picture of its own",
-    "Camouflage and stickers are no longer overexposed and have brightness sliders",
+    "Stickers and camouflage are much sharper in battle: a vehicle texture with a sticker is twice as big",
+    "An On the barrel box for camouflages and stickers",
+    "Camouflage has no seam along the middle of the vehicle; a box brings the old look back",
+    "Machine gun cupolas and hatches take paint like other parts",
 };
 
 // which news the player has read: by their text, so a build with the same news stays quiet
