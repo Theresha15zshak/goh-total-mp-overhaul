@@ -132,6 +132,18 @@ static char winner_team(const char *ss) {
 
 typedef struct { char type[16], name[100], team[4], army[8], id[24], host[12]; int left, kicked; } Member;
 static int numbers_to_field(const char *ss, const char *key, char out[][64], int max);
+// Army mode "team": the nation is the team's, in {teams}, and the members have none
+static int team_army(const char *ss, const char *team, char *out, size_t n) {
+    const char *teams = strstr(ss, "{teams {"), *alliances = teams ? strstr(teams, "{alliances") : NULL;
+    if (!teams || !alliances) return 0;
+    for (const char *p = teams; (p = strstr(p, "{name ")) && p < alliances; p++) {
+        char tn[8];
+        const char *next = strstr(p + 1, "{name ");
+        if (!next || next > alliances) next = alliances;
+        if (field(p, next, "name", tn, sizeof tn) && !strcmp(tn, team)) return field(p, next, "army", out, n);
+    }
+    return 0;
+}
 
 // the report body (server/src/matches.js "v3") for a match that counts; 0 with why when it does not
 // over: the game itself ended the match. gone: a bit per player number that left the battle (the host is never one: when he goes the
@@ -183,7 +195,8 @@ static int make_report(const char *ss, const char *me, const char *key, char *bo
         if (!strcmp(x->type, "spectator")) continue;
         if (strcmp(x->type, "player")) { *why = "not only players"; return 0; }
         if (!field(p, next, "name", x->name, sizeof x->name) || !field(p, next, "team", x->team, sizeof x->team) ||
-            !field(p, next, "army", x->army, sizeof x->army) || !field(p, next, "steamId", x->id, sizeof x->id)) { *why = "member incomplete"; return 0; }
+            !field(p, next, "steamId", x->id, sizeof x->id)) { *why = "member incomplete"; return 0; }
+        if (!field(p, next, "army", x->army, sizeof x->army) && !team_army(ss, x->team, x->army, sizeof x->army)) { *why = "member incomplete"; return 0; }
         field(p, next, "hostId", x->host, sizeof x->host);
         for (char *c = x->name; *c; c++) if (*c == '\t' || *c == '\n' || *c == '\r') *c = ' ';
         count++;
@@ -384,7 +397,7 @@ static int replay_name(const char *ss, const char *me, wchar_t *out, size_t n) {
         char t[16], tm[4], id[24], ar[16];
         if (!field(p, next, "type", t, sizeof t) || strcmp(t, "player") || !field(p, next, "team", tm, sizeof tm)) continue;
         if (tm[0] >= 'a' && tm[0] <= 'h') count[tm[0] - 'a']++;
-        if (field(p, next, "steamId", id, sizeof id) && !strcmp(id, me) && field(p, next, "army", ar, sizeof ar)) name_part(army, sizeof army, ar);
+        if (field(p, next, "steamId", id, sizeof id) && !strcmp(id, me) && (field(p, next, "army", ar, sizeof ar) || team_army(ss, tm, ar, sizeof ar))) name_part(army, sizeof army, ar);
     }
     int a = 0, b = 0;
     for (int i = 0; i < 8; i++) if (count[i]) { if (!a) a = count[i]; else if (!b) b = count[i]; }

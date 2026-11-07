@@ -875,6 +875,7 @@ static const char *NEWS_RU[] = {
     "Рейтинг: в зачёт идут и игры со свободным выбором наций, не только Ось против Союзников",
     "Рейтинг: новые правила. Вышел из боя: штраф. Хост закрыл бой: ему поражение, противникам победа",
     "Рейтинг: кикнутый из боя не получает штраф, такой бой не считается",
+    "Рейтинг: исправлен учёт игр, где хост задаёт нацию каждой команде",
 };
 static const char *NEWS_EN[] = {
     "Competitive: infantry answers orders much faster, groups turn together",
@@ -888,6 +889,7 @@ static const char *NEWS_EN[] = {
     "Rating: matches with a free choice of nations count too, not only Axis against Allies",
     "Rating: new rules. Left a battle: a penalty. The host closed it: he loses, the enemies win",
     "Rating: a player kicked from a battle takes no penalty, and the battle does not count",
+    "Rating: fixed matches where the host sets a nation for each team",
 };
 
 // which news the player has read: by their text, so a build with the same news stays quiet
