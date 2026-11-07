@@ -5,6 +5,8 @@
 //   POST /report   text, one field per line:
 //                    reporter SteamID / key / "v2" / mode / sides / map / start / end (unix, from the game) /
 //                    winner ("axis"|"allies"), then a line per player: "steam_id\tnation\tname"
+//                    two teams with nations of their own choice: "teams" in place of axis_allies, the winner is a team's letter and
+//                    a player's line ends in "\tteam"; side in the tables is then that letter
 //                    (nation: ger fin | eng usa rus)
 //                  answers "rated", "confirmed", "disputed", "duplicate" or why not (4xx)
 //   GET /ratings?ids=a,b,c     for the lobby: "steam_id\tladder\tmmr\tgames\twins" per known track
@@ -23,6 +25,9 @@ const KEY = /^[0-9a-f]{64}$/;
 const MODES = new Set(['battle_zones', 'ammunition']);
 const SIDE = { ger: 'axis', fin: 'axis', eng: 'allies', usa: 'allies', rus: 'allies' };
 const MIN_DURATION_S = 180, MAX_AGE_S = 14 * 86400, REPORTS_PER_HOUR = 30, HISTORY = 30;
+// Balance tags of the builds that send a match only after its results screen (report.c). An older build also sends matches its host
+// closed early (116, 2026-11-07, from F919). The tag comes with the heartbeat; a release with a new tag goes in here.
+const REPORT_TAGS = new Set(['4D2C']);
 
 const clean = (s, n) => Array.from(s.replace(/[\u0000-\u001f\u007f]/g, '').trim()).slice(0, n).join('') || '?';
 const ladderOf = size => (size === 1 ? '1v1' : 'team');
@@ -38,24 +43,27 @@ function parse(body, now) {
   if (ver !== 'v2') return { err: 'unknown report version' };
   if (!STEAM_ID.test(reporter || '') || !KEY.test(key || '')) return { err: 'bad reporter' };
   if (!MODES.has(mode)) return { err: 'mode not rated' };
-  if (sides !== 'axis_allies') return { err: 'sides not rated' };
+  if (sides !== 'axis_allies' && sides !== 'teams') return { err: 'sides not rated' };
+  const free = sides === 'teams';
   const start = Number(startS), end = Number(endS);
   if (!Number.isInteger(start) || !Number.isInteger(end) || end > now + 600 || end < now - MAX_AGE_S) return { err: 'bad time' };
   const duration = end - start;
   if (duration < MIN_DURATION_S) return { err: 'too short' };
-  if (winner !== 'axis' && winner !== 'allies') return { err: 'bad winner' };
   const players = [], seen = new Set();
   for (const l of lines.slice(9)) {
     if (!l) continue;
-    const [id, nation, name = ''] = l.split('\t');
-    if (!STEAM_ID.test(id || '') || !SIDE[nation] || seen.has(id)) return { err: 'bad player' };
+    const [id, nation, name = '', team = ''] = l.split('\t');
+    if (!STEAM_ID.test(id || '') || !SIDE[nation] || seen.has(id) || (free && !/^[a-h]$/.test(team))) return { err: 'bad player' };
     seen.add(id);
-    players.push({ id, nation, side: SIDE[nation], name: clean(name, 32) });
+    players.push({ id, nation, side: free ? team : SIDE[nation], name: clean(name, 32) });
   }
-  const axis = players.filter(p => p.side === 'axis'), allies = players.filter(p => p.side === 'allies');
-  if (!axis.length || axis.length !== allies.length || axis.length > 4) return { err: 'sides not equal' };
+  const pair = free ? [...new Set(players.map(p => p.side))].sort() : ['axis', 'allies'];
+  if (pair.length !== 2) return { err: 'not two teams' };
+  if (!pair.includes(winner)) return { err: 'bad winner' };
+  const one = players.filter(p => p.side === pair[0]), two = players.filter(p => p.side === pair[1]);
+  if (!one.length || one.length !== two.length || one.length > 4) return { err: 'sides not equal' };
   if (!seen.has(reporter)) return { err: 'reporter not in the match' };
-  return { reporter, key, mode, map: clean(map || '', 64), start, end, duration, winner, players, size: axis.length };
+  return { reporter, key, mode, map: clean(map || '', 64), start, end, duration, winner, players, pair, size: one.length };
 }
 
 async function tracks(env, ladder, players) {
@@ -75,9 +83,10 @@ export async function report(req, env) {
   const now = Math.floor(Date.now() / 1000);
   const r = parse(body, now);
   if (r.err) return [400, r.err];
-  const held = await env.DB.prepare('SELECT key_hash, verified_at FROM players WHERE steam_id = ?1').bind(r.reporter).first();
+  const held = await env.DB.prepare('SELECT key_hash, verified_at, version FROM players WHERE steam_id = ?1').bind(r.reporter).first();
   if (!held || !held.key_hash || held.key_hash !== (await sha256(r.key))) return [403, 'unknown key'];
   if (!held.verified_at) return [403, 'not verified'];     // only players signed in with Steam report (verify.js)
+  if (!REPORT_TAGS.has(held.version)) return [200, 'old build'];   // 200: the client lets this match go and does not ask again
   const recent = await env.DB.prepare('SELECT count(*) AS n FROM reports WHERE reporter = ?1 AND at > ?2').bind(r.reporter, now - 3600).first();
   if (recent.n >= REPORTS_PER_HOUR) return [429, 'too many reports'];
 
@@ -89,7 +98,7 @@ export async function report(req, env) {
   const ladder = ladderOf(r.size);
   const t = await tracks(env, ladder, r.players);
   const sideIdx = s => r.players.map((p, i) => (p.side === s ? i : -1)).filter(i => i >= 0);
-  const ax = sideIdx('axis'), al = sideIdx('allies'), axisWon = r.winner === 'axis';
+  const ax = sideIdx(r.pair[0]), al = sideIdx(r.pair[1]), axisWon = r.winner === r.pair[0];
   const pkey = r.players.map(p => p.id).sort().join(',');
   const rep = await env.DB.prepare(
     "SELECT count(*) AS n FROM matches WHERE pkey = ?1 AND status = 'rated' AND ended_at >= ?2 AND ended_at < ?3"
@@ -198,7 +207,7 @@ export async function player(url, env) {
       const names = side => others.filter(p => p.side === side).map(p => p.name).join(', ');
       const delta = m.status === 'rated' ? mmr(m.mu_a1) - mmr(m.mu_a0) : 0;
       out += tsv('M', m.id, m.ended_at, m.mode, m.map, m.size, m.nation, m.won, delta, m.status,
-        names(m.side), names(m.side === 'axis' ? 'allies' : 'axis'));
+        names(m.side), others.filter(p => p.side !== m.side).map(p => p.name).join(', '));
     }
   }
   return out;

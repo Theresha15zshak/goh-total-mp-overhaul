@@ -872,6 +872,7 @@ static const char *NEWS_RU[] = {
     "Компетитив: солдаты больше не приседают и не замирают на бегу",
     "Компетитив: исправлен вылет сервера хоста в бою",
     "Рейтинг: игра идёт в зачёт, только если открылся экран итогов",
+    "Рейтинг: в зачёт идут и игры со свободным выбором наций, не только Ось против Союзников",
 };
 static const char *NEWS_EN[] = {
     "Competitive: infantry answers orders much faster, groups turn together",
@@ -882,6 +883,7 @@ static const char *NEWS_EN[] = {
     "Competitive: soldiers no longer squat and freeze on the run",
     "Competitive: fixed a crash of the host's server in battle",
     "Rating: a match counts only if its results screen opened",
+    "Rating: matches with a free choice of nations count too, not only Axis against Allies",
 };
 
 // which news the player has read: by their text, so a build with the same news stays quiet

@@ -3,8 +3,8 @@
 // Its replay.ss is the session card in the game's text format: game type, army selection mode, map, start and
 // end time, every member (type, name, team a/b, army, SteamID), which team is Axis or Allies, and
 // battleInfoTotal, whose "info" block (base64 of zlib) holds the winning team's letter (re/NOTES.md).
-// A match that counts (Axis vs Allies, Battle Zones or Domination, equal human sides of 1..4, a winner, us in
-// it) becomes a report; online.c sends it. Only replay.ss is read, not the whole replay.
+// A match that counts (Axis vs Allies, or two teams with nations of their own choice; Battle Zones or Domination, equal human
+// sides of 1..4, a winner, us in it) becomes a report; online.c sends it. Only replay.ss is read, not the whole replay.
 #include <windows.h>
 #include <shlobj.h>
 #include <shellapi.h>
@@ -140,7 +140,8 @@ static int make_report(const char *ss, const char *me, const char *key, char *bo
     if (!field(ss, stop, "gameStartTime", start, sizeof start) || !field(ss, stop, "gameEndTime", end, sizeof end)) { *why = "no times"; return 0; }
     *end_time = _atoi64(end);
     if (!field(ss, stop, "gameType", type, sizeof type) || (strcmp(type, "battle_zones") && strcmp(type, "ammunition"))) { *why = "mode not rated"; return 0; }
-    if (!field(ss, stop, "armySelectionMode", sel, sizeof sel) || strcmp(sel, "alliance")) { *why = "not Axis vs Allies"; return 0; }
+    if (!field(ss, stop, "armySelectionMode", sel, sizeof sel)) { *why = "no army mode"; return 0; }
+    int free_pick = strcmp(sel, "alliance") != 0;       // any nation on either team: the teams have no side, only their letters
     field(ss, stop, "bots", bots, sizeof bots);
     if (strcmp(bots, "0")) { *why = "bots"; return 0; }
     if (!field(ss, stop, "map", map, sizeof map)) map[0] = 0;
@@ -174,9 +175,19 @@ static int make_report(const char *ss, const char *me, const char *key, char *bo
         count++;
     }
     int axis = 0, allies = 0, mine = 0;
+    char first = 0, second = 0;                 // free pick: the two teams; axis and allies then count their players
     for (int i = 0; i < count; i++) {
-        const char *s = m[i].team[0] >= 'a' && m[i].team[0] <= 'h' ? side_of[m[i].team[0] - 'a'] : "";
-        if (!strcmp(s, "axis")) axis++;
+        char team = m[i].team[0] >= 'a' && m[i].team[0] <= 'h' && !m[i].team[1] ? m[i].team[0] : 0;
+        const char *s = team ? side_of[team - 'a'] : "";
+        if (free_pick) {
+            if (!team) { *why = "a team with no name"; return 0; }
+            if (!first) first = team;
+            else if (team != first && !second) second = team;
+            if (team == first) axis++;
+            else if (team == second) allies++;
+            else { *why = "more than two teams"; return 0; }
+        }
+        else if (!strcmp(s, "axis")) axis++;
         else if (!strcmp(s, "allies")) allies++;
         else { *why = "a team with no side"; return 0; }
         if (!strcmp(m[i].id, me)) mine = 1;
@@ -184,11 +195,12 @@ static int make_report(const char *ss, const char *me, const char *key, char *bo
     if (!mine) { *why = "we were not in it"; return 0; }
     if (!axis || axis != allies || axis > 4) { *why = "sides not equal"; return 0; }
     char w = winner_team(ss);
-    const char *won = w ? side_of[w - 'a'] : "";
-    if (strcmp(won, "axis") && strcmp(won, "allies")) { *why = "no winner"; return 0; }
-    int o = snprintf(body, n, "%s\n%s\nv2\n%s\naxis_allies\n%s\n%s\n%s\n%s\n", me, key, type, map, start, end, won);
+    char letter[2] = {w, 0};
+    const char *won = !w ? "" : free_pick ? letter : side_of[w - 'a'];
+    if (free_pick ? w != first && w != second : strcmp(won, "axis") && strcmp(won, "allies")) { *why = "no winner"; return 0; }
+    int o = snprintf(body, n, "%s\n%s\nv2\n%s\n%s\n%s\n%s\n%s\n%s\n", me, key, type, free_pick ? "teams" : "axis_allies", map, start, end, won);
     for (int i = 0; i < count && o > 0 && (size_t)o < n; i++)
-        o += snprintf(body + o, n - o, "%s\t%s\t%s\n", m[i].id, m[i].army, m[i].name);
+        o += snprintf(body + o, n - o, "%s\t%s\t%s\t%s\n", m[i].id, m[i].army, m[i].name, m[i].team);
     if (o <= 0 || (size_t)o >= n) { *why = "too long"; return 0; }
     return 1;
 }
