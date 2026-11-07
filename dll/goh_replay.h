@@ -192,6 +192,7 @@ int report_next(const char *me, const char *key, char *body, size_t n, long long
 void report_done(long long end_time);       // that match is dealt with (taken, or never will be)
 void report_gone(int number);               // a player left the battle
 void report_closed(void);                   // we left it through the menu
+void report_kicked(int user);               // the host threw that hostId out
 void report_cut(void);                      // our own connection was gone when a player "left"
 extern volatile long g_net_check;           // a player left: online.c looks whether it is our connection
 void report_finished(void);                 // the results screen opened: a match played to its end

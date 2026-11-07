@@ -130,7 +130,7 @@ static char winner_team(const char *ss) {
     return team;
 }
 
-typedef struct { char type[16], name[100], team[4], army[8], id[24], host[12]; int left; } Member;
+typedef struct { char type[16], name[100], team[4], army[8], id[24], host[12]; int left, kicked; } Member;
 static int numbers_to_field(const char *ss, const char *key, char out[][64], int max);
 
 // the report body (server/src/matches.js "v3") for a match that counts; 0 with why when it does not
@@ -144,8 +144,9 @@ static int numbers_to_field(const char *ss, const char *key, char out[][64], int
 //   the host closed it or lost his connection, nobody had left: he gets q, his team s, the enemies win.
 //   the host closed it after someone left: who left gets q, everyone else n.
 //   we left through the menu: q for us and n for all. Only that, so a client can punish nobody else; the server keeps it apart.
+//   someone was kicked: no penalty for him and nothing for anyone, or a host could kick his way to a win. Who left still gets q.
 // Anyone else sees a server gone, the same as a crash, and reports nothing.
-static int make_report(const char *ss, const char *me, const char *key, char *body, size_t n, long long *end_time, const char **why, int over, uint32_t gone, int early, int closed, int cut, int self_early) {
+static int make_report(const char *ss, const char *me, const char *key, char *body, size_t n, long long *end_time, const char **why, int over, uint32_t gone, int early, int closed, int cut, int self_early, const int *kicked, int kicks) {
     const char *stop = ss + strlen(ss);
     char type[32], sel[32], map[160], start[24], end[24], bots[8] = "0";
     *end_time = 0;
@@ -220,7 +221,17 @@ static int make_report(const char *ss, const char *me, const char *key, char *bo
     int host_closed = 0, voided = 0, self_left = 0, i_host = 0;
     for (int i = 0; i < count; i++)
         if (!strcmp(m[i].id, me)) { ours = m[i].team[0]; i_host = !strcmp(m[i].host, master); }
-    if (!over) {
+    int kick = 0, someone_left = 0;
+    for (int i = 0; i < count; i++) {
+        for (int k = 0; k < kicks; k++) if (kicked[k] == atoi(m[i].host)) { m[i].left = 0; m[i].kicked = 1; kick = 1; }
+        someone_left |= m[i].left;
+    }
+    if (kick) {
+        if (!someone_left) { *why = "a player was kicked"; return 0; }
+        voided = 1;
+        for (int i = 0; i < count; i++) if (m[i].team[0] != ours) w = m[i].team[0];
+    }
+    else if (!over) {
         if (cut && i_host) for (int i = 0; i < count; i++) m[i].left = 0;   // nobody left: we fell off
         char stayed = 0;
         int two = 0, anyone = 0;
@@ -480,16 +491,28 @@ static long long match_kept(const char *key, long long start, long long end) {  
 #define GONE_KEEP 12
 #define GONE_AFTER_S 30
 volatile long g_net_check;
-void report_gone(int number) {
+static void keep_pair(const char *key, int number) {
     char v[320], out[320];
-    g_net_check = 1;
-    GetPrivateProfileStringA("reports", "gone", "", v, sizeof v, g_ini);
+    GetPrivateProfileStringA("reports", key, "", v, sizeof v, g_ini);
     int n = 0, o = 0;
     char *items[GONE_KEEP + 1], *next = NULL;
     for (char *t = strtok_s(v, " ", &next); t && n < GONE_KEEP + 1; t = strtok_s(NULL, " ", &next)) items[n++] = t;
     for (int i = n >= GONE_KEEP ? n - GONE_KEEP + 1 : 0; i < n; i++) o += snprintf(out + o, sizeof out - o, "%s ", items[i]);
     snprintf(out + o, sizeof out - o, "%lld:%d", (long long)time(NULL), number);
-    WritePrivateProfileStringA("reports", "gone", out, g_ini);
+    WritePrivateProfileStringA("reports", key, out, g_ini);
+}
+void report_gone(int number) { g_net_check = 1; keep_pair("gone", number); }
+void report_kicked(int user) { keep_pair("kicked", user); }
+static int match_kicked(long long start, long long end, int *users, int max) {
+    char v[320], *next = NULL;
+    int n = 0;
+    GetPrivateProfileStringA("reports", "kicked", "", v, sizeof v, g_ini);
+    for (char *t = strtok_s(v, " ", &next); t && n < max; t = strtok_s(NULL, " ", &next)) {
+        long long at = _atoi64(t);
+        const char *c = strchr(t, ':');
+        if (c && at >= start && at <= end + GONE_AFTER_S) users[n++] = atoi(c + 1);
+    }
+    return n;
 }
 #define EARLY_S 120             // leaving this soon costs nobody anything, and the match does not count
 static uint32_t match_gone(long long start, long long end, long long over_at, int *early) {
@@ -556,8 +579,9 @@ int report_next(const char *me, const char *key, char *body, size_t n, long long
     int early = 0;
     long long over_at = match_kept("finished", from, best_end), closed_at = match_kept("closed", from, best_end);
     uint32_t gone = match_gone(from, best_end, over_at, &early);
+    int kicked[8], kicks = match_kicked(from, best_end, kicked, 8);
     int ok = make_report(ss, me, key, body, n, end_time, &why, over_at != 0, gone, early, closed_at != 0,
-                         match_kept("cut", from, best_end) != 0, closed_at && closed_at - from < EARLY_S);
+                         match_kept("cut", from, best_end) != 0, closed_at && closed_at - from < EARLY_S, kicked, kicks);
     free(ss);
     if (!ok) {
         rc_log("report: match ending %lld not rated here (%s)", best_end, why);

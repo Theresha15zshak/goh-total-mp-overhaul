@@ -66,9 +66,10 @@ static const Watch WATCH[] = {
     {"present",      0x4fc010, 6, {0x40, 0x53, 0x48, 0x83, 0xec, 0x20}},  // eRenderDevice present: swapchain [+0xa8]->Present
     {"game_result",  0x299100, 5, {0x48, 0x89, 0x5c, 0x24, 0x08}},  // opens eGUI_PageGameResult (Show's page is in a lambda: not seen there)
     {"game_over",    0xd08aa0, 5, {0x48, 0x89, 0x5c, 0x24, 0x18}},  // eGame::GameOver(game, winner): the only way to state 3 at +0xd4
+    {"user_delete",  0xc74960, 5, {0x48, 0x89, 0x5c, 0x24, 0x08}},  // "on user delete": (client, msg), msg+8 the reason (names at c5ef90), msg+0x10 the user
     {"player_gone",  0xd09f70, 5, {0x48, 0x89, 0x5c, 0x24, 0x18}},  // "Reassigning units of player": (game, &player number), a player left the battle
 };
-enum { W_LOAD = 1, W_TICK = 2, W_EXIT = 3, W_SPAWN = 4, W_PAGE_SHOW = 5, W_PAGE_CLOSE = 6, W_STATS_EVENT = 7, W_STATS_EVENT2 = 8, W_PRESENT = 9, W_RESULT = 10, W_OVER = 11, W_GONE = 12 };
+enum { W_LOAD = 1, W_TICK = 2, W_EXIT = 3, W_SPAWN = 4, W_PAGE_SHOW = 5, W_PAGE_CLOSE = 6, W_STATS_EVENT = 7, W_STATS_EVENT2 = 8, W_PRESENT = 9, W_RESULT = 10, W_OVER = 11, W_DELETE = 12, W_GONE = 13 };
 #define NWATCH (sizeof(WATCH) / sizeof(WATCH[0]))
 
 Ctl g_ctl;
@@ -433,6 +434,12 @@ static void __cdecl watch_hit(uint32_t id, void *a1, void *a2) {
         int state = *(volatile int *)((uintptr_t)a1 + 0xd4);
         rc_log("the game is over, state %d, in a replay: %d", state, replay_core() != 0);
         if (state != 3 && !replay_core()) report_finished();
+        return;
+    }
+    if (id == W_DELETE) {
+        int reason = *(volatile int *)((uintptr_t)a2 + 8), user = *(volatile int *)((uintptr_t)a2 + 0x10);
+        rc_log("user %d is out, reason %d, in a replay: %d", user, reason, replay_core() != 0);
+        if (reason == 6 && !replay_core()) report_kicked(user);    // kickoff: thrown out, he did not leave
         return;
     }
     if (id == W_GONE) {                         // who left before the end loses (report.c)
