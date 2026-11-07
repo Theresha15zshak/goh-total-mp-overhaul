@@ -3,10 +3,14 @@
 // Zones ("battle_zones") or Domination ("ammunition", «Превосходство»), equal sides of 1..4, at least 3 minutes.
 //
 //   POST /report   text, one field per line:
-//                    reporter SteamID / key / "v2" / mode / sides / map / start / end (unix, from the game) /
+//                    reporter SteamID / key / "v3" / mode / sides / map / start / end (unix, from the game) /
 //                    winner ("axis"|"allies"), then a line per player: "steam_id\tnation\tname"
 //                    two teams with nations of their own choice: "teams" in place of axis_allies, the winner is a team's letter and
-//                    a player's line ends in "\tteam"; side in the tables is then that letter
+//                    a player's line goes on with "\tteam"; side in the tables is then that letter
+//                    the line's last field is the player's outcome (report.c): w win, l loss, q loss for leaving or closing the match,
+//                    s small loss (the host's team when he closes it, losers to a team short of a man), n nothing
+//                    only the reporter q and all others n: his own word that he left. It touches nobody else and is kept apart from
+//                    the match, whose report comes later and would otherwise find it taken; that report then does not charge him again
 //                    (nation: ger fin | eng usa rus)
 //                  answers "rated", "confirmed", "disputed", "duplicate" or why not (4xx)
 //   GET /ratings?ids=a,b,c     for the lobby: "steam_id\tladder\tmmr\tgames\twins" per known track
@@ -24,10 +28,11 @@ const STEAM_ID = /^7656119\d{10}$/;
 const KEY = /^[0-9a-f]{64}$/;
 const MODES = new Set(['battle_zones', 'ammunition']);
 const SIDE = { ger: 'axis', fin: 'axis', eng: 'allies', usa: 'allies', rus: 'allies' };
-const MIN_DURATION_S = 180, MAX_AGE_S = 14 * 86400, REPORTS_PER_HOUR = 30, HISTORY = 30;
-// Balance tags of the builds that send a match only after its results screen (report.c). An older build also sends matches its host
-// closed early (116, 2026-11-07, from F919). The tag comes with the heartbeat; a release with a new tag goes in here.
+const MIN_DURATION_S = 120, MAX_AGE_S = 14 * 86400, REPORTS_PER_HOUR = 30, HISTORY = 30;
+// Balance tags of the builds we take reports from. An older build also sends matches its host closed early (116, 2026-11-07, from F919).
+// The tag comes with the heartbeat; a release with a new tag goes in here.
 const REPORT_TAGS = new Set(['4D2C']);
+const SMALL_LOSS = 0.25, QUIT_MU = 1.5;   // QUIT_MU: leaving costs at least this, 60 MMR, or leaving would pay against a stronger team
 
 const clean = (s, n) => Array.from(s.replace(/[\u0000-\u001f\u007f]/g, '').trim()).slice(0, n).join('') || '?';
 const ladderOf = size => (size === 1 ? '1v1' : 'team');
@@ -40,7 +45,7 @@ async function sha256(s) {
 function parse(body, now) {
   const lines = body.split('\n');
   const [reporter, key, ver, mode, sides, map, startS, endS, winner] = lines;
-  if (ver !== 'v2') return { err: 'unknown report version' };
+  if (ver !== 'v3') return { err: 'unknown report version' };   // v2 also sent matches their host closed (119): v3 waits for the game's own GameOver
   if (!STEAM_ID.test(reporter || '') || !KEY.test(key || '')) return { err: 'bad reporter' };
   if (!MODES.has(mode)) return { err: 'mode not rated' };
   if (sides !== 'axis_allies' && sides !== 'teams') return { err: 'sides not rated' };
@@ -52,14 +57,14 @@ function parse(body, now) {
   const players = [], seen = new Set();
   for (const l of lines.slice(9)) {
     if (!l) continue;
-    const [id, nation, name = '', team = ''] = l.split('\t');
-    if (!STEAM_ID.test(id || '') || !SIDE[nation] || seen.has(id) || (free && !/^[a-h]$/.test(team))) return { err: 'bad player' };
+    const [id, nation, name = '', team = '', out = ''] = l.split('\t');
+    if (!STEAM_ID.test(id || '') || !SIDE[nation] || seen.has(id) || (free && !/^[a-h]$/.test(team)) || !/^[wlqsn]$/.test(out)) return { err: 'bad player' };
     seen.add(id);
-    players.push({ id, nation, side: free ? team : SIDE[nation], name: clean(name, 32) });
+    players.push({ id, nation, side: free ? team : SIDE[nation], name: clean(name, 32), out });
   }
   const pair = free ? [...new Set(players.map(p => p.side))].sort() : ['axis', 'allies'];
   if (pair.length !== 2) return { err: 'not two teams' };
-  if (!pair.includes(winner)) return { err: 'bad winner' };
+  if (!pair.includes(winner) || players.some(p => p.out === 'w' && p.side !== winner)) return { err: 'bad winner' };
   const one = players.filter(p => p.side === pair[0]), two = players.filter(p => p.side === pair[1]);
   if (!one.length || one.length !== two.length || one.length > 4) return { err: 'sides not equal' };
   if (!seen.has(reporter)) return { err: 'reporter not in the match' };
@@ -90,9 +95,16 @@ export async function report(req, env) {
   const recent = await env.DB.prepare('SELECT count(*) AS n FROM reports WHERE reporter = ?1 AND at > ?2').bind(r.reporter, now - 3600).first();
   if (recent.n >= REPORTS_PER_HOUR) return [429, 'too many reports'];
 
-  const fp = await sha256([r.mode, r.map, r.start, ...r.players.map(p => p.id + ':' + p.nation).sort()].join('|'));
+  const base = await sha256([r.mode, r.map, r.start, ...r.players.map(p => p.id + ':' + p.nation).sort()].join('|'));
+  const selfFp = id => sha256(base + ':self:' + id);
+  const self = r.players.every(p => p.out === 'n' || (p.out === 'q' && p.id === r.reporter)) && r.players.some(p => p.out === 'q');
+  const fp = self ? await selfFp(r.reporter) : base;
   const old = await env.DB.prepare('SELECT * FROM matches WHERE fp = ?1 ORDER BY id DESC LIMIT 1').bind(fp).first();
   if (old) return [200, await again(env, old, r, now)];
+  if (!self) for (const p of r.players) {
+    if (p.out !== 'q') continue;
+    if (await env.DB.prepare('SELECT id FROM matches WHERE fp = ?1').bind(await selfFp(p.id)).first()) { p.out = 'n'; p.paid = true; }
+  }
 
   // a new match: rate everyone on both tracks
   const ladder = ladderOf(r.size);
@@ -107,10 +119,19 @@ export async function report(req, env) {
   const after = { all: [], nat: [] };
   for (const k of ['all', 'nat']) {
     const before = t.map(x => drift(x[k], r.end));
-    const [a, b] = rate(ax.map(i => before[i]), al.map(i => before[i]), axisWon);
-    ax.forEach((i, j) => (after[k][i] = a[j]));
-    al.forEach((i, j) => (after[k][i] = b[j]));
-    after[k] = after[k].map((x, i) => ({ mu: t[i][k].mu + f * (x.mu - t[i][k].mu), sigma: x.sigma }));
+    const [aWin, bLose] = rate(ax.map(i => before[i]), al.map(i => before[i]), true);
+    const [aLose, bWin] = rate(ax.map(i => before[i]), al.map(i => before[i]), false);
+    const up = [], down = [];
+    ax.forEach((i, j) => { up[i] = aWin[j]; down[i] = aLose[j]; });
+    al.forEach((i, j) => { up[i] = bWin[j]; down[i] = bLose[j]; });
+    after[k] = r.players.map((p, i) => {
+      const mu = t[i][k].mu, move = x => mu + f * (x.mu - mu);
+      if (p.out === 'n') return { mu, sigma: t[i][k].sigma };
+      if (p.out === 'w') return { mu: move(up[i]), sigma: up[i].sigma };
+      if (p.out === 's') return { mu: mu + SMALL_LOSS * (move(down[i]) - mu), sigma: down[i].sigma };
+      if (p.out === 'q') return { mu: Math.min(move(down[i]), mu - QUIT_MU), sigma: down[i].sigma };
+      return { mu: move(down[i]), sigma: down[i].sigma };
+    });
   }
   // One batch is one transaction, and fp is unique: of two reports of a match at the same moment one gets in whole, the other is
   // turned back here and goes on as a second report. Apart, both were rated as new matches (97 and 98).
@@ -128,11 +149,12 @@ export async function report(req, env) {
     env.DB.prepare(`INSERT INTO reports (match_id, reporter, winner, at) VALUES (${matchId}, ?2, ?3, ?4)`).bind(fp, r.reporter, r.winner, now),
   ];
   r.players.forEach((p, i) => {
-    const won = p.side === r.winner ? 1 : 0;
+    if (p.paid || (self && p.id !== r.reporter)) return;
+    const won = p.out === 'w' ? 1 : p.out === 'n' ? 2 : 0;      // 2: this match changed nothing for this player
     st.push(env.DB.prepare(
       `INSERT INTO profiles (steam_id, name, updated) VALUES (?1, ?2, ?3) ON CONFLICT(steam_id) DO UPDATE SET name = ?2, updated = ?3`
     ).bind(p.id, p.name, now));
-    st.push(put(p.id, 'all', after.all[i], won), put(p.id, p.nation, after.nat[i], won));
+    if (won !== 2) st.push(put(p.id, 'all', after.all[i], won), put(p.id, p.nation, after.nat[i], won));
     st.push(env.DB.prepare(
       `INSERT INTO match_players (match_id, steam_id, name, nation, side, won, mu_a0, sg_a0, mu_a1, sg_a1, mu_n0, sg_n0, mu_n1, sg_n1)
        VALUES (${matchId}, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)`
@@ -168,6 +190,7 @@ async function again(env, m, r, now) {
      WHERE steam_id = ?1 AND ladder = ?2 AND nation = ?3`
   ).bind(pid, m.ladder, nation, mu1 - mu0, sg0 / sg1, won);
   for (const p of results) {
+    if (p.won === 2) continue;                  // nothing to take back
     st.push(back(p.steam_id, 'all', p.mu_a0, p.sg_a0, p.mu_a1, p.sg_a1, p.won));
     st.push(back(p.steam_id, p.nation, p.mu_n0, p.sg_n0, p.mu_n1, p.sg_n1, p.won));
   }

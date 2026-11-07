@@ -65,8 +65,10 @@ static const Watch WATCH[] = {
     {"stats_event2", 0xd13ba0, 7, {0x40, 0x55, 0x53, 0x41, 0x56, 0x41, 0x57}},  // the same for frontline, battle zones and the rest
     {"present",      0x4fc010, 6, {0x40, 0x53, 0x48, 0x83, 0xec, 0x20}},  // eRenderDevice present: swapchain [+0xa8]->Present
     {"game_result",  0x299100, 5, {0x48, 0x89, 0x5c, 0x24, 0x08}},  // opens eGUI_PageGameResult (Show's page is in a lambda: not seen there)
+    {"game_over",    0xd08aa0, 5, {0x48, 0x89, 0x5c, 0x24, 0x18}},  // eGame::GameOver(game, winner): the only way to state 3 at +0xd4
+    {"player_gone",  0xd09f70, 5, {0x48, 0x89, 0x5c, 0x24, 0x18}},  // "Reassigning units of player": (game, &player number), a player left the battle
 };
-enum { W_LOAD = 1, W_TICK = 2, W_SPAWN = 4, W_PAGE_SHOW = 5, W_PAGE_CLOSE = 6, W_STATS_EVENT = 7, W_STATS_EVENT2 = 8, W_PRESENT = 9, W_RESULT = 10 };
+enum { W_LOAD = 1, W_TICK = 2, W_EXIT = 3, W_SPAWN = 4, W_PAGE_SHOW = 5, W_PAGE_CLOSE = 6, W_STATS_EVENT = 7, W_STATS_EVENT2 = 8, W_PRESENT = 9, W_RESULT = 10, W_OVER = 11, W_GONE = 12 };
 #define NWATCH (sizeof(WATCH) / sizeof(WATCH[0]))
 
 Ctl g_ctl;
@@ -410,6 +412,7 @@ static int is_result_page(uintptr_t page) {
 
 static int g_ui_on;              // our panel draws into the game's frames
 
+int pvp_game_menu_lately(void);
 static void __cdecl watch_hit(uint32_t id, void *a1, void *a2) {
     g_watch_tid[id] = (LONG)GetCurrentThreadId();
     LONG n = InterlockedIncrement(&g_watch_count[id]);
@@ -422,9 +425,20 @@ static void __cdecl watch_hit(uint32_t id, void *a1, void *a2) {
         stats_event((uintptr_t)a2);
         return;
     }
-    if (id == W_RESULT) {                       // a match played to its end: its report may go (report.c)
+    if (id == W_RESULT) {                       // no proof of an end: it also opened for a host who closed his match (119, 2026-11-07)
         rc_log("the results screen opens, in a replay: %d", replay_core() != 0);
-        if (!replay_core()) report_finished();
+        return;
+    }
+    if (id == W_OVER) {                         // the game itself named a winner: the match's report may go (report.c)
+        int state = *(volatile int *)((uintptr_t)a1 + 0xd4);
+        rc_log("the game is over, state %d, in a replay: %d", state, replay_core() != 0);
+        if (state != 3 && !replay_core()) report_finished();
+        return;
+    }
+    if (id == W_GONE) {                         // who left before the end loses (report.c)
+        int number = *(volatile uint8_t *)a2;
+        rc_log("player %d left the battle, in a replay: %d", number, replay_core() != 0);
+        if (!replay_core()) report_gone(number);
         return;
     }
     if (id == W_PAGE_SHOW) {
@@ -446,6 +460,10 @@ static void __cdecl watch_hit(uint32_t id, void *a1, void *a2) {
             rc_log("results page closed");
         }
         return;
+    }
+    if (id == W_EXIT && !replay_core() && pvp_game_menu_lately()) {  // he chose to leave: for the host that closes the match (report.c)
+        rc_log("left the battle through the menu");
+        report_closed();
     }
     if (n > 2 && id == W_TICK) return;                              // the tick is too chatty to log every call
     rc_log("hit %s (%p, %p)", WATCH[id].name, a1, a2);

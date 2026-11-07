@@ -873,6 +873,7 @@ static const char *NEWS_RU[] = {
     "Компетитив: исправлен вылет сервера хоста в бою",
     "Рейтинг: игра идёт в зачёт, только если открылся экран итогов",
     "Рейтинг: в зачёт идут и игры со свободным выбором наций, не только Ось против Союзников",
+    "Рейтинг: новые правила. Вышел из боя: штраф. Хост закрыл бой: ему поражение, противникам победа",
 };
 static const char *NEWS_EN[] = {
     "Competitive: infantry answers orders much faster, groups turn together",
@@ -884,6 +885,7 @@ static const char *NEWS_EN[] = {
     "Competitive: fixed a crash of the host's server in battle",
     "Rating: a match counts only if its results screen opened",
     "Rating: matches with a free choice of nations count too, not only Axis against Allies",
+    "Rating: new rules. Left a battle: a penalty. The host closed it: he loses, the enemies win",
 };
 
 // which news the player has read: by their text, so a build with the same news stays quiet
@@ -1217,15 +1219,17 @@ static void tab_stats(const Pane &p, float top, float bottom) {
         if (!localtime_s(&lt, &t)) strftime(date, sizeof date, "%d.%m %H:%M", &lt);
         snprintf(what, sizeof what, "%s \xC2\xB7 %s", mode_name(f[3]), f[4]);
         snprintf(size, sizeof size, "%s\xC3\x97%s", f[5], f[5]);
-        bool won = atoi(f[7]) != 0, rated = !strcmp(f[9], "rated");
+        int res = atoi(f[7]);                   // 2: the match counted for others, not for this player
+        bool won = res == 1, rated = !strcmp(f[9], "rated");
+        const char *word = res == 2 ? TR("Ничья", "Draw") : won ? TR("Победа", "Win") : TR("Поражение", "Loss");
         int delta = atoi(f[8]);
-        if (rated) snprintf(result, sizeof result, "%s %+d", won ? TR("Победа", "Win") : TR("Поражение", "Loss"), delta);
-        else snprintf(result, sizeof result, TR("%s (спорный)", "%s (disputed)"), won ? TR("Победа", "Win") : TR("Поражение", "Loss"));
+        if (rated) snprintf(result, sizeof result, "%s %+d", word, delta);
+        else snprintf(result, sizeof result, TR("%s (спорный)", "%s (disputed)"), word);
         van_cell(hl, hc[0], yy, hc[1] - hc[0] - 6, c, date);
         van_cell(hl, hc[1], yy, hc[2] - hc[1] - 6, c, what);
         van_cell(hl, hc[2], yy, hc[3] - hc[2] - 6, c, size);
         van_cell(hl, hc[3], yy, hc[4] - hc[3] - 6, c, nation_name(f[6]));
-        van_cell(hl, hc[4], yy, hc[5] - hc[4] - 6, !rated ? VAN_TITLE : won ? VAN_WIN : VAN_WARN, result);
+        van_cell(hl, hc[4], yy, hc[5] - hc[4] - 6, !rated || res == 2 ? VAN_TITLE : won ? VAN_WIN : VAN_WARN, result);
         van_cell(hl, hc[5], yy, hc[6] - hc[5] - 6, c, f[10][0] ? f[10] : "-");
         van_cell(hl, hc[6], yy, hc[7] - hc[6] - 6, c, f[11]);
         if (hot && (f[10][0] || f[11][0])) ImGui::SetTooltip(TR("Союзники: %s\nПротивники: %s", "Allies: %s\nOpponents: %s"), f[10][0] ? f[10] : "-", f[11]);
@@ -1804,12 +1808,14 @@ static void card_window() {
         map_title(f[4], place, sizeof place);
         snprintf(what, sizeof what, "%s \xC2\xB7 %s", mode_name(f[3]), place);
         snprintf(fight, sizeof fight, "%s\xC3\x97%s", f[5], f[5]);
-        bool won = atoi(f[7]) != 0, rated = !strcmp(f[9], "rated");
-        if (rated) snprintf(result, sizeof result, "%s %+d", won ? TR("Победа", "Win") : TR("Поражение", "Loss"), atoi(f[8]));
-        else snprintf(result, sizeof result, "%s", won ? TR("Победа", "Win") : TR("Поражение", "Loss"));
+        int res = atoi(f[7]);                   // 2: the match counted for others, not for this player
+        bool won = res == 1, rated = !strcmp(f[9], "rated");
+        const char *word = res == 2 ? TR("Ничья", "Draw") : won ? TR("Победа", "Win") : TR("Поражение", "Loss");
+        if (rated) snprintf(result, sizeof result, "%s %+d", word, atoi(f[8]));
+        else snprintf(result, sizeof result, "%s", word);
         const char *cell[5] = {date, what, fight, nation_name(f[6]), result};
         for (int i = 0; i < 5; i++) {
-            ImU32 col = i == 4 ? (!rated ? VAN_TITLE : won ? VAN_WIN : VAN_WARN) : over ? VAN_HOVER : VAN_TEXT;
+            ImU32 col = i == 4 ? (!rated || res == 2 ? VAN_TITLE : won ? VAN_WIN : VAN_WARN) : over ? VAN_HOVER : VAN_TEXT;
             float x = at.x + COL[i] * lw + 6 * s;
             van_cell(rl, x, at.y + (row - lh) * .5f, (COL[i + 1] - COL[i]) * lw - 10 * s, col, cell[i]);
         }

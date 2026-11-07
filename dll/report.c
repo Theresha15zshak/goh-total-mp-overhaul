@@ -130,10 +130,22 @@ static char winner_team(const char *ss) {
     return team;
 }
 
-typedef struct { char type[16], name[100], team[4], army[8], id[24]; } Member;
+typedef struct { char type[16], name[100], team[4], army[8], id[24], host[12]; int left; } Member;
+static int numbers_to_field(const char *ss, const char *key, char out[][64], int max);
 
-// the report body (server/src/matches.js "v2") for a match that counts; 0 with why when it does not
-static int make_report(const char *ss, const char *me, const char *key, char *body, size_t n, long long *end_time, const char **why) {
+// the report body (server/src/matches.js "v3") for a match that counts; 0 with why when it does not
+// over: the game itself ended the match. gone: a bit per player number that left the battle (the host is never one: when he goes the
+// battle is closed under everyone). early: someone left in the first minutes, nothing counts. closed: we left through the menu.
+// cut: our own connection was gone when they "left". self_early: we left through the menu in the first minutes.
+// Each player gets an outcome for the server (matches.js): w win, l loss, q loss for leaving, s small loss, n nothing.
+//   the game ended it: winners w, who left q. Who stayed on the losing side: n beside a teammate who left, s if the winners were the
+//     team short of a man (they lost to fewer), else l.
+//   a whole team left: the team that stayed wins.
+//   the host closed it or lost his connection, nobody had left: he gets q, his team s, the enemies win.
+//   the host closed it after someone left: who left gets q, everyone else n.
+//   we left through the menu: q for us and n for all. Only that, so a client can punish nobody else; the server keeps it apart.
+// Anyone else sees a server gone, the same as a crash, and reports nothing.
+static int make_report(const char *ss, const char *me, const char *key, char *body, size_t n, long long *end_time, const char **why, int over, uint32_t gone, int early, int closed, int cut, int self_early) {
     const char *stop = ss + strlen(ss);
     char type[32], sel[32], map[160], start[24], end[24], bots[8] = "0";
     *end_time = 0;
@@ -171,6 +183,7 @@ static int make_report(const char *ss, const char *me, const char *key, char *bo
         if (strcmp(x->type, "player")) { *why = "not only players"; return 0; }
         if (!field(p, next, "name", x->name, sizeof x->name) || !field(p, next, "team", x->team, sizeof x->team) ||
             !field(p, next, "army", x->army, sizeof x->army) || !field(p, next, "steamId", x->id, sizeof x->id)) { *why = "member incomplete"; return 0; }
+        field(p, next, "hostId", x->host, sizeof x->host);
         for (char *c = x->name; *c; c++) if (*c == '\t' || *c == '\n' || *c == '\r') *c = ' ';
         count++;
     }
@@ -194,14 +207,59 @@ static int make_report(const char *ss, const char *me, const char *key, char *bo
     }
     if (!mine) { *why = "we were not in it"; return 0; }
     if (!axis || axis != allies || axis > 4) { *why = "sides not equal"; return 0; }
-    char w = winner_team(ss);
+    static char ids[32][64];
+    char master[12] = "";
+    memset(ids, 0, sizeof ids);
+    field(ss, stop, "master", master, sizeof master);
+    if (gone) numbers_to_field(ss, "steamId", ids, 32);
+    for (int i = 0; i < count; i++)
+        for (int k = 0; k < 32; k++)
+            if (gone >> k & 1 && !strcmp(ids[k], m[i].id) && strcmp(m[i].host, master)) m[i].left = 1;
+    if (early) { *why = "someone left in the first minutes"; return 0; }
+    char w = over ? winner_team(ss) : 0, ours = 0;
+    int host_closed = 0, voided = 0, self_left = 0, i_host = 0;
+    for (int i = 0; i < count; i++)
+        if (!strcmp(m[i].id, me)) { ours = m[i].team[0]; i_host = !strcmp(m[i].host, master); }
+    if (!over) {
+        if (cut && i_host) for (int i = 0; i < count; i++) m[i].left = 0;   // nobody left: we fell off
+        char stayed = 0;
+        int two = 0, anyone = 0;
+        for (int i = 0; i < count; i++) {
+            anyone |= m[i].left;
+            if (!m[i].left) { if (stayed && stayed != m[i].team[0]) two = 1; stayed = m[i].team[0]; }
+        }
+        if (!two) w = stayed;
+        else if (i_host && (closed || cut)) { if (anyone) voided = 1; else host_closed = 1; }
+        else if (closed && !i_host) {
+            if (self_early) { *why = "we left in the first minutes"; return 0; }
+            self_left = 1;
+        }
+        else { *why = "no game over: it crashed or was closed early"; return 0; }
+        if (two) for (int i = 0; i < count; i++) if (m[i].team[0] != ours) w = m[i].team[0];
+        if (!w || w < 'a' || w > 'h') { *why = "no winner"; return 0; }
+    }
+    int left_won = 0, left_lost = 0;
+    for (int i = 0; i < count; i++) if (m[i].left) { if (m[i].team[0] == w) left_won = 1; else left_lost = 1; }
+    char outs[20] = "";
+    for (int i = 0; i < count; i++) {
+        int mine_won = m[i].team[0] == w, is_me = !strcmp(m[i].id, me);
+        outs[i] = self_left ? (is_me ? 'q' : 'n')
+                : m[i].left ? 'q'
+                : voided ? 'n'
+                : host_closed && !strcmp(m[i].host, master) ? 'q'
+                : mine_won ? 'w'
+                : host_closed ? 's'
+                : left_lost ? 'n'
+                : left_won ? 's' : 'l';
+    }
     char letter[2] = {w, 0};
     const char *won = !w ? "" : free_pick ? letter : side_of[w - 'a'];
     if (free_pick ? w != first && w != second : strcmp(won, "axis") && strcmp(won, "allies")) { *why = "no winner"; return 0; }
-    int o = snprintf(body, n, "%s\n%s\nv2\n%s\n%s\n%s\n%s\n%s\n%s\n", me, key, type, free_pick ? "teams" : "axis_allies", map, start, end, won);
+    int o = snprintf(body, n, "%s\n%s\nv3\n%s\n%s\n%s\n%s\n%s\n%s\n", me, key, type, free_pick ? "teams" : "axis_allies", map, start, end, won);
     for (int i = 0; i < count && o > 0 && (size_t)o < n; i++)
-        o += snprintf(body + o, n - o, "%s\t%s\t%s\t%s\n", m[i].id, m[i].army, m[i].name, m[i].team);
+        o += snprintf(body + o, n - o, "%s\t%s\t%s\t%s\t%c\n", m[i].id, m[i].army, m[i].name, m[i].team, outs[i]);
     if (o <= 0 || (size_t)o >= n) { *why = "too long"; return 0; }
+    rc_log("report: %s won, outcomes %s", won, outs);
     return 1;
 }
 
@@ -212,7 +270,7 @@ static int is_autoreplay(const wchar_t *n);
 // battleInfoTotal has a block per member keyed by its hostId; the block starts with length-prefixed team,
 // army and hostId, a 0, then the player number (player#N, what the charts go by). The card's members give
 // hostId -> name.
-static int numbers_to_names(const char *ss, char names[][64], int max) {
+static int numbers_to_field(const char *ss, const char *key, char names[][64], int max) {
     const char *stop = ss + strlen(ss), *bi = strstr(ss, "{battleInfoTotal"), *mem = strstr(ss, "{members {");
     const char *teams = mem ? strstr(mem, "{teams {") : NULL;
     if (!bi || !mem || !teams) return 0;
@@ -241,10 +299,11 @@ static int numbers_to_names(const char *ss, char names[][64], int max) {
         if (!m || m > teams) continue;
         const char *next = strstr(m + 1, "{type ");
         if (!next || next > teams) next = teams;
-        if (field(m, next, "name", names[number], 64)) found++;
+        if (field(m, next, key, names[number], 64)) found++;
     }
     return found > 0;
 }
+static int numbers_to_names(const char *ss, char names[][64], int max) { return numbers_to_field(ss, "name", names, max); }
 
 int replay_player_names(const char *rel, char names[][64], int max) {
     const char *me = online_my_id();
@@ -387,30 +446,67 @@ static long long last_end(void) {
     return now - BACKLOG_S;      // the first start: the last two weeks' matches go in too
 }
 
-// For now only a match that reached its results screen goes to the server. The card alone cannot tell: it has a winner after a match
-// closed early too, and when the host's server fell (2026-11-06) each player's card said his own side lost. The moments the screen
-// opened are kept in goh_online.ini, so a report held over to the next start still finds its own.
+// Only a match the game itself ended goes to the server (GameOver, watched in goh_replay.c). The card alone cannot tell: it has a winner
+// after a match closed early too, and when the host's server fell (2026-11-06) each player's card said his own side lost. The results
+// screen cannot tell either: match 119 reached the server with it from the host who closed the match. The moments of GameOver are kept
+// in goh_online.ini, so a report held over to the next start still finds its own.
 #define FINISHED_KEEP 8
 #define FINISHED_AFTER_S 180        // the card's end is when we left; the clock of a match may lag ours a little
-void report_finished(void) {
+static void keep_time(const char *key) {
     char v[160], out[160];
-    GetPrivateProfileStringA("reports", "finished", "", v, sizeof v, g_ini);
+    GetPrivateProfileStringA("reports", key, "", v, sizeof v, g_ini);
     int n = 0;
     char *times[FINISHED_KEEP + 1], *next = NULL;
     for (char *t = strtok_s(v, " ", &next); t && n < FINISHED_KEEP + 1; t = strtok_s(NULL, " ", &next)) times[n++] = t;
     int from = n >= FINISHED_KEEP ? n - FINISHED_KEEP + 1 : 0, o = 0;
     for (int i = from; i < n; i++) o += snprintf(out + o, sizeof out - o, "%s ", times[i]);
     snprintf(out + o, sizeof out - o, "%lld", (long long)time(NULL));
-    WritePrivateProfileStringA("reports", "finished", out, g_ini);
+    WritePrivateProfileStringA("reports", key, out, g_ini);
 }
-static int match_finished(long long start, long long end) {
+void report_finished(void) { keep_time("finished"); }
+void report_closed(void) { keep_time("closed"); }
+void report_cut(void) { keep_time("cut"); }
+static long long match_kept(const char *key, long long start, long long end) {     // the moment, 0 none
     char v[160], *next = NULL;
-    GetPrivateProfileStringA("reports", "finished", "", v, sizeof v, g_ini);
+    GetPrivateProfileStringA("reports", key, "", v, sizeof v, g_ini);
     for (char *t = strtok_s(v, " ", &next); t; t = strtok_s(NULL, " ", &next)) {
         long long at = _atoi64(t);
-        if (at >= start && at <= end + FINISHED_AFTER_S) return 1;
+        if (at >= start && at <= end + FINISHED_AFTER_S) return at;
     }
     return 0;
+}
+
+// who left which battle, kept the same way: "time:number"
+#define GONE_KEEP 12
+#define GONE_AFTER_S 30
+volatile long g_net_check;
+void report_gone(int number) {
+    char v[320], out[320];
+    g_net_check = 1;
+    GetPrivateProfileStringA("reports", "gone", "", v, sizeof v, g_ini);
+    int n = 0, o = 0;
+    char *items[GONE_KEEP + 1], *next = NULL;
+    for (char *t = strtok_s(v, " ", &next); t && n < GONE_KEEP + 1; t = strtok_s(NULL, " ", &next)) items[n++] = t;
+    for (int i = n >= GONE_KEEP ? n - GONE_KEEP + 1 : 0; i < n; i++) o += snprintf(out + o, sizeof out - o, "%s ", items[i]);
+    snprintf(out + o, sizeof out - o, "%lld:%d", (long long)time(NULL), number);
+    WritePrivateProfileStringA("reports", "gone", out, g_ini);
+}
+#define EARLY_S 120             // leaving this soon costs nobody anything, and the match does not count
+static uint32_t match_gone(long long start, long long end, long long over_at, int *early) {
+    char v[320], *next = NULL;
+    uint32_t gone = 0;
+    GetPrivateProfileStringA("reports", "gone", "", v, sizeof v, g_ini);
+    for (char *t = strtok_s(v, " ", &next); t; t = strtok_s(NULL, " ", &next)) {
+        long long at = _atoi64(t);
+        const char *c = strchr(t, ':');
+        int number = c ? atoi(c + 1) : -1;
+        if (over_at && at >= over_at) continue;             // the battle was over: going home is no leaving
+        if (at >= start && at <= end + GONE_AFTER_S && number >= 0 && number < 32) {
+            gone |= 1u << number;
+            if (at - start < EARLY_S) *early = 1;
+        }
+    }
+    return gone;
 }
 
 void report_done(long long end_time) {
@@ -454,11 +550,15 @@ int report_next(const char *me, const char *key, char *body, size_t n, long long
     char *ss = read_ss(best);
     if (!ss) return 0;
     const char *why = "";
-    int ok = make_report(ss, me, key, body, n, end_time, &why);
     char start[24] = "0";
     field(ss, ss + strlen(ss), "gameStartTime", start, sizeof start);
+    long long from = _atoi64(start);
+    int early = 0;
+    long long over_at = match_kept("finished", from, best_end), closed_at = match_kept("closed", from, best_end);
+    uint32_t gone = match_gone(from, best_end, over_at, &early);
+    int ok = make_report(ss, me, key, body, n, end_time, &why, over_at != 0, gone, early, closed_at != 0,
+                         match_kept("cut", from, best_end) != 0, closed_at && closed_at - from < EARLY_S);
     free(ss);
-    if (ok && !match_finished(_atoi64(start), best_end)) { ok = 0; why = "no results screen: it crashed or was closed early"; }
     if (!ok) {
         rc_log("report: match ending %lld not rated here (%s)", best_end, why);
         report_done(best_end);

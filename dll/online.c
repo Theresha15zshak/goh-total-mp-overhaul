@@ -562,6 +562,12 @@ static DWORD WINAPI online_thread(LPVOID unused) {
     long wanted = 0;
     for (;;) {
         DWORD now = GetTickCount();
+        if (InterlockedExchange(&g_net_check, 0)) {         // a host without internet sees everyone leave
+            int alive = 0;
+            for (int i = 0; i < 2 && !alive; i++) alive = http(s, L"GET", L"/versions", NULL, buf) == 200;
+            rc_log("a player left, our connection: %s", alive ? "fine" : "gone");
+            if (!alive) report_cut();
+        }
         if (g_online_consent == 1 && (InterlockedExchange(&g_beat_now, 0) || !last_beat || now - last_beat >= BEAT_MS)) {
             char body[256];
             snprintf(body, sizeof body, "%s\n%s\n%s\n%s", g_id, g_name, g_balance_tag, g_key);

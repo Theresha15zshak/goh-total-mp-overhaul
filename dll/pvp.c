@@ -433,6 +433,7 @@ static const uint32_t VT_CHANNEL_VIEWS[] = {0x1042fc0, 0x1042c58, 0x1041bd0, 0x1
 static void *volatile g_panel;               // the last look at the screen saw it
 #define VT_GAME_MENU 0x1013f48               // eDialogBlur: only the ESC menu (page_game_menu) and popups have one
 static volatile int g_game_menu;             // the last look at the screen saw it
+static volatile DWORD g_game_menu_at;
 
 // ---- the lobby's lines taller: the listbox's own line height -------------------------------------------------
 // What did not work (2026-11-02): resizing and moving the lines ourselves (the listbox put them back: they jumped),
@@ -529,6 +530,7 @@ long pvp_screen_seq(void) { return g_screen_seq; }
 static void screen_publish(const ScreenFind *f) {
     if (f->menu != g_game_menu) rc_log("pvp: the ESC menu %s", f->menu ? "on screen" : "gone");
     g_game_menu = f->menu;
+    if (f->menu) g_game_menu_at = GetTickCount() | 1;
     if (f->panel != g_panel) rc_log("pvp: the game's chat panel %s", f->panel ? "on screen" : "gone");
     g_panel = f->panel;
     memcpy(g_screen_named, f->named, sizeof g_screen_named);
@@ -543,6 +545,7 @@ static void screen_publish(const ScreenFind *f) {
 }
 
 int pvp_game_menu(void) { return g_game_menu; }
+int pvp_game_menu_lately(void) { return g_game_menu_at && GetTickCount() - g_game_menu_at < 5000; }   // left through it, not thrown out
 int pvp_rect(float *x, float *y, float *w, float *h, float *head_h, float *root_w, float *root_h) {
     AcquireSRWLockShared(&g_places_lock);
     int ok = g_places.pvp_ok;

@@ -190,6 +190,10 @@ uint64_t steam_lobby_now(void);             // 0 = not in one (that we saw)
 void report_init(const char *dir);
 int report_next(const char *me, const char *key, char *body, size_t n, long long *end_time);   // 1 = body to send
 void report_done(long long end_time);       // that match is dealt with (taken, or never will be)
+void report_gone(int number);               // a player left the battle
+void report_closed(void);                   // we left it through the menu
+void report_cut(void);                      // our own connection was gone when a player "left"
+extern volatile long g_net_check;           // a player left: online.c looks whether it is our connection
 void report_finished(void);                 // the results screen opened: a match played to its end
 // player number (player#N) -> name, from a replay's card: rel is the game's profile-relative path
 // ("//replays/x.rep"), "" for the newest replay written in the last 10 minutes; 1 when found
