@@ -157,8 +157,11 @@ static int team_army(const char *ss, const char *team, char *out, size_t n) {
 //   the host closed it after someone left: who left gets q, everyone else n.
 //   we left through the menu: q for us and n for all. Only that, so a client can punish nobody else; the server keeps it apart.
 //   someone was kicked: no penalty for him and nothing for anyone, or a host could kick his way to a win. Who left still gets q.
+//   host_left: we are a guest, the battle ended under us and the game gave no reason. A host who closes the match through his
+//     menu does exactly that, while a dead server or a lost connection comes with one (tested 2026-11-08). So a host without the
+//     mod who closes a match is caught too: as above, he gets q, his team s, the enemies win.
 // Anyone else sees a server gone, the same as a crash, and reports nothing.
-static int make_report(const char *ss, const char *me, const char *key, char *body, size_t n, long long *end_time, const char **why, int over, uint32_t gone, int early, int closed, int cut, int self_early, const int *kicked, int kicks) {
+static int make_report(const char *ss, const char *me, const char *key, char *body, size_t n, long long *end_time, const char **why, int over, uint32_t gone, int early, int closed, int cut, int self_early, const int *kicked, int kicks, int host_left) {
     const char *stop = ss + strlen(ss);
     char type[32], sel[32], map[160], start[24], end[24], bots[8] = "0";
     *end_time = 0;
@@ -232,8 +235,11 @@ static int make_report(const char *ss, const char *me, const char *key, char *bo
     if (early) { *why = "someone left in the first minutes"; return 0; }
     char w = over ? winner_team(ss) : 0, ours = 0;
     int host_closed = 0, voided = 0, self_left = 0, i_host = 0;
-    for (int i = 0; i < count; i++)
+    char host_team = 0;
+    for (int i = 0; i < count; i++) {
         if (!strcmp(m[i].id, me)) { ours = m[i].team[0]; i_host = !strcmp(m[i].host, master); }
+        if (!strcmp(m[i].host, master)) host_team = m[i].team[0];
+    }
     int kick = 0, someone_left = 0;
     for (int i = 0; i < count; i++) {
         for (int k = 0; k < kicks; k++) if (kicked[k] == atoi(m[i].host)) { m[i].left = 0; m[i].kicked = 1; kick = 1; }
@@ -254,12 +260,14 @@ static int make_report(const char *ss, const char *me, const char *key, char *bo
         }
         if (!two) w = stayed;
         else if (i_host && (closed || cut)) { if (anyone) voided = 1; else host_closed = 1; }
+        else if (host_left && !i_host && host_team && !closed) { if (anyone) voided = 1; else host_closed = 1; }
         else if (closed && !i_host) {
             if (self_early) { *why = "we left in the first minutes"; return 0; }
             self_left = 1;
         }
         else { *why = "no game over: it crashed or was closed early"; return 0; }
-        if (two) for (int i = 0; i < count; i++) if (m[i].team[0] != ours) w = m[i].team[0];
+        char against = (host_closed || voided) && host_team ? host_team : ours;    // the side that loses it
+        if (two) for (int i = 0; i < count; i++) if (m[i].team[0] != against) w = m[i].team[0];
         if (!w || w < 'a' || w > 'h') { *why = "no winner"; return 0; }
     }
     int left_won = 0, left_lost = 0;
@@ -490,12 +498,25 @@ static void keep_time(const char *key) {
 void report_finished(void) { keep_time("finished"); }
 void report_closed(void) { keep_time("closed"); }
 void report_cut(void) { keep_time("cut"); }
+void report_thrown(void) { keep_time("thrown"); }
+void report_dropped(void) { keep_time("dropped"); }
 static long long match_kept(const char *key, long long start, long long end) {     // the moment, 0 none
     char v[160], *next = NULL;
     GetPrivateProfileStringA("reports", key, "", v, sizeof v, g_ini);
     for (char *t = strtok_s(v, " ", &next); t; t = strtok_s(NULL, " ", &next)) {
         long long at = _atoi64(t);
         if (at >= start && at <= end + FINISHED_AFTER_S) return at;
+    }
+    return 0;
+}
+
+// a kept moment within [from, to], 0 none
+static long long kept_between(const char *key, long long from, long long to) {
+    char v[160], *next = NULL;
+    GetPrivateProfileStringA("reports", key, "", v, sizeof v, g_ini);
+    for (char *t = strtok_s(v, " ", &next); t; t = strtok_s(NULL, " ", &next)) {
+        long long at = _atoi64(t);
+        if (at >= from && at <= to) return at;
     }
     return 0;
 }
@@ -593,8 +614,10 @@ int report_next(const char *me, const char *key, char *body, size_t n, long long
     long long over_at = match_kept("finished", from, best_end), closed_at = match_kept("closed", from, best_end);
     uint32_t gone = match_gone(from, best_end, over_at, &early);
     int kicked[8], kicks = match_kicked(from, best_end, kicked, 8);
+    long long thrown_at = kept_between("thrown", from, best_end + GONE_AFTER_S);
+    int host_left = thrown_at && !kept_between("dropped", thrown_at - 5, thrown_at + 60);
     int ok = make_report(ss, me, key, body, n, end_time, &why, over_at != 0, gone, early, closed_at != 0,
-                         match_kept("cut", from, best_end) != 0, closed_at && closed_at - from < EARLY_S, kicked, kicks);
+                         match_kept("cut", from, best_end) != 0, closed_at && closed_at - from < EARLY_S, kicked, kicks, host_left);
     free(ss);
     if (!ok) {
         rc_log("report: match ending %lld not rated here (%s)", best_end, why);

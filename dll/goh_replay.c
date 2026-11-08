@@ -68,8 +68,9 @@ static const Watch WATCH[] = {
     {"game_over",    0xd08aa0, 5, {0x48, 0x89, 0x5c, 0x24, 0x18}},  // eGame::GameOver(game, winner): the only way to state 3 at +0xd4
     {"user_delete",  0xc74960, 5, {0x48, 0x89, 0x5c, 0x24, 0x08}},  // "on user delete": (client, msg), msg+8 the reason (names at c5ef90), msg+0x10 the user
     {"player_gone",  0xd09f70, 5, {0x48, 0x89, 0x5c, 0x24, 0x18}},  // "Reassigning units of player": (game, &player number), a player left the battle
+    {"leave_reason", 0xca1dc0, 7, {0x48, 0x83, 0xec, 0x28, 0x83, 0xc1, 0xfb}},  // the text of "why you are out" (reason in rcx, 5..11)
 };
-enum { W_LOAD = 1, W_TICK = 2, W_EXIT = 3, W_SPAWN = 4, W_PAGE_SHOW = 5, W_PAGE_CLOSE = 6, W_STATS_EVENT = 7, W_STATS_EVENT2 = 8, W_PRESENT = 9, W_RESULT = 10, W_OVER = 11, W_DELETE = 12, W_GONE = 13 };
+enum { W_LOAD = 1, W_TICK = 2, W_EXIT = 3, W_SPAWN = 4, W_PAGE_SHOW = 5, W_PAGE_CLOSE = 6, W_STATS_EVENT = 7, W_STATS_EVENT2 = 8, W_PRESENT = 9, W_RESULT = 10, W_OVER = 11, W_DELETE = 12, W_GONE = 13, W_REASON = 14 };
 #define NWATCH (sizeof(WATCH) / sizeof(WATCH[0]))
 
 Ctl g_ctl;
@@ -471,6 +472,16 @@ static void __cdecl watch_hit(uint32_t id, void *a1, void *a2) {
     if (id == W_EXIT && !replay_core() && pvp_game_menu_lately()) {  // he chose to leave: for the host that closes the match (report.c)
         rc_log("left the battle through the menu");
         report_closed();
+    } else if (id == W_EXIT && !replay_core()) {    // taken out of the battle: a host who closed it, or a lost server (W_REASON)
+        rc_log("taken out of the battle");
+        report_thrown();
+    }
+    if (id == W_REASON) {
+        // a guest put out by a dead server is told why (2026-11-08, host's game killed: 9); a host who closes the match through
+        // his menu sends nothing of the kind: the guest is just out, and that tells the two apart
+        rc_log("the game says why we are out: %d", (int)(intptr_t)a1);
+        if (!replay_core()) report_dropped();
+        return;
     }
     if (n > 2 && id == W_TICK) return;                              // the tick is too chatty to log every call
     rc_log("hit %s (%p, %p)", WATCH[id].name, a1, a2);
