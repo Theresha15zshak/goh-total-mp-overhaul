@@ -876,6 +876,7 @@ static const char *NEWS_RU[] = {
     "Рейтинг: новые правила. Вышел из боя: штраф. Хост закрыл бой: ему поражение, противникам победа",
     "Рейтинг: кикнутый из боя не получает штраф, такой бой не считается",
     "Рейтинг: исправлен учёт игр, где хост задаёт нацию каждой команде",
+    "Моя статистика: вся история боёв по страницам, по 15 боёв",
 };
 static const char *NEWS_EN[] = {
     "Competitive: infantry answers orders much faster, groups turn together",
@@ -890,6 +891,7 @@ static const char *NEWS_EN[] = {
     "Rating: new rules. Left a battle: a penalty. The host closed it: he loses, the enemies win",
     "Rating: a player kicked from a battle takes no penalty, and the battle does not count",
     "Rating: fixed matches where the host sets a nation for each team",
+    "My stats: the whole match history in pages of 15",
 };
 
 // which news the player has read: by their text, so a build with the same news stays quiet
@@ -1141,7 +1143,15 @@ static void tab_online(const Pane &p, float top, float bottom) {
 
 static void tab_stats(const Pane &p, float top, float bottom) {
     static Doc d;
+    static int page = 1;                        // of the history, 15 matches each
+    online_doc_page(DOC_PLAYER, page);
     doc_get(d, DOC_PLAYER);
+    int pages = 1;
+    for (int k = 0; k < d.n; k++)
+        if (d.nf[k] >= 3 && !strcmp(d.f[k][0], "H")) {
+            pages = atoi(d.f[k][2]) > 0 ? atoi(d.f[k][2]) : 1;
+            if (page > pages) page = pages;     // the history got shorter (a match taken out)
+        }
     ImDrawList *dl = p.dl;
     float x0 = p.p0.x + 0.03f * p.size.x, y = top + (p.row - p.lh) * 0.5f;
     if (g_steam_verified != 1) {            // only for players signed in with Steam: the stats are theirs then
@@ -1201,8 +1211,9 @@ static void tab_stats(const Pane &p, float top, float bottom) {
     for (int i = 0; i < 7; i++) hc[i] = p.p0.x + HC[i] * p.size.x;
     hc[7] = p.p0.x + 0.99f * p.size.x;
     for (int i = 0; i < 7; i++) van_text(dl, hc[i], hy, VAN_TITLE, HT[i]);
+    float pager = pages > 1 ? p.row * 1.2f : 0;  // the page numbers under the history
     ImGui::SetCursorScreenPos(ImVec2(p.p0.x, hy + p.lh * 1.4f));
-    ImGui::BeginChild("##history", ImVec2(p.size.x, bottom - hy - p.lh * 1.4f), ImGuiChildFlags_None, ImGuiWindowFlags_NoBackground);
+    ImGui::BeginChild("##history", ImVec2(p.size.x, bottom - hy - p.lh * 1.4f - pager), ImGuiChildFlags_None, ImGuiWindowFlags_NoBackground);
     ImGui::SetWindowFontScale(p.sy);
     ImDrawList *hl = ImGui::GetWindowDrawList();
     ImVec2 o = ImGui::GetCursorScreenPos();
@@ -1241,11 +1252,38 @@ static void tab_stats(const Pane &p, float top, float bottom) {
     }
     if (!shown)
         van_text(hl, o.x + 0.03f * p.size.x, o.y + p.lh * 0.5f, VAN_TITLE,
-                 TR("Рейтинговых игр пока нет. Засчитываются: Ось против Союзников, «Зоны боевых действий» или «Превосходство», "
-                     "равные команды, от 3 минут.",
-                     "No rated games yet. Rated: Axis vs Allies, \"Battle Zones\" or \"Domination\", even teams, 3 minutes or longer."));
+                 TR("Рейтинговых игр пока нет. Засчитываются: «Зоны боевых действий» или «Превосходство», "
+                     "равные команды без ботов, от 2 минут.",
+                     "No rated games yet. Rated: \"Battle Zones\" or \"Domination\", even teams without bots, 2 minutes or longer."));
     else ImGui::Dummy(ImVec2(1, 0));
     ImGui::EndChild();
+    if (pages < 2) return;
+    // < 1 ... 4 5 [6] 7 8 ... 12 >: the first, the last, two either side of this one
+    int list[16], n = 0;
+    for (int i = 1; i <= pages && n < 14; i++)
+        if (i == 1 || i == pages || (i >= page - 2 && i <= page + 2)) {
+            if (n && i - list[n - 1] > 1) list[n++] = 0;        // 0: the dots
+            list[n++] = i;
+        }
+    char item[18][16];
+    int target[18], m = 0;
+    snprintf(item[m], 16, "<"); target[m++] = page > 1 ? page - 1 : 0;
+    for (int i = 0; i < n; i++) { if (list[i]) snprintf(item[m], 16, "%d", list[i]); else snprintf(item[m], 16, "..."); target[m++] = list[i] == page ? 0 : list[i]; }
+    snprintf(item[m], 16, ">"); target[m++] = page < pages ? page + 1 : 0;
+    float gap = p.lh * 0.9f, w = 0, iw[18];
+    for (int i = 0; i < m; i++) { iw[i] = ImGui::CalcTextSize(item[i]).x; w += iw[i] + (i ? gap : 0); }
+    float x = p.p0.x + (p.size.x - w) * 0.5f, py = bottom - pager + (pager - p.lh) * 0.5f;
+    for (int i = 0; i < m; i++) {
+        bool cur = item[i][0] != '<' && item[i][0] != '>' && item[i][0] != '.' && atoi(item[i]) == page;
+        ImGui::PushID(1000 + i);
+        ImGui::SetCursorScreenPos(ImVec2(x - gap * 0.3f, py));
+        bool click = ImGui::InvisibleButton("##page", ImVec2(iw[i] + gap * 0.6f, p.lh)) && target[i];
+        bool hot = ImGui::IsItemHovered() && target[i];
+        van_text(p.dl, x, py, cur ? ACCENT : hot ? VAN_HOVER : target[i] ? VAN_TEXT : VAN_TITLE, item[i]);
+        if (click) page = target[i];
+        ImGui::PopID();
+        x += iw[i] + gap;
+    }
 }
 
 // ---- Steam avatars (32x32) by SteamID, through the game's own steam_api64.dll ----------------------------------

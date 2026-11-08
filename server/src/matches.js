@@ -28,7 +28,7 @@ const STEAM_ID = /^7656119\d{10}$/;
 const KEY = /^[0-9a-f]{64}$/;
 const MODES = new Set(['battle_zones', 'ammunition']);
 const SIDE = { ger: 'axis', fin: 'axis', eng: 'allies', usa: 'allies', rus: 'allies' };
-const MIN_DURATION_S = 120, MAX_AGE_S = 14 * 86400, REPORTS_PER_HOUR = 30, HISTORY = 30;
+const MIN_DURATION_S = 120, MAX_AGE_S = 14 * 86400, REPORTS_PER_HOUR = 30, HISTORY = 30, PAGE = 15;
 // Balance tags of the builds we take reports from. An older build also sends matches its host closed early (116, 2026-11-07, from F919).
 // The tag comes with the heartbeat; a release with a new tag goes in here.
 const REPORT_TAGS = new Set(['4D2C']);
@@ -215,11 +215,21 @@ export async function player(url, env) {
   if (!STEAM_ID.test(id)) return null;
   const prof = await env.DB.prepare('SELECT name FROM profiles WHERE steam_id = ?1').bind(id).first();
   const { results: rs } = await env.DB.prepare('SELECT ladder, nation, mu, games, wins FROM ratings WHERE steam_id = ?1 AND games > 0').bind(id).all();
+  // ?page=N (from 1): PAGE matches of the history and an "H page pages" line; without it the newest HISTORY, as older clients expect
+  const paged = url.searchParams.has('page'), size = paged ? PAGE : HISTORY;
+  const page = paged ? Math.min(Math.max(parseInt(url.searchParams.get('page'), 10) || 1, 1), 100000) : 1;
   const { results: ms } = await env.DB.prepare(
     `SELECT m.id, m.ended_at, m.mode, m.map, m.size, m.status, mp.nation, mp.side, mp.won, mp.mu_a0, mp.mu_a1
-     FROM match_players mp JOIN matches m ON m.id = mp.match_id WHERE mp.steam_id = ?1 AND m.status != 'removed' ORDER BY m.id DESC LIMIT ${HISTORY}`
+     FROM match_players mp JOIN matches m ON m.id = mp.match_id WHERE mp.steam_id = ?1 AND m.status != 'removed' ORDER BY m.id DESC
+     LIMIT ${size} OFFSET ${(page - 1) * size}`
   ).bind(id).all();
   let out = tsv('P', prof ? prof.name : '');
+  if (paged) {
+    const c = await env.DB.prepare(
+      "SELECT count(*) AS n FROM match_players mp JOIN matches m ON m.id = mp.match_id WHERE mp.steam_id = ?1 AND m.status != 'removed'"
+    ).bind(id).first();
+    out += tsv('H', page, Math.max(1, Math.ceil(c.n / PAGE)));
+  }
   for (const r of rs) out += r.nation === 'all' ? tsv('L', r.ladder, mmr(r.mu), r.games, r.wins) : tsv('N', r.ladder, r.nation, mmr(r.mu), r.games, r.wins);
   if (ms.length) {
     const { results: all } = await env.DB.prepare(

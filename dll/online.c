@@ -212,6 +212,17 @@ static int g_doc_state[DOC_N];
 static DWORD g_doc_at[DOC_N];
 static char g_doc_ids[DOC_N][16 * 18 + 1];     // DOC_RATINGS, DOC_LOBBY, DOC_CHAT: comma separated SteamIDs
 static SRWLOCK g_doc_lock = SRWLOCK_INIT;
+static int g_doc_page[DOC_N];
+
+void online_doc_page(int doc, int page) {
+    AcquireSRWLockExclusive(&g_doc_lock);
+    if (g_doc_page[doc] != page) {               // another page: fetched at once, nothing of the last one meanwhile
+        g_doc_page[doc] = page;
+        g_doc_at[doc] = 0;
+        free(g_doc[doc]); g_doc[doc] = NULL; g_doc_state[doc] = 0;
+    }
+    ReleaseSRWLockExclusive(&g_doc_lock);
+}
 
 void online_want(int doc) { g_doc_want[doc] = GetTickCount() | 1; }
 
@@ -243,10 +254,11 @@ static void fetch_docs(HINTERNET s, char *buf) {
         int fresh = g_doc_at[d] && now - g_doc_at[d] < DOC_MS;
         char ids[sizeof g_doc_ids[0]];
         memcpy(ids, g_doc_ids[d], sizeof ids);
+        int page = g_doc_page[d] > 0 ? g_doc_page[d] : 1;
         ReleaseSRWLockShared(&g_doc_lock);
         if (fresh || ((d == DOC_RATINGS || d == DOC_LOBBY || d == DOC_CHAT || d == DOC_CARD) && !ids[0])) continue;
         wchar_t path[400];
-        if (d == DOC_PLAYER) swprintf(path, 400, L"/player?id=%hs", g_id);
+        if (d == DOC_PLAYER) swprintf(path, 400, L"/player?id=%hs&page=%d", g_id, page);
         else if (d == DOC_CARD) swprintf(path, 400, L"/player?id=%hs", ids);
         else if (d == DOC_BOARD_1V1) swprintf(path, 400, L"/leaderboard?ladder=1v1");
         else if (d == DOC_BOARD_TEAM) swprintf(path, 400, L"/leaderboard?ladder=team");
@@ -254,6 +266,7 @@ static void fetch_docs(HINTERNET s, char *buf) {
         int st = http(s, L"GET", path, NULL, buf);
         char *copy = st == 200 ? _strdup(buf) : NULL;
         AcquireSRWLockExclusive(&g_doc_lock);
+        if (g_doc_page[d] > 0 && g_doc_page[d] != page) { free(copy); ReleaseSRWLockExclusive(&g_doc_lock); continue; }   // turned meanwhile
         if (copy) { free(g_doc[d]); g_doc[d] = copy; }
         g_doc_state[d] = copy ? 1 : 2;
         g_doc_at[d] = now | 1;

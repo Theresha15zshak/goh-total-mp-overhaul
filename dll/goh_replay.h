@@ -161,6 +161,7 @@ int steam_id_ok(const char *s);             // 17 digits of a SteamID           
 enum { DOC_PLAYER, DOC_BOARD_1V1, DOC_BOARD_TEAM, DOC_RATINGS, DOC_LOBBY, DOC_CHAT, DOC_CARD, DOC_N };   // DOC_RATINGS: the online tab,
                                                                                             // DOC_CHAT: the chat's online list
 void online_want(int doc);                  // on screen this frame
+void online_doc_page(int doc, int page);        // DOC_PLAYER: which page of the history (from 1)
 void online_doc_ids(int doc, const char *ids);   // DOC_RATINGS / DOC_LOBBY / DOC_CHAT: whose (comma separated SteamIDs, at most 16)
 int online_doc(int doc, char *out, size_t n, int *state);   // the last text; state 0 none yet, 1 ok, 2 unreachable
 
