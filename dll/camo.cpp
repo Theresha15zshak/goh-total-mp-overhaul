@@ -804,7 +804,14 @@ extern "C" void camo_tick() {
     unsigned char on = 0;
     if (mode) read(mode + 0x908, &on, 1);
     if ((on == 1) != in_game) { in_game = on == 1; InterlockedIncrement(&battle_number); }
-    { char path[MAX_PATH]; snprintf(path, sizeof path, "%ls\\..\\goh_snapshots.ini", folder); sticker_scale = GetPrivateProfileIntA("debug", "camo_sticker_scale", 2, path); camo_selftest_tick(path); lobby_dump_tick(path); }
+    {   // the ini once in 5 s, not every tick: GetPrivateProfileInt reads the file each time, ~100 us, and this runs ~1000 times a
+        // second on the game's logic thread (ui_stats, 2026-11-08: "camo tick" 99 us on average in a battle, the rest of the mod 30 us)
+        static DWORD ini_at;
+        static char path[MAX_PATH];
+        if (!path[0]) snprintf(path, sizeof path, "%ls\\..\\goh_snapshots.ini", folder);
+        if (!ini_at || GetTickCount() - ini_at >= 5000) { ini_at = GetTickCount() | 1; sticker_scale = GetPrivateProfileIntA("debug", "camo_sticker_scale", 2, path); }
+        camo_selftest_tick(path); lobby_dump_tick(path);
+    }
     // what lies on the game's pages, from the last look at the screen; the row's place, a walk of its own, a few times a second
     static long seen;
     static Panel p, list, info, day, last;

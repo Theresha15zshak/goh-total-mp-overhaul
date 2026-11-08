@@ -879,6 +879,7 @@ static const char *NEWS_RU[] = {
     "Моя статистика: вся история боёв по страницам, по 15 боёв",
     "Лидеры: страницы по 100 игроков. Статистика и лидеры сохраняются и открываются сразу",
     "Реплеи: перемотка назад убрана, реплеи больше не съедают гигабайты ОЗУ",
+    "FPS: мод больше не тормозит бой, его работа занимает меньше 1% кадра",
 };
 static const char *NEWS_EN[] = {
     "Competitive: infantry answers orders much faster, groups turn together",
@@ -896,6 +897,7 @@ static const char *NEWS_EN[] = {
     "My stats: the whole match history in pages of 15",
     "Leaders: pages of 100 players. Stats and leaders are kept and open at once",
     "Replays: seeking back is gone, replays no longer eat gigabytes of RAM",
+    "FPS: the mod no longer slows battles down, its work takes under 1% of a frame",
 };
 
 // which news the player has read: by their text, so a build with the same news stays quiet
