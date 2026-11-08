@@ -733,7 +733,11 @@ typedef struct {
 } SnapRec;
 
 // compressed pages live in a temporary file mapped in chunks: a whole replay is ~10 GB, and Windows keeps
-// in memory only what it has room for (file pages are cheap to drop); the file goes when the game closes
+// in memory only what it has room for (file pages are cheap to drop); the file goes when the game closes.
+// Not FILE_ATTRIBUTE_TEMPORARY: that asks Windows to keep the file in memory and write it as late as it can, so the
+// pages stayed dirty and in use (5 GB for the base of a 3 vs 3 alone, more with every snapshot). A full chunk is
+// written out and taken out of the working set at once: its pages are then a clean cache, given back when needed,
+// and read again from the file by a jump.
 static uint8_t *g_chunk[MAX_CHUNKS];
 static HANDLE g_chunk_map[MAX_CHUNKS], g_arena_file = INVALID_HANDLE_VALUE;
 static uint64_t g_arena_used;
@@ -780,7 +784,7 @@ static int map_chunk(uint64_t c) {
         GetTempPathA(MAX_PATH, dir);
         wsprintfA(path, "%sgoh_snapshots_%lu.bin", dir, GetCurrentProcessId());
         g_arena_file = CreateFileA(path, GENERIC_READ | GENERIC_WRITE, 0, NULL, CREATE_ALWAYS,
-                                   FILE_ATTRIBUTE_TEMPORARY | FILE_FLAG_DELETE_ON_CLOSE, NULL);
+                                   FILE_ATTRIBUTE_NORMAL | FILE_FLAG_DELETE_ON_CLOSE, NULL);
         rc_log("snapshots: compressed data in %s%s", path, g_arena_file == INVALID_HANDLE_VALUE ? " - could not create it, using memory" : "");
     }
     if (g_arena_file != INVALID_HANDLE_VALUE) {
@@ -795,6 +799,8 @@ static int map_chunk(uint64_t c) {
     return g_chunk[c] != NULL;
 }
 
+static volatile LONG g_chunk_writers[MAX_CHUNKS];  // copies into a chunk still going on
+static uint64_t g_chunks_out;                        // chunks below this were written out
 static uint64_t arena_put(const void *src, uint32_t n) {
     lock(&g_arena_lock);
     uint64_t at = g_arena_used;
@@ -802,8 +808,16 @@ static uint64_t arena_put(const void *src, uint32_t n) {
     uint64_t c = at / ARENA_CHUNK;
     if (c >= MAX_CHUNKS || (!g_chunk[c] && !map_chunk(c))) { unlock(&g_arena_lock); return ~0ull; }
     g_arena_used = at + n;
+    InterlockedIncrement(&g_chunk_writers[c]);
+    uint64_t out = 0;                       // a full chunk this helper writes out, + 1
+    if (c > g_chunks_out && g_chunk_map[c - 1] && !g_chunk_writers[c - 1]) { out = c; g_chunks_out = c; }
     unlock(&g_arena_lock);
     memcpy(g_chunk[c] + at % ARENA_CHUNK, src, n);
+    InterlockedDecrement(&g_chunk_writers[c]);
+    if (out) {                              // the chunk before is full and nobody writes to it: to disk, out of the working set
+        FlushViewOfFile(g_chunk[out - 1], ARENA_CHUNK);
+        VirtualUnlock(g_chunk[out - 1], ARENA_CHUNK);  // fails (not locked) but drops the pages from the working set
+    }
     return at;
 }
 
@@ -952,7 +966,7 @@ void snap_session_end(void) {
     if (g_lists) real_VirtualFree(g_lists, 0, MEM_RELEASE);
     if (g_stage) real_VirtualFree(g_stage, 0, MEM_RELEASE);
     g_ver = NULL; g_head = NULL; g_lists = NULL; g_stage = NULL;
-    g_arena_used = 0; g_nver = 0; g_ver_committed = 0; g_nlist = 0; g_lists_committed = 0; g_stage_committed = 0; g_stage_warm = 0;
+    g_arena_used = 0; g_chunks_out = 0; g_nver = 0; g_ver_committed = 0; g_nlist = 0; g_lists_committed = 0; g_stage_committed = 0; g_stage_warm = 0;
     g_nsnap = 0; g_cur = -1; g_sess = 0; g_job_pending = 0; g_job.left = 0; g_job.n = 0;
     g_nhome = 0;
     keep_end();
@@ -1077,8 +1091,9 @@ void snap_tick(int game_ms) {
     if (g_job_pending) {
         finish_snapshot();
         SnapRec *s = &g_snaps[g_nsnap - 1];
-        rc_log("snapshots: #%ld at %d ms, %u pages, game stopped %.0f ms, store %llu MB", g_nsnap - 1, s->ms, s->npages, g_stall_ms,
-               (unsigned long long)store_mb());
+        long keep_d3d(void);
+        rc_log("snapshots: #%ld at %d ms, %u pages, game stopped %.0f ms, store %llu MB, %llu MB of it written out, %ld Direct3D objects held",
+               g_nsnap - 1, s->ms, s->npages, g_stall_ms, (unsigned long long)store_mb(), (unsigned long long)(g_chunks_out * (ARENA_CHUNK >> 20)), keep_d3d());
         return;
     }
     // the first one right after the base: it makes everything the base caught half-written exact

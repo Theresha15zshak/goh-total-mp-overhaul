@@ -324,6 +324,9 @@ int keep_install(uint8_t *exe) {
     return ok && g_kept;
 }
 
+// Direct3D objects held back now: they live until the replay ends, so they are what grows with it
+long keep_d3d(void) { return g_nkept[K_D3D]; }
+
 // a snapshot was taken: whatever lives now may be pointed at by it
 void keep_begin(void) { InterlockedIncrement(&g_epoch); g_keeping = 1; }
 
