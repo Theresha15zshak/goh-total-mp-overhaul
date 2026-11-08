@@ -878,6 +878,7 @@ static const char *NEWS_RU[] = {
     "Рейтинг: исправлен учёт игр, где хост задаёт нацию каждой команде",
     "Моя статистика: вся история боёв по страницам, по 15 боёв",
     "Лидеры: страницы по 100 игроков. Статистика и лидеры сохраняются и открываются сразу",
+    "Реплеи: перемотка назад убрана, реплеи больше не съедают гигабайты ОЗУ",
 };
 static const char *NEWS_EN[] = {
     "Competitive: infantry answers orders much faster, groups turn together",
@@ -894,6 +895,7 @@ static const char *NEWS_EN[] = {
     "Rating: fixed matches where the host sets a nation for each team",
     "My stats: the whole match history in pages of 15",
     "Leaders: pages of 100 players. Stats and leaders are kept and open at once",
+    "Replays: seeking back is gone, replays no longer eat gigabytes of RAM",
 };
 
 // which news the player has read: by their text, so a build with the same news stays quiet

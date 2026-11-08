@@ -1438,14 +1438,9 @@ static void handle_cmd(uintptr_t core) {
                 ctl_msg(TR("Перескакиваю…", "Jumping…"));
             } else if (target > now) {
                 seek_start(core, target);
-            } else if (!g_rewind_ok) {
-                ctl_msg(TR("Перемотка назад недоступна: код игры не совпал.", "Seeking back is unavailable: the game's code did not match."));
-            } else if (!g_load_item || strcmp(g_load_path, g_ctl.path)) {
-                ctl_msg(TR("Для перемотки назад откройте реплей через «Реплеи» в меню.", "To seek back, open the replay from \"Replays\" in the menu."));
-            } else if (g_rw == RW_NONE) {
-                seek_stop(core);
-                g_rw_target = target;
-                g_rw = RW_EXIT;
+            } else {
+                ctl_msg(TR("Перемотки назад нет: чтобы посмотреть раньше, откройте реплей заново.",
+                           "There is no seeking back: to see an earlier moment, open the replay again."));
             }
             break;
         }
@@ -1588,11 +1583,9 @@ static void startup(HMODULE self) {
     g_census_auto = GetPrivateProfileIntA("debug", "census", 0, ini);
     g_uistat_on = GetPrivateProfileIntA("debug", "ui_stats", 0, ini);
     pathing_init(g_base, ini, 0);
-#ifdef COMPETITIVE_ONLY
+    // Snapshots and rewinding back are out (2026-11-08): the game's heap in our range and the snapshot store took
+    // gigabytes of memory in a replay. They live on in the branch experimental-replay-snapshots.
     if (0) {
-#else
-    if (GetPrivateProfileIntA("snapshots", "enabled", 0, ini)) {
-#endif
         int ok = snap_install(g_base);
         rc_log("snapshots: game heap %s", ok ? "in our range" : "NOT moved (import slots not found)");
         g_snapshots = ok;
