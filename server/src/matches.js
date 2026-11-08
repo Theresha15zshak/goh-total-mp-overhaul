@@ -28,7 +28,7 @@ const STEAM_ID = /^7656119\d{10}$/;
 const KEY = /^[0-9a-f]{64}$/;
 const MODES = new Set(['battle_zones', 'ammunition']);
 const SIDE = { ger: 'axis', fin: 'axis', eng: 'allies', usa: 'allies', rus: 'allies' };
-const MIN_DURATION_S = 120, MAX_AGE_S = 14 * 86400, REPORTS_PER_HOUR = 30, HISTORY = 30, PAGE = 15;
+const MIN_DURATION_S = 120, MAX_AGE_S = 14 * 86400, REPORTS_PER_HOUR = 30, HISTORY = 30, PAGE = 15, MAX_PAGES = 999, BOARD_PAGE = 100;
 // Balance tags of the builds we take reports from. An older build also sends matches its host closed early (116, 2026-11-07, from F919).
 // The tag comes with the heartbeat; a release with a new tag goes in here.
 const REPORT_TAGS = new Set(['4D2C']);
@@ -214,22 +214,28 @@ export async function player(url, env) {
   const id = url.searchParams.get('id') || '';
   if (!STEAM_ID.test(id)) return null;
   const prof = await env.DB.prepare('SELECT name FROM profiles WHERE steam_id = ?1').bind(id).first();
-  const { results: rs } = await env.DB.prepare('SELECT ladder, nation, mu, games, wins FROM ratings WHERE steam_id = ?1 AND games > 0').bind(id).all();
-  // ?page=N (from 1): PAGE matches of the history and an "H page pages" line; without it the newest HISTORY, as older clients expect
+  const { results: rs } = await env.DB.prepare(
+    'SELECT ladder, nation, mu, games, wins FROM ratings WHERE steam_id = ?1 AND games > 0 ORDER BY ladder, nation').bind(id).all();
+  // ?page=N (from 1): PAGE matches of the history and an "H page pages" line; without it the newest HISTORY, as older clients expect.
+  // With a page also "V version": the client keeps the text, sends &have=version next time and gets "SAME" while nothing changed.
+  // Every match that counts or is taken back moves the player's ratings or his count of matches, and so the version.
   const paged = url.searchParams.has('page'), size = paged ? PAGE : HISTORY;
-  const page = paged ? Math.min(Math.max(parseInt(url.searchParams.get('page'), 10) || 1, 1), 100000) : 1;
+  const page = paged ? Math.min(Math.max(parseInt(url.searchParams.get('page'), 10) || 1, 1), MAX_PAGES) : 1;
+  let count = 0, version = '';
+  if (paged) {
+    count = (await env.DB.prepare(
+      "SELECT count(*) AS n FROM match_players mp JOIN matches m ON m.id = mp.match_id WHERE mp.steam_id = ?1 AND m.status != 'removed'"
+    ).bind(id).first()).n;
+    version = (await sha256(JSON.stringify([prof ? prof.name : '', rs, count, page, PAGE]))).slice(0, 16);
+    if (url.searchParams.get('have') === version) return 'SAME\n';
+  }
   const { results: ms } = await env.DB.prepare(
     `SELECT m.id, m.ended_at, m.mode, m.map, m.size, m.status, mp.nation, mp.side, mp.won, mp.mu_a0, mp.mu_a1
      FROM match_players mp JOIN matches m ON m.id = mp.match_id WHERE mp.steam_id = ?1 AND m.status != 'removed' ORDER BY m.id DESC
      LIMIT ${size} OFFSET ${(page - 1) * size}`
   ).bind(id).all();
   let out = tsv('P', prof ? prof.name : '');
-  if (paged) {
-    const c = await env.DB.prepare(
-      "SELECT count(*) AS n FROM match_players mp JOIN matches m ON m.id = mp.match_id WHERE mp.steam_id = ?1 AND m.status != 'removed'"
-    ).bind(id).first();
-    out += tsv('H', page, Math.max(1, Math.ceil(c.n / PAGE)));
-  }
+  if (paged) out += tsv('V', version) + tsv('H', page, Math.min(MAX_PAGES, Math.max(1, Math.ceil(count / PAGE))));
   for (const r of rs) out += r.nation === 'all' ? tsv('L', r.ladder, mmr(r.mu), r.games, r.wins) : tsv('N', r.ladder, r.nation, mmr(r.mu), r.games, r.wins);
   if (ms.length) {
     const { results: all } = await env.DB.prepare(
@@ -246,11 +252,29 @@ export async function player(url, env) {
   return out;
 }
 
+// &page=N: BOARD_PAGE players and an "H page pages" line; without it the whole ladder, as older clients expect.
+// &cache=1: a "V version" line first, from a cheap sum over the ladder; &have=version then gets "SAME" while it holds.
+// A name changed in profiles does not move it: the board shows the old one until a rating moves.
 export async function leaderboard(url, env) {
   const ladder = url.searchParams.get('ladder') === '1v1' ? '1v1' : 'team';
+  const paged = url.searchParams.has('page');
+  const page = paged ? Math.min(Math.max(parseInt(url.searchParams.get('page'), 10) || 1, 1), MAX_PAGES) : 1;
+  let head = '';
+  if (paged || url.searchParams.get('cache') === '1') {
+    const s = await env.DB.prepare(
+      "SELECT count(*) AS n, total(mu) AS mu, total(sigma) AS sg, total(games) AS g, total(wins) AS w FROM ratings WHERE ladder = ?1 AND nation = 'all' AND games > 0"
+    ).bind(ladder).first();
+    if (url.searchParams.get('cache') === '1') {
+      const version = (await sha256(JSON.stringify([ladder, s.n, s.mu, s.sg, s.g, s.w, paged ? page : 0]))).slice(0, 16);
+      if (url.searchParams.get('have') === version) return 'SAME\n';
+      head = tsv('V', version);
+    }
+    if (paged) head += tsv('H', page, Math.min(MAX_PAGES, Math.max(1, Math.ceil(s.n / BOARD_PAGE))));
+  }
+  const skip = paged ? (page - 1) * BOARD_PAGE : 0;
   const { results } = await env.DB.prepare(
     `SELECT r.steam_id, coalesce(p.name, '?') AS name, r.mu, r.games, r.wins FROM ratings r LEFT JOIN profiles p ON p.steam_id = r.steam_id
-     WHERE r.ladder = ?1 AND r.nation = 'all' AND r.games > 0 ORDER BY r.mu DESC`
+     WHERE r.ladder = ?1 AND r.nation = 'all' AND r.games > 0 ORDER BY r.mu DESC, r.steam_id${paged ? ` LIMIT ${BOARD_PAGE} OFFSET ${skip}` : ''}`
   ).bind(ladder).all();
-  return results.map((r, i) => tsv(i + 1, r.steam_id, r.name, mmr(r.mu), r.games, r.wins)).join('');
+  return head + results.map((r, i) => tsv(skip + i + 1, r.steam_id, r.name, mmr(r.mu), r.games, r.wins)).join('');
 }

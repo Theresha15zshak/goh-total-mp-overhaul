@@ -214,12 +214,51 @@ static char g_doc_ids[DOC_N][16 * 18 + 1];     // DOC_RATINGS, DOC_LOBBY, DOC_CH
 static SRWLOCK g_doc_lock = SRWLOCK_INIT;
 static int g_doc_page[DOC_N];
 
+// The player's own stats (a file per page) and the two leaderboards are kept on disk in goh_cache. Each holds the server's
+// "V version" line: asked with &have=version the server says SAME while nothing changed, and the kept text is shown.
+static char g_dir[MAX_PATH];
+static int cache_name(int doc, int page, char *out, size_t n) {
+    if (doc == DOC_PLAYER && g_id[0]) return snprintf(out, n, "%sgoh_cache\\stats_%s_%d.txt", g_dir, g_id, page), 1;
+    if (doc == DOC_BOARD_1V1) return snprintf(out, n, "%sgoh_cache\\board_1v1_%d.txt", g_dir, page), 1;
+    if (doc == DOC_BOARD_TEAM) return snprintf(out, n, "%sgoh_cache\\board_team_%d.txt", g_dir, page), 1;
+    return 0;
+}
+static char *stats_read(int doc, int page) {
+    char path[MAX_PATH + 64];
+    if (!cache_name(doc, page, path, sizeof path)) return NULL;
+    FILE *f = fopen(path, "rb");
+    if (!f) return NULL;
+    char *t = malloc(MAX_BODY);
+    size_t n = t ? fread(t, 1, MAX_BODY - 1, f) : 0;
+    fclose(f);
+    if (!t || !n) { free(t); return NULL; }
+    t[n] = 0;
+    return t;
+}
+static void stats_write(int doc, int page, const char *t) {
+    char path[MAX_PATH + 64], dir[MAX_PATH + 16];
+    if (!cache_name(doc, page, path, sizeof path)) return;
+    snprintf(dir, sizeof dir, "%sgoh_cache", g_dir);
+    CreateDirectoryA(dir, NULL);
+    FILE *f = fopen(path, "wb");
+    if (f) { fwrite(t, 1, strlen(t), f); fclose(f); }
+}
+static void stats_version(const char *t, char *v, size_t n) {
+    const char *p = t && !strncmp(t, "V\t", 2) ? t : t ? strstr(t, "\nV\t") : NULL;
+    v[0] = 0;
+    if (!p) return;
+    p += *p == '\n' ? 3 : 2;
+    size_t k = strcspn(p, "\r\n");
+    if (k < n && k <= 32) { memcpy(v, p, k); v[k] = 0; }
+}
+
 void online_doc_page(int doc, int page) {
     AcquireSRWLockExclusive(&g_doc_lock);
-    if (g_doc_page[doc] != page) {               // another page: fetched at once, nothing of the last one meanwhile
+    if (g_doc_page[doc] != page) {               // another page: fetched at once; the kept copy of it shows meanwhile, if there is one
         g_doc_page[doc] = page;
         g_doc_at[doc] = 0;
-        free(g_doc[doc]); g_doc[doc] = NULL; g_doc_state[doc] = 0;
+        char *kept = stats_read(doc, page);
+        if (kept) { free(g_doc[doc]); g_doc[doc] = kept; g_doc_state[doc] = 1; }
     }
     ReleaseSRWLockExclusive(&g_doc_lock);
 }
@@ -258,13 +297,29 @@ static void fetch_docs(HINTERNET s, char *buf) {
         ReleaseSRWLockShared(&g_doc_lock);
         if (fresh || ((d == DOC_RATINGS || d == DOC_LOBBY || d == DOC_CHAT || d == DOC_CARD) && !ids[0])) continue;
         wchar_t path[400];
-        if (d == DOC_PLAYER) swprintf(path, 400, L"/player?id=%hs&page=%d", g_id, page);
+        char *kept = stats_read(d, page), have[40];
+        stats_version(kept, have, sizeof have);
+        if (kept) {                                 // nothing on screen yet: the kept copy at once, the server is asked below
+            AcquireSRWLockExclusive(&g_doc_lock);
+            if (!g_doc[d]) { g_doc[d] = _strdup(kept); g_doc_state[d] = g_doc[d] ? 1 : 0; }
+            ReleaseSRWLockExclusive(&g_doc_lock);
+        }
+        const char *h1 = have[0] ? "&have=" : "";
+        if (d == DOC_PLAYER) swprintf(path, 400, L"/player?id=%hs&page=%d%hs%hs", g_id, page, h1, have);
         else if (d == DOC_CARD) swprintf(path, 400, L"/player?id=%hs", ids);
-        else if (d == DOC_BOARD_1V1) swprintf(path, 400, L"/leaderboard?ladder=1v1");
-        else if (d == DOC_BOARD_TEAM) swprintf(path, 400, L"/leaderboard?ladder=team");
+        else if (d == DOC_BOARD_1V1) swprintf(path, 400, L"/leaderboard?ladder=1v1&page=%d&cache=1%hs%hs", page, h1, have);
+        else if (d == DOC_BOARD_TEAM) swprintf(path, 400, L"/leaderboard?ladder=team&page=%d&cache=1%hs%hs", page, h1, have);
         else swprintf(path, 400, L"/ratings?ids=%hs", ids);
         int st = http(s, L"GET", path, NULL, buf);
-        char *copy = st == 200 ? _strdup(buf) : NULL;
+        char *copy = NULL;
+        if (st == 200 && !strncmp(buf, "SAME", 4)) { copy = kept; kept = NULL; }      // nothing changed: the kept text
+        else if (st == 200) {
+            copy = _strdup(buf);
+            char v[40];
+            stats_version(buf, v, sizeof v);
+            if (v[0]) stats_write(d, page, buf);
+        }
+        free(kept);
         AcquireSRWLockExclusive(&g_doc_lock);
         if (g_doc_page[d] > 0 && g_doc_page[d] != page) { free(copy); ReleaseSRWLockExclusive(&g_doc_lock); continue; }   // turned meanwhile
         if (copy) { free(g_doc[d]); g_doc[d] = copy; }
@@ -626,6 +681,7 @@ static DWORD WINAPI online_thread(LPVOID unused) {
 }
 
 void online_start(const char *dir) {
+    snprintf(g_dir, sizeof g_dir, "%s", dir);
     snprintf(g_ini, sizeof g_ini, "%sgoh_online.ini", dir);
     g_online_consent = GetPrivateProfileIntA("online", "consent_v2", -1, g_ini);
     report_init(dir);
