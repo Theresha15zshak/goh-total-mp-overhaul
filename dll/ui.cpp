@@ -880,6 +880,7 @@ static const char *NEWS_RU[] = {
     "Лидеры: страницы по 100 игроков. Статистика и лидеры сохраняются и открываются сразу",
     "Реплеи: перемотка назад убрана, реплеи больше не съедают гигабайты ОЗУ",
     "FPS: мод больше не тормозит бой, его работа занимает меньше 1% кадра",
+    "Камуфляж: исправлен вылет «File not found» при подготовке камуфляжа",
 };
 static const char *NEWS_EN[] = {
     "Competitive: infantry answers orders much faster, groups turn together",
@@ -898,6 +899,7 @@ static const char *NEWS_EN[] = {
     "Leaders: pages of 100 players. Stats and leaders are kept and open at once",
     "Replays: seeking back is gone, replays no longer eat gigabytes of RAM",
     "FPS: the mod no longer slows battles down, its work takes under 1% of a frame",
+    "Camouflage: fixed the \"File not found\" crash while camouflage was prepared",
 };
 
 // which news the player has read: by their text, so a build with the same news stays quiet

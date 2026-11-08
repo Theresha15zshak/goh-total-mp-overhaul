@@ -889,6 +889,10 @@ constexpr uintptr_t FN_TEX_FIND = 0x62f990, FN_FILE_ENTRY = 0x663960, FN_FILE_AD
 constexpr uintptr_t TEX_FIND_CALLS[] = {0x62b6ec, 0x632935, 0x64c730, 0x64eefd};
 unsigned char (*tex_find_real)(void *, void *, char *);
 void *(*open_prev)(void *, unsigned);
+// Our own reads: 0x201 as before plus 0x800, with which a file that is not there makes the repository log a warning and
+// return NULL (eIORepository.cpp:370) instead of ending the game (:374, "File not found", 2026-11-08: grille_k.mdl read
+// from a camouflage thread). The game opens with 0x801 itself in two places.
+constexpr unsigned OPEN_QUIET = 0x201 | 0x800;
 struct GamePath { GameString s; void *wide; };
 GamePath path_of(const std::string &s) {
     GamePath p = {};
@@ -914,7 +918,7 @@ std::string texture_file(std::string name) {
         if (((unsigned char (*)(void *))(base + FN_FILE_EXISTS))(&d)) return dds;
         if (!open_prev) return "";
         GamePath f = path_of(file);
-        unsigned char *st = (unsigned char *)open_prev(&f, 0x201);       // a few bytes, the stream is left to the game's heap
+        unsigned char *st = (unsigned char *)open_prev(&f, OPEN_QUIET);       // a few bytes, the stream is left to the game's heap
         if (!st) return "";
         const char *b = *(const char **)(st + 8), *e = *(const char **)(st + 0x28);
         std::string text(b, b && e > b && e - b < 4096 ? e - b : 0);
@@ -1252,7 +1256,7 @@ void bake_layer(VehicleMap &pr, const Model &m, const std::vector<unsigned char>
 bool read_game_file(const std::string &path, std::vector<unsigned char> &out) {
     GamePath p = path_of(path);
     if (!open_prev || !((unsigned char (*)(void *))(base + FN_FILE_EXISTS))(&p)) return false;
-    unsigned char *st = (unsigned char *)open_prev(&p, 0x201);
+    unsigned char *st = (unsigned char *)open_prev(&p, OPEN_QUIET);
     if (!st) return false;
     uintptr_t vt = *(uintptr_t *)st - base;
     bool ok = false;
@@ -2035,7 +2039,7 @@ void selftest() {
     rc_log("camo selftest: found %d, flag %d, file %s", found, flag, file.c_str());
     if (!found) return;
     GamePath f = path_of(file);
-    void *st = open_prev(&f, 0x201);
+    void *st = open_prev(&f, OPEN_QUIET);
     rc_log("camo selftest: opened %p", st);
     void *bitmap = ((void *(*)(void *))(base + FN_BITMAP))(&p);
     rc_log("camo selftest: bitmap %p, vtable %llx", bitmap, (unsigned long long)(bitmap ? *(uintptr_t *)bitmap - base : 0));
