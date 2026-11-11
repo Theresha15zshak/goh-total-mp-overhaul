@@ -441,6 +441,8 @@ static void __cdecl watch_hit(uint32_t id, void *a1, void *a2) {
         int reason = *(volatile int *)((uintptr_t)a2 + 8), user = *(volatile int *)((uintptr_t)a2 + 0x10);
         rc_log("user %d is out, reason %d, in a replay: %d", user, reason, replay_core() != 0);
         if (reason == 6 && !replay_core()) report_kicked(user);    // kickoff: thrown out, he did not leave
+        else if (!replay_core()) report_out(user);  // he left or lost his connection: player_gone (below) never came in a real
+                                                    // match (2026-11-11, a host's whole evening: 0 calls), this one did, user = hostId
         return;
     }
     if (id == W_GONE) {                         // who left before the end loses (report.c)

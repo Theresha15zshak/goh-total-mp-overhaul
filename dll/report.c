@@ -161,7 +161,7 @@ static int team_army(const char *ss, const char *team, char *out, size_t n) {
 //     menu does exactly that, while a dead server or a lost connection comes with one (tested 2026-11-08). So a host without the
 //     mod who closes a match is caught too: as above, he gets q, his team s, the enemies win.
 // Anyone else sees a server gone, the same as a crash, and reports nothing.
-static int make_report(const char *ss, const char *me, const char *key, char *body, size_t n, long long *end_time, const char **why, int over, uint32_t gone, int early, int closed, int cut, int self_early, const int *kicked, int kicks, int host_left) {
+static int make_report(const char *ss, const char *me, const char *key, char *body, size_t n, long long *end_time, const char **why, int over, uint32_t gone, int early, int closed, int cut, int self_early, const int *kicked, int kicks, int host_left, const int *out, int outs_n) {
     const char *stop = ss + strlen(ss);
     char type[32], sel[32], map[160], start[24], end[24], bots[8] = "0";
     *end_time = 0;
@@ -232,6 +232,9 @@ static int make_report(const char *ss, const char *me, const char *key, char *bo
     for (int i = 0; i < count; i++)
         for (int k = 0; k < 32; k++)
             if (gone >> k & 1 && !strcmp(ids[k], m[i].id) && strcmp(m[i].host, master)) m[i].left = 1;
+    for (int i = 0; i < count; i++)
+        for (int k = 0; k < outs_n; k++)
+            if (out[k] == atoi(m[i].host) && strcmp(m[i].host, master)) m[i].left = 1;
     if (early) { *why = "someone left in the first minutes"; return 0; }
     char w = over ? winner_team(ss) : 0, ours = 0;
     int host_closed = 0, voided = 0, self_left = 0, i_host = 0;
@@ -537,6 +540,7 @@ static void keep_pair(const char *key, int number) {
 }
 void report_gone(int number) { g_net_check = 1; keep_pair("gone", number); }
 void report_kicked(int user) { keep_pair("kicked", user); }
+void report_out(int user) { g_net_check = 1; keep_pair("out", user); }
 static int match_kicked(long long start, long long end, int *users, int max) {
     char v[320], *next = NULL;
     int n = 0;
@@ -549,6 +553,23 @@ static int match_kicked(long long start, long long end, int *users, int max) {
     return n;
 }
 #define EARLY_S 120             // leaving this soon costs nobody anything, and the match does not count
+// who left the session (hostIds), the same window as match_gone. Not after the game was over (everyone goes home), and not from a
+// second before we left the battle ourselves (stop_at): what a closing battle throws out is no leaving.
+static int match_out(long long start, long long end, long long over_at, long long stop_at, int *users, int max, int *early) {
+    char v[320], *next = NULL;
+    int n = 0;
+    GetPrivateProfileStringA("reports", "out", "", v, sizeof v, g_ini);
+    for (char *t = strtok_s(v, " ", &next); t && n < max; t = strtok_s(NULL, " ", &next)) {
+        long long at = _atoi64(t);
+        const char *c = strchr(t, ':');
+        if (!c || at < start || at > end + GONE_AFTER_S) continue;
+        if (over_at && at >= over_at) continue;
+        if (stop_at && at >= stop_at - 1) continue;
+        users[n++] = atoi(c + 1);
+        if (at - start < EARLY_S) *early = 1;
+    }
+    return n;
+}
 static uint32_t match_gone(long long start, long long end, long long over_at, int *early) {
     char v[320], *next = NULL;
     uint32_t gone = 0;
@@ -616,8 +637,11 @@ int report_next(const char *me, const char *key, char *body, size_t n, long long
     int kicked[8], kicks = match_kicked(from, best_end, kicked, 8);
     long long thrown_at = kept_between("thrown", from, best_end + GONE_AFTER_S);
     int host_left = thrown_at && !kept_between("dropped", thrown_at - 5, thrown_at + 60);
+    long long stop_at = closed_at && (!thrown_at || closed_at < thrown_at) ? closed_at : thrown_at;
+    int out[16], outs_n = match_out(from, best_end, over_at, stop_at, out, 16, &early);
     int ok = make_report(ss, me, key, body, n, end_time, &why, over_at != 0, gone, early, closed_at != 0,
-                         match_kept("cut", from, best_end) != 0, closed_at && closed_at - from < EARLY_S, kicked, kicks, host_left);
+                         match_kept("cut", from, best_end) != 0, closed_at && closed_at - from < EARLY_S, kicked, kicks, host_left,
+                         out, outs_n);
     free(ss);
     if (!ok) {
         rc_log("report: match ending %lld not rated here (%s)", best_end, why);

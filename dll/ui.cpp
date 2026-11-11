@@ -882,6 +882,7 @@ static const char *NEWS_RU[] = {
     "FPS: мод больше не тормозит бой, его работа занимает меньше 1% кадра",
     "Камуфляж: исправлен вылет «File not found» при подготовке камуфляжа",
     "Рейтинг: закрытие боя хостом засчитывается, даже если у хоста нет мода",
+    "Рейтинг: уход игрока перед закрытием боя хостом теперь замечается — штраф получает ушедший, а не хост",
 };
 static const char *NEWS_EN[] = {
     "Competitive: infantry answers orders much faster, groups turn together",
@@ -902,6 +903,7 @@ static const char *NEWS_EN[] = {
     "FPS: the mod no longer slows battles down, its work takes under 1% of a frame",
     "Camouflage: fixed the \"File not found\" crash while camouflage was prepared",
     "Rating: a host closing the battle counts even when the host has no mod",
+    "Rating: a player leaving before the host closes the battle is now seen: the leaver is penalised, not the host",
 };
 
 // which news the player has read: by their text, so a build with the same news stays quiet

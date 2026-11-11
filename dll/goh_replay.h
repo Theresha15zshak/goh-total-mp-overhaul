@@ -196,6 +196,7 @@ void report_closed(void);                   // we left it through the menu
 void report_thrown(void);                   // the battle ended under us, not through our menu
 void report_dropped(void);                  // ... and the game told us why: a lost connection
 void report_kicked(int user);               // the host threw that hostId out
+void report_out(int user);                  // that hostId left the session
 void report_cut(void);                      // our own connection was gone when a player "left"
 extern volatile long g_net_check;           // a player left: online.c looks whether it is our connection
 void report_finished(void);                 // the results screen opened: a match played to its end
