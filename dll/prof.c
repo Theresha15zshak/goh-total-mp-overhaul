@@ -15,7 +15,7 @@
 #define SLOTS 8192
 #define ZONE_SLOTS 1024
 #define MAX_MODS 256
-#define ZONE_TLS 0x147cb08          // DWORD: TlsAlloc index of the per-thread step stack (5e4c60)
+#define ZONE_TLS 0x14a3d78          // DWORD: TlsAlloc index of the per-thread step stack (5e4c60)
 #define ZONE_SIZE 0x38              // one step: +0 kind, +8 const char *name
 #define MAX_DEPTH 24
 

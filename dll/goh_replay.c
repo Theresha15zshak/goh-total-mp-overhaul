@@ -23,52 +23,52 @@
 BOOL proxy_init(void);
 
 // ---- game addresses (RVA, 1.067) --------------------------------------------------------------
-#define SITE_RATIO        0xc6c14c   // movss xmm8, [rip+disp] ; pacing floor 1.0
-#define GAME_TIME_MS      0x1556e48
-#define UNPAUSE_DELAY     0x1556db8
-#define MP_SINGLETON      0x15a4eb0
+#define SITE_RATIO        0xc8c56c   // movss xmm8, [rip+disp] ; pacing floor 1.0
+#define GAME_TIME_MS      0x1584568
+#define UNPAUSE_DELAY     0x15844d8
+#define MP_SINGLETON      0x15d2b90
 #define SESSION_CLIENT    0x48
 #define REPLAY_SERVER     0xe0
 #define SERVER_CORE       0xb0
-#define VT_REPLAY_CLIENT  0x113e3f8
-#define VT_REPLAY_SERVER  0x1038b40
-#define VT_CORE           0x113d488
+#define VT_REPLAY_CLIENT  0x1161b20
+#define VT_REPLAY_SERVER  0x105a138
+#define VT_CORE           0x1160fc0
 #define CORE_PAUSED       0x21
 #define CORE_NEXT_QUANT   0x28
 #define CORE_SENT_TIME    0x40       // int: game ms where the last batch the server sent begins
 #define CORE_SENT_DELTA   0x44       // int: game ms per quant
 #define CORE_SENT_AMOUNT  0x48       // int: quants in that batch
-#define REPLAY_MANAGER    0x153e2b0
-#define GAME_MODE_OBJ     0x159c760   // [..]+0x908 byte: 1 from "Enter game mode" (a69130) to "Exit game mode" (a69000)
+#define REPLAY_MANAGER    0x1565a30
+#define GAME_MODE_OBJ     0x15ca450   // [..]+0x908 byte: 1 from "Enter game mode" (a69130) to "Exit game mode" (a69000)
 #define GAME_MODE_ON      0x908
-#define IAT_QPC           0xfed168
-#define IMAGE_END         0x1707000
+#define IAT_QPC           0x100d170
+#define IMAGE_END         0x1737000
 // The client runs one quant per frame (mp.thread_game.exec 53aca0), so frames set the seek pace, not the
 // server: it is let loose and held once it has sent the target, so the client stops right there.
 #define SEEK_SPEED        50.0f
 #define SEEK_SPEED_SAFE   8.0f       // when the server cannot be held: the old pace, more would overshoot
 
-static const uint8_t RATIO_INS[9] = {0xf3, 0x44, 0x0f, 0x10, 0x05, 0x7b, 0x43, 0x39, 0x00};
+static const uint8_t RATIO_INS[9] = {0xf3, 0x44, 0x0f, 0x10, 0x05, 0x77, 0x40, 0x39, 0x00};
 
 // functions we watch: (rcx, rdx) go to watch_hit before the game's code runs.
 // The stolen prologue (len bytes, whole instructions) must be position independent.
 typedef struct { const char *name; uint32_t rva; uint8_t len, prologue[8]; } Watch;
 static const Watch WATCH[] = {
-    {"menu_command", 0xbd4990, 5, {0x48, 0x89, 0x5c, 0x24, 0x10}},  // in-game menu buttons
-    {"replay_load",  0x2637e0, 5, {0x48, 0x89, 0x5c, 0x24, 0x18}},  // Replays list "Load"
-    {"server_tick",  0xc6b2e0, 5, {0x48, 0x89, 0x5c, 0x24, 0x10}},  // quant server
-    {"exit_game",    0xa69000, 5, {0x48, 0x89, 0x5c, 0x24, 0x08}},  // "Exit game mode"
-    {"spawn",        0xd2e2a0, 5, {0x4c, 0x89, 0x44, 0x24, 0x18}},  // (combat stats, &{unit, player}): purchase bookkeeping
-    {"page_show",    0x343930, 5, {0x44, 0x89, 0x44, 0x24, 0x18}},  // PageManager::Show(mgr, page, mods)
-    {"page_close",   0x344180, 5, {0x48, 0x89, 0x5c, 0x24, 0x08}},  // PageManager::Close(mgr, &page)
-    {"stats_event",  0xd24380, 5, {0x48, 0x89, 0x5c, 0x24, 0x08}},  // eCompetitiveGame/eGuerrillaGame::HandleStatsEvent(game, ev)
-    {"stats_event2", 0xd13ba0, 7, {0x40, 0x55, 0x53, 0x41, 0x56, 0x41, 0x57}},  // the same for frontline, battle zones and the rest
-    {"present",      0x4fc010, 6, {0x40, 0x53, 0x48, 0x83, 0xec, 0x20}},  // eRenderDevice present: swapchain [+0xa8]->Present
-    {"game_result",  0x299100, 5, {0x48, 0x89, 0x5c, 0x24, 0x08}},  // opens eGUI_PageGameResult (Show's page is in a lambda: not seen there)
-    {"game_over",    0xd08aa0, 5, {0x48, 0x89, 0x5c, 0x24, 0x18}},  // eGame::GameOver(game, winner): the only way to state 3 at +0xd4
-    {"user_delete",  0xc74960, 5, {0x48, 0x89, 0x5c, 0x24, 0x08}},  // "on user delete": (client, msg), msg+8 the reason (names at c5ef90), msg+0x10 the user
-    {"player_gone",  0xd09f70, 5, {0x48, 0x89, 0x5c, 0x24, 0x18}},  // "Reassigning units of player": (game, &player number), a player left the battle
-    {"leave_reason", 0xca1dc0, 7, {0x48, 0x83, 0xec, 0x28, 0x83, 0xc1, 0xfb}},  // the text of "why you are out" (reason in rcx, 5..11)
+    {"menu_command", 0xbf4b20, 5, {0x48, 0x89, 0x5c, 0x24, 0x10}},  // in-game menu buttons
+    {"replay_load",  0x26ab30, 5, {0x48, 0x89, 0x5c, 0x24, 0x18}},  // Replays list "Load"
+    {"server_tick",  0xc8b6f0, 5, {0x48, 0x89, 0x5c, 0x24, 0x10}},  // quant server
+    {"exit_game",    0xa87be0, 5, {0x48, 0x89, 0x5c, 0x24, 0x08}},  // "Exit game mode"
+    {"spawn",        0xd4af80, 5, {0x4c, 0x89, 0x44, 0x24, 0x18}},  // (combat stats, &{unit, player}): purchase bookkeeping
+    {"page_show",    0x34b490, 5, {0x44, 0x89, 0x44, 0x24, 0x18}},  // PageManager::Show(mgr, page, mods)
+    {"page_close",   0x34bce0, 5, {0x48, 0x89, 0x5c, 0x24, 0x08}},  // PageManager::Close(mgr, &page)
+    {"stats_event",  0xd41060, 5, {0x48, 0x89, 0x5c, 0x24, 0x08}},  // eCompetitiveGame/eGuerrillaGame::HandleStatsEvent(game, ev)
+    {"stats_event2", 0xd30880, 7, {0x40, 0x55, 0x53, 0x41, 0x56, 0x41, 0x57}},  // the same for frontline, battle zones and the rest
+    {"present",      0x50a9c0, 6, {0x40, 0x53, 0x48, 0x83, 0xec, 0x20}},  // eRenderDevice present: swapchain [+0xa8]->Present
+    {"game_result",  0x2a0bc0, 5, {0x48, 0x89, 0x5c, 0x24, 0x08}},  // opens eGUI_PageGameResult (Show's page is in a lambda: not seen there)
+    {"game_over",    0xd25780, 5, {0x48, 0x89, 0x5c, 0x24, 0x18}},  // eGame::GameOver(game, winner): the only way to state 3 at +0xd4
+    {"user_delete",  0xc918d0, 5, {0x48, 0x89, 0x5c, 0x24, 0x08}},  // "on user delete": (client, msg), msg+8 the reason (names at c5ef90), msg+0x10 the user
+    {"player_gone",  0xd26c50, 5, {0x48, 0x89, 0x5c, 0x24, 0x18}},  // "Reassigning units of player": (game, &player number), a player left the battle
+    {"leave_reason", 0xcbcd20, 7, {0x48, 0x83, 0xec, 0x28, 0x83, 0xc1, 0xfb}},  // the text of "why you are out" (reason in rcx, 5..11)
 };
 enum { W_LOAD = 1, W_TICK = 2, W_EXIT = 3, W_SPAWN = 4, W_PAGE_SHOW = 5, W_PAGE_CLOSE = 6, W_STATS_EVENT = 7, W_STATS_EVENT2 = 8, W_PRESENT = 9, W_RESULT = 10, W_OVER = 11, W_DELETE = 12, W_GONE = 13, W_REASON = 14 };
 #define NWATCH (sizeof(WATCH) / sizeof(WATCH[0]))
@@ -236,8 +236,8 @@ static void set_ratio_patch(int on) {
 // recomputed from the client's reported speed, kept at least 0.5 above the floor and lowered by 0.02 per
 // quant (c6c0a0), so seeks ran x4-5 with the frame loop idle 9 frames out of 10. The ratio only spaces
 // quants in real time; their game time (delta) is untouched.
-#define SITE_RATIO_STORE1 0xc6c387   // movss [rdi+0Ch], xmm8 (end of c6c0a0) -> mov al,1 at c6c38d
-#define SITE_RATIO_STORE2 0xc6b5db   // movss [r14+0Ch], xmm0 (adaptive branch of c6b2e0) -> c6b5e1
+#define SITE_RATIO_STORE1 0xc8c7a7   // movss [rdi+0Ch], xmm8 (end of c6c0a0) -> mov al,1 at c6c38d
+#define SITE_RATIO_STORE2 0xc8b9f5   // movss [r14+0Ch], xmm0 (adaptive branch of c6b2e0) -> c6b5e1
 static const uint8_t RATIO_STORE1_INS[6] = {0xf3, 0x44, 0x0f, 0x11, 0x47, 0x0c};
 static const uint8_t RATIO_STORE2_INS[6] = {0xf3, 0x41, 0x0f, 0x11, 0x46, 0x0c};
 static volatile uint8_t *g_force_ratio;      // in the page next to the game: read by the stubs
@@ -323,7 +323,7 @@ static volatile LONG g_load_fresh;          // a Load just happened; its path is
 #define EV_KILLER_PLAYER 0x38       // byte: player of the killer descriptor at ev+0x28 (0xff = none)
 #define EV_KILLED       3
 #define MAX_PLAYER_BYTE 0x12        // the game's own bound for player bytes
-static const uint32_t VT_PAGE_GAME_RESULT[] = {0x10403c0, 0x1040490, 0x10404a0, 0x10404b8};   // eGUI_PageGameResult and its bases
+static const uint32_t VT_PAGE_GAME_RESULT[] = {0x10619d0, 0x1061aa0, 0x1061ab0, 0x1061ac8};   // eGUI_PageGameResult and its bases
 
 MatchStats g_ms;
 volatile long g_ms_results;
@@ -493,7 +493,7 @@ static void __cdecl watch_hit(uint32_t id, void *a1, void *a2) {
     if (n <= 2) {
         // call chain as game RVAs, to find the loop above it. Our stubs have no unwind data, so
         // scan the raw stack for values that point right after a call instruction in the game code.
-        uintptr_t lo = (uintptr_t)g_base + 0x1000, hi = (uintptr_t)g_base + 0xfec000;
+        uintptr_t lo = (uintptr_t)g_base + 0x1000, hi = (uintptr_t)g_base + 0x100b980;
         volatile uintptr_t marker = 0;
         const uintptr_t *sp = (const uintptr_t *)&marker;
         char line[1200]; int len = 0, found = 0;
@@ -553,9 +553,9 @@ static int detour(uint32_t id) {
 // ---- the game's music: muted while our director plays a battle ------------------------------------
 // MediaManager play(path, channel, fade, loop) -> channel or -1; stop(path, fade), empty path = all.
 // path is the engine's path object: std::string + cached wide copy at +0x20.
-#define FN_MEDIA_PLAY   0x4caa10
-#define FN_MEDIA_STOP   0x4cabf0
-#define FN_PATH_FREE    0x674210
+#define FN_MEDIA_PLAY   0x4d91e0
+#define FN_MEDIA_STOP   0x4d93c0
+#define FN_PATH_FREE    0x686d50
 static const uint8_t MEDIA_PLAY_INS[5] = {0x89, 0x54, 0x24, 0x10, 0x53};     // mov [rsp+10h], edx ; push rbx
 static const uint8_t MEDIA_STOP_INS[5] = {0x4c, 0x8b, 0xdc, 0x41, 0x54};     // mov r11, rsp ; push r12
 
@@ -617,7 +617,7 @@ static int g_media_ok;
 // They are drawn or skipped together: letting through whichever came first after the pause drew a scene
 // without its GUI pass now and then, and an object that pass sets up crashed render.tgt with a null
 // vertex declaration (51ffd0 -> 6e0ec0) at the same moment of a replay twice.
-#define FN_RENDER_SCREEN  0x694960
+#define FN_RENDER_SCREEN  0x6a7690
 static const uint8_t RENDER_SCREEN_INS[5] = {0x48, 0x89, 0x5c, 0x24, 0x18};   // mov [rsp+18h], rbx
 static volatile LONG g_turbo;               // a seek runs
 static volatile LONG g_frames, g_frames_drawn;   // main loop iterations / frames drawn
@@ -699,14 +699,14 @@ static void dump_threads(void) {
 // The engine cannot step back, it only replays orders from the start. All of this runs on the
 // game's logic thread, right before its per-iteration GUI update (MAIN_ITER), where the menu buttons run.
 // (The process main thread draws frames; sending GUI events from there only works after ~15 s.)
-#define MAIN_ITER         0x33a2b0   // GUI update, once per logic-loop iteration (57b8b5): sub rsp,28h; call 2bec60
-#define FN_SEND_EVENT     0x6532b0   // (event*, 0): synchronous GUI event dispatch
-#define EV_VTABLE         0x102ebb0  // plain GUI event, slot 0 = 224700
+#define MAIN_ITER         0x341e10   // GUI update, once per logic-loop iteration (57b8b5): sub rsp,28h; call 2bec60
+#define FN_SEND_EVENT     0x663380   // (event*, 0): synchronous GUI event dispatch
+#define EV_VTABLE         0x104fef0  // plain GUI event, slot 0 = 224700
 #define EV_EXIT           0xfc2      // what the in-game menu's "Exit" sends
-#define FN_LOAD           0x2637e0   // Replays list "Load"(eGUI_ReplaysDialog*, eReplayInfo*)
-static const uint32_t VT_REPLAYS_DIALOG[] = {0x1038d58, 0x1038fa0, 0x1038fb0, 0x1038fc8, 0x1038ff0};
-static const uint32_t VT_REPLAY_INFO[] = {0x1038d00, 0x1038d38};
-static const uint8_t MAIN_ITER_INS[9] = {0x48, 0x83, 0xec, 0x28, 0xe8, 0xa7, 0x49, 0xf8, 0xff};
+#define FN_LOAD           0x26ab30   // Replays list "Load"(eGUI_ReplaysDialog*, eReplayInfo*)
+static const uint32_t VT_REPLAYS_DIALOG[] = {0x105a350, 0x105a598, 0x105a5a8, 0x105a5c0, 0x105a5e8};
+static const uint32_t VT_REPLAY_INFO[] = {0x105a2f8, 0x105a330};
+static const uint8_t MAIN_ITER_INS[9] = {0x48, 0x83, 0xec, 0x28, 0xe8, 0x07, 0x49, 0xf8, 0xff};
 static const uint8_t SEND_EVENT_INS[9] = {0x40, 0x53, 0x48, 0x83, 0xec, 0x20, 0x48, 0x8b, 0xd9};
 
 static void apply_pov(void);         // player view, below
@@ -965,7 +965,7 @@ static int hook_main_iter(void) {
 // ---- camera speed ceilings ------------------------------------------------------------------------
 // Options keep {min, max} pairs for the camera speeds; 38bf77 resets a value outside them and the
 // options sliders stop at max. We only lift the maxima, before the game reads options.set.
-#define CAM_RANGES 0x14768a8   // scroll {0.03, 0.3}, rotate {0.1, 2.0}, third person {0.03, 0.3}
+#define CAM_RANGES 0x149d8e8   // scroll {0.03, 0.3}, rotate {0.1, 2.0}, third person {0.03, 0.3}
 static const float CAM_RANGES_ORIG[6] = {0.03f, 0.3f, 0.1f, 2.0f, 0.03f, 0.3f};
 static const float CAM_MAX[3] = {3.0f, 10.0f, 3.0f};
 
@@ -980,8 +980,9 @@ static void lift_camera_limits(void) {
 // Every game is recorded as replays/autoreplayN.rep. 52ebb0 takes the lowest N of 1..5 with no file and,
 // once all five exist, overwrites the oldest: only the last five games were ever kept. With 9999 numbers
 // they just go on (a deleted replay's number is used again); the oldest is overwritten only past 9999.
-#define SITE_AUTOREPLAYS 0x52dfd6   // mov r9d, 5 in 52df60 (a new recording session)
+#define SITE_AUTOREPLAYS 0x53c986   // mov r9d, 5 in 52df60 (a new recording session)
 #define AUTOREPLAYS      9999
+#define SITE_CREATE_REPLAY 0xc9202e   // the option's answer, before a recording session is made
 static const uint8_t AUTOREPLAYS_INS[6] = {0x41, 0xb9, 0x05, 0x00, 0x00, 0x00};
 
 static void widen_autoreplays(void) {
@@ -990,17 +991,24 @@ static void widen_autoreplays(void) {
     int32_t n = AUTOREPLAYS;
     patch(site + 2, &n, 4);
     rc_log("autoreplays: %d names, none overwritten before that", n);
+    // 1.068: a match is recorded only if the profile has game/multiplayer/create_replay, and nothing in the game sets it
+    // (c91f06: test al, al ; je -> no session). Our match reports are read from these replays: record always.
+    static const uint8_t ASK[8] = {0x84, 0xc0, 0x74, 0x06, 0x45, 0x0f, 0xb6, 0xfe};
+    uint8_t *ask = g_base + SITE_CREATE_REPLAY;
+    if (memcmp(ask, ASK, sizeof ASK)) { rc_log("autoreplays: unexpected code where the game asks for the option, recording is the profile's"); return; }
+    patch(ask + 2, "", 2);
+    rc_log("autoreplays: every match is recorded, whatever the profile says");
 }
 
 // ---- player view: own camera recorded during live games, put back in replays ------------------
 // Replays only hold orders; the camera never leaves the player's PC. So during a live game we
 // sample our camera 20 times a second into Documents\my games\gates of hell\replay_camera, and in
 // a replay whose game started at the same time we drive the camera from that file.
-#define CAMERA          0x159ae88   // +0 pitch, +4 yaw, +8 fov, +0xc distance, +0x20 look-at x, y, z
-#define FN_CAMERA_SET   0x6e0000    // (eCameraState*, camera*, bool instant): what loading a save does
-#define VT_CAMERA_STATE 0x10fdbf0
-#define VT_GAME_CLIENT  0x113d660
-#define TPC_CAMERA      0x159e218   // third-person camera owner; active if [[it+0x3b0]+0x10] (af7b20)
+#define CAMERA          0x15c8b78   // +0 pitch, +4 yaw, +8 fov, +0xc distance, +0x20 look-at x, y, z
+#define FN_CAMERA_SET   0x6f3270    // (eCameraState*, camera*, bool instant): what loading a save does
+#define VT_CAMERA_STATE 0x1121a00
+#define VT_GAME_CLIENT  0x11610d0
+#define TPC_CAMERA      0x15cbf08   // third-person camera owner; active if [[it+0x3b0]+0x10] (af7b20)
 static const uint8_t CAMERA_SET_INS[11] = {0x48, 0x89, 0x5c, 0x24, 0x10, 0x48, 0x89, 0x74, 0x24, 0x18, 0x57};
 
 typedef struct { int32_t ms; float pitch, yaw, fov, dist, x, y, z; } CamSample;
@@ -1547,7 +1555,7 @@ static DWORD WINAPI worker(LPVOID _) {
 
 // rip-relative targets: the page has to sit within 2 GB of the game code
 static int near_page(void) {
-    for (uintptr_t a = (uintptr_t)g_base + IMAGE_END; !g_page && a < (uintptr_t)g_base + 0x70000000; a += 0x10000)
+    for (uintptr_t a = (uintptr_t)g_base + IMAGE_END; !g_page && a < (uintptr_t)g_base + 0x70000000; a += 0x10170)
         g_page = VirtualAlloc((void *)a, 0x1000, MEM_COMMIT | MEM_RESERVE, PAGE_EXECUTE_READWRITE);
     return g_page != NULL;
 }
@@ -1585,7 +1593,7 @@ static void startup(HMODULE self) {
         return;
     }
     if (memcmp(g_base + SITE_RATIO, RATIO_INS, 9)) {
-        g_ctl.state = ST_ERROR; ctl_msg(TR("Другая версия игры (нужна 1.067), панель выключена.", "Another game version (1.067 needed), the panel is off."));
+        g_ctl.state = ST_ERROR; ctl_msg(TR("Другая версия игры (нужна 1.068), панель выключена.", "Another game version (1.068 needed), the panel is off."));
         rc_log("unsupported build, nothing patched");
         return;
     }
@@ -1639,7 +1647,7 @@ static void startup(HMODULE self) {
                rdq((uintptr_t)g_base + VT_CAMERA_STATE) != 0;
     if (PART("watch")) for (uint32_t i = 0; i < NWATCH; i++) detour(i);
     g_rewind_ok = !memcmp(g_base + FN_SEND_EVENT, SEND_EVENT_INS, 9) &&
-                  rdq((uintptr_t)g_base + EV_VTABLE) == (uintptr_t)g_base + 0x224700 &&
+                  rdq((uintptr_t)g_base + EV_VTABLE) == (uintptr_t)g_base + 0x22b620 &&
                   g_watch_count[1] == 0 && !memcmp(g_base + WATCH[1].rva, "\xe9", 1) &&   // Load is watched
                   PART("main_iter") && hook_main_iter();
     rc_log("rewind %s", g_rewind_ok ? "ready" : "unavailable (code mismatch)");

@@ -19,15 +19,15 @@ typedef struct {
     uint32_t vt_human, vt_brain, add_order, set_beo, message, rule, follow, squad_tick, squad_range, squad_ahead, squad_ahead2;
 } Where;
 static const Where WHERE[2] = {
-    {0x1482260, 0x1482290, 0x1482580, 0x1482598, 0x1483008, 0x14822b0, 0x1556e48, 0xa1c497, 0x5e4190, 0xb90d0, 0x14d080, 0x10ebdd8, 0x10ec7c8, 0x9053e0, 0x9052f0, 0x9424f0, 0x9121c0, 0x951530, 0x93107b, 0x9311e2, 0x933ada, 0x933b97},
-    {0x10ee430, 0x10ee460, 0x10ee750, 0x10ee768, 0x10ef1d8, 0x10ee480, 0x11a1328, 0x8310fb, 0x3fa1e0, 0x8d620, 0xee990, 0xdee9b8, 0xdef378, 0x71a480, 0x71a390, 0x7574d0, 0x7273b0, 0x766510, 0x74626b, 0x7463d2, 0x748cca, 0x748d87},
+    {0x14a9680, 0x14a96b0, 0x14a99a0, 0x14a99b8, 0x14aa478, 0x14a96d0, 0x1584568, 0xa3ae57, 0x5f3d40, 0xba640, 0x152740, 0x110f630, 0x110fff8, 0x91dc90, 0x91dba0, 0x95aee0, 0x92aa70, 0x969f20, 0x93107b, 0x9311e2, 0x94c7fa, 0x94c8b7},
+    {0x11126f0, 0x1112720, 0x1112a10, 0x1112a28, 0x11134e8, 0x1112740, 0x11cba58, 0x84cd6b, 0x407040, 0x8eb40, 0xf1b00, 0xe0dfb0, 0xe0e948, 0x72ffe0, 0x72fef0, 0x76d170, 0x73cf10, 0x77c1b0, 0x74626b, 0x7463d2, 0x75ec9a, 0x75ed57},
 };
 static const Where *W = &WHERE[0];
 static int g_server;
 // the player's game only
-#define V_DQ     0x148da28      // mp_serverDQ, int: a quant's game ms when not 0, the server's own (c6c16c), 50 by default
-#define V_LAG_MIN 0x1478c48     // mp_minClientSpeedupLag, float: 80
-#define V_LAG_MAX 0x1478c60     // mp_maxClientSpeedupLag, float: 300
+#define V_DQ     0x14b4ec8      // mp_serverDQ, int: a quant's game ms when not 0, the server's own (c6c16c), 50 by default
+#define V_LAG_MIN 0x149fcd8     // mp_minClientSpeedupLag, float: 80
+#define V_LAG_MAX 0x149fcf0     // mp_maxClientSpeedupLag, float: 300
 
 static uint8_t *g_exe;
 static int g_test, g_stat, g_smooth, g_no_idle, g_dq, g_press, g_sync, g_early, g_free_ms, g_wait_ms, g_hurry_ms, g_brain2, g_hot_ms;
@@ -78,7 +78,7 @@ int pathing_press_order(void) {
     uint8_t on = 0;
     SIZE_T got;
     HANDLE self = GetCurrentProcess();
-    ReadProcessMemory(self, g_exe + 0x159e218, &owner, 8, &got);
+    ReadProcessMemory(self, g_exe + 0x15cbf08, &owner, 8, &got);
     if (owner) ReadProcessMemory(self, (void *)(owner + 0x3b0), &manual, 8, &got);
     if (manual) ReadProcessMemory(self, (void *)(manual + 0x10), &on, 1, &got);
     return !on;
@@ -147,7 +147,7 @@ size_t pathing_edit(const char *name, uint8_t *b, size_t n, size_t cap) {
 
 // How long a soldier takes to answer, measured: from the right button down to the first of the local player's standing soldiers
 // moving, in the quant of each one (eHuman's slot 23, the same turn as eActor's). The test's only; the log says it.
-#define G_LOCAL_PLAYER 0x1487a88
+#define G_LOCAL_PLAYER 0x14aef38
 typedef struct { uintptr_t actor; float x, y, dirx, diry; int still, gen, started, fast, moving, turned; double prev; } Track;
 static Track g_tracks[2048];
 static volatile double g_click, g_release;
@@ -173,7 +173,7 @@ static const char *order_name(const void *o) {
     uint8_t *vt = NULL, *fn = NULL, c[8];
     int32_t rel;
     if (!o) return "-";
-    if (!peek(o, &vt, 8) || vt < g_exe || vt >= g_exe + 0x1700000 || !peek(vt + 0x28, &fn, 8) || !peek(fn, c, 8)) return "?";
+    if (!peek(o, &vt, 8) || vt < g_exe || vt >= g_exe + 0x1737000 || !peek(vt + 0x28, &fn, 8) || !peek(fn, c, 8)) return "?";
     if (c[0] != 0x48 || c[1] != 0x8d || c[2] != 5 || c[7] != 0xc3) return "??";
     memcpy(&rel, c + 3, 4);
     return (const char *)(fn + 7 + rel);
@@ -264,10 +264,10 @@ static void pipe_event(char kind, int a, int b) {
     Event e = {(float)((uistat_now() - click) / 1000), 0, "", a, b, kind};
     g_pipe[i] = e;
 }
-#define FN_SERVER_MESSAGE 0xc7b6e0
-#define FN_CLIENT_EXEC 0x53aca0
-#define VT_CLIENT_EXEC 0x10b7bb8
-static const uint32_t SERVER_SLOTS[3] = {0x1038bb8, 0x10b7958, 0x113e008};
+#define FN_SERVER_MESSAGE 0xc96d80
+#define FN_CLIENT_EXEC 0x549630
+#define VT_CLIENT_EXEC 0x10d9a10
+static const uint32_t SERVER_SLOTS[3] = {0x105a1b0, 0x10d97b0, 0x1161748};
 static void *(*g_server_real)(void *, uint8_t *, void *, void *);
 static void *(*g_client_real)(void *);
 static void *server_message(void *self, uint8_t *msg, void *x, void *y) {
@@ -436,7 +436,7 @@ static const char *const FIGHT_RULES[] = {"hide_check", "injured_by_enemy", "ene
 #define BRAIN_ENEMY 0x3b8
 static volatile long g_held[NFIGHT], g_alarms, g_alarms_back, g_hot_clash;
 #define HOT_REST_MS 700
-#define RULE_STOP 0x400000
+#define RULE_STOP 0x409f70
 // 0 not told, 1 told and not moving yet, 2 going
 static int told(uint8_t *brain) {
     Hot *h = &g_hot[((uintptr_t)brain >> 4) % 2048];
@@ -735,7 +735,7 @@ brain:;
     memcpy(&vt_beo, exe + W->vt_brain + 0x68, 8);
     memcpy(&vt_msg, exe + W->vt_brain + 0x98, 8);
     memcpy(&slot, exe + W->vt_human + 8 * 23, 8);
-    if (vt_add != exe + W->add_order || vt_beo != exe + W->set_beo || vt_msg != exe + W->message || (uint8_t *)slot < exe || (uint8_t *)slot >= exe + 0x1000000) { rc_log("pathing: the brain is not as expected"); return; }
+    if (vt_add != exe + W->add_order || vt_beo != exe + W->set_beo || vt_msg != exe + W->message || (uint8_t *)slot < exe || (uint8_t *)slot >= exe + 0x1020138) { rc_log("pathing: the brain is not as expected"); return; }
     g_add_real = (void (*)(void *, void *, void *))vt_add;
     g_beo_real = (void (*)(void *, void *))vt_beo;
     our = (void *)add_order; patch(exe + W->vt_brain + 0x90, &our, 8);

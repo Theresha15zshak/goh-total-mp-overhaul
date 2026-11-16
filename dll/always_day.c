@@ -44,7 +44,7 @@ static unsigned char term_check(void *self, void *arg) {
 }
 
 void day_install(uint8_t *exe, void (*patch)(void *, const void *, size_t), int server) {
-    const uintptr_t vt = server ? 0xdfb9e0 : 0x10f8da0, fn = server ? 0x80e870 : 0x9f95b0;
+    const uintptr_t vt = server ? 0xe1b5b8 : 0x111cbb8, fn = server ? 0x82a470 : 0xa17ef0;
     void *slot;
     memcpy(&slot, exe + vt + 8 * 9, 8);
     if (slot != exe + fn) { rc_log("day: the mission's terms are not as expected, no always day"); return; }

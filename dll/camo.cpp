@@ -25,7 +25,7 @@ int stbi_info_from_memory(const unsigned char *, int, int *, int *, int *);
 void stbi_image_free(void *);
 }
 namespace {
-constexpr uintptr_t G_DESKTOP = 0x159ca68;
+constexpr uintptr_t G_DESKTOP = 0x15ca758;
 uintptr_t base;
 wchar_t folder[MAX_PATH], ini[MAX_PATH];
 SRWLOCK lock = SRWLOCK_INIT;
@@ -66,7 +66,7 @@ void *find(void *layout, const char *name) {
     GameString s = {}; s.size = strlen(name); s.cap = 15;
     if (s.size > 15) { s.ptr = name; s.cap = s.size; } else memcpy(s.buf, name, s.size);
     uintptr_t fn = q(q((uintptr_t)layout) + 0x1e0);
-    if (fn < base + 0x1000 || fn >= base + 0xfec000) return nullptr;
+    if (fn < base + 0x1000 || fn >= base + 0x100b980) return nullptr;
     return ((void *(*)(void *, GameString *))fn)(layout, &s);
 }
 bool bounds(uintptr_t d, Panel &p) {
@@ -76,7 +76,7 @@ bool bounds(uintptr_t d, Panel &p) {
         unsigned flags; int pos[2];
         if (!read(d + 0x48, &flags, 4) || !(flags & 2) || !read(d + 0x98, pos, 8)) return false;
         p.x += pos[0]; p.y += pos[1];
-        if (q(d) == base + 0x1101800) { p.shown = p.w > 0 && p.h > 0; return p.shown; }
+        if (q(d) == base + 0x11255f0) { p.shown = p.w > 0 && p.h > 0; return p.shown; }
         d = q(d + 0xf0);
     }
     return false;
@@ -85,9 +85,9 @@ bool bounds(uintptr_t d, Panel &p) {
 // The game finds a texture's variants by listing name#*.dds (55aef0, a list per texture). Ours is added to that list
 // for the vehicles' colour textures; when the game then opens name#gohcamo.dds, the file opened is name.dds and what
 // it holds is the same DDS with the pattern on it, every mip, same format and size. The alpha stays as it is.
-constexpr uintptr_t FN_TEX_MODS = 0x55aef0, FN_MODS_GROW = 0x55c8d0, FN_MOD_IS = 0x556820, VT_ZIP = 0x1060678, VT_BUF = 0x10c6258;
-constexpr uintptr_t TEX_MODS_CALLS[] = {0x55b606, 0x55c1bc, 0x71542a, 0x715b0a, 0x7174ba};
-constexpr uintptr_t FN_MOD_NEW = 0x556310, FN_MOD_FREE = 0x5564e0;
+constexpr uintptr_t FN_TEX_MODS = 0x569a40, FN_MODS_GROW = 0x56b420, FN_MOD_IS = 0x565370, VT_ZIP = 0x1081ca8, VT_BUF = 0x10e8ab8;
+constexpr uintptr_t TEX_MODS_CALLS[] = {0x56a156, 0x56ad0c, 0x72867a, 0x728d5a, 0x72a70a};
+constexpr uintptr_t FN_MOD_NEW = 0x564e60, FN_MOD_FREE = 0x565030;
 // A vehicle's variant: gohcamo<picture>x<crc of model and settings>, so changed settings are a new texture for the game,
 // which keeps textures by name. A second name, gohcamoid<crc of the model>, is only on the vehicle's main textures: a
 // skeleton that has it is that vehicle (small textures are shared between vehicles). What the other threads may use of
@@ -510,8 +510,8 @@ Painted *painted_of(const std::string &name, const std::string &token, const uns
 // #burned of wrecks). eSkeleton::SetTexMod (714960) works on one skeleton, so on one vehicle: entity+0xb0.
 // Selection: eGameControl [159e218], its selection at +0xd8, entries {entity, ...} 16 bytes from sel+8 to sel+0x10.
 // Test, Shift+F12: the selected vehicles get our variant, or lose it.
-constexpr uintptr_t GAME_CONTROL = 0x159e218, FN_MOD_VALID = 0x715180,
-                    FN_SET_TEXMOD = 0x714960;
+constexpr uintptr_t GAME_CONTROL = 0x15cbf08, FN_MOD_VALID = 0x7283d0,
+                    FN_SET_TEXMOD = 0x727bb0;
 bool has_mod(uintptr_t skeleton, const char *name) {
     alignas(16) unsigned char mod[0x80];
     ((void *(*)(void *, const char *))(base + FN_MOD_NEW))(mod, name);
@@ -527,7 +527,7 @@ void set_texmod(uintptr_t skeleton, const char *name) {
 }
 // Every actor passes here on its turn in the game's thread (eActor's slot 23). One of the local player's vehicles with
 // a camouflage set for it gets it, once: a wreck's own #burned comes after. a464f0 is the game's "local player".
-constexpr uintptr_t VT_ACTOR = 0x10de138, FN_ACTOR_QUANT = 0x7efd10, G_LOCAL_PLAYER = 0x1487a88, GAME_MODE_OBJ = 0x159c760;
+constexpr uintptr_t VT_ACTOR = 0x1100ea8, FN_ACTOR_QUANT = 0x804ae0, G_LOCAL_PLAYER = 0x14aef38, GAME_MODE_OBJ = 0x15ca450;
 volatile LONG battle_number, published_count;
 void *(*actor_quant_real)(void *);
 void camouflage(unsigned char *actor) {
@@ -765,7 +765,7 @@ extern "C" void camo_selftest_tick(const char *);
 extern "C" void lobby_dump_tick(const char *);
 extern "C" int dialog_covered(void *dialog);
 // The Game tab of the options: its list, its last row, wherever the groups put it, and the place of its boxes
-constexpr uintptr_t VT_TREE = 0x110cab0, VT_TREE_ROW = 0x110c800, VT_CHECKBOX = 0x1134ba0;
+constexpr uintptr_t VT_TREE = 0x1130888, VT_TREE_ROW = 0x11305d8, VT_CHECKBOX = 0x11586b0;
 uintptr_t tree_of(uintptr_t d, int depth) {
     if (!d || depth > 8) return 0;
     if (q(d) == base + VT_TREE) return d;
@@ -882,11 +882,11 @@ namespace {
 // the file's name at +0x20, as 62fc70 makes them) whose Open (slot 1) opens the plain texture and paints what it reads.
 // A copy of the plain file's entry does not do: it tried the file on disk. A .ebm is a one line { reference "name" }
 // to another texture: followed. The game then treats name#gohcamo... as any other variant.
-constexpr uintptr_t FN_TEX_FIND = 0x62f990, FN_FILE_ENTRY = 0x663960, FN_FILE_ADD = 0x664820, FN_PATH_KEY = 0x674f30,
-                    FN_PATH_NEW = 0x6741b0, FN_PATH_FREE = 0x674210, FN_STR_SET = 0xa50b0, FN_NEW = 0x36b6a0,
-                    VT_ABSTRACT_STORAGE = 0x10101b0, FN_BITMAP = 0x62b680, FN_FILE_EXISTS = 0x663830,
-                    VT_FILE = 0x10c6088, FN_BUF_STREAM = 0x6796c0, FN_BITMAP_LOAD = 0x629cd0;
-constexpr uintptr_t TEX_FIND_CALLS[] = {0x62b6ec, 0x632935, 0x64c730, 0x64eefd};
+constexpr uintptr_t FN_TEX_FIND = 0x63f3d0, FN_FILE_ENTRY = 0x673a60, FN_FILE_ADD = 0x674860, FN_PATH_KEY = 0x687a70,
+                    FN_PATH_NEW = 0x686cf0, FN_PATH_FREE = 0x686d50, FN_STR_SET = 0xa6400, FN_NEW = 0x373650,
+                    VT_ABSTRACT_STORAGE = 0x1030e40, FN_BITMAP = 0x63b0c0, FN_FILE_EXISTS = 0x6739b0,
+                    VT_FILE = 0x10e88e8, FN_BUF_STREAM = 0x68c3f0, FN_BITMAP_LOAD = 0x639710;
+constexpr uintptr_t TEX_FIND_CALLS[] = {0x63b12c, 0x642375, 0x65c7f0, 0x65efbd};
 unsigned char (*tex_find_real)(void *, void *, char *);
 void *(*open_prev)(void *, unsigned);
 // Our own reads: 0x201 as before plus 0x800, with which a file that is not there makes the repository log a warning and
@@ -1827,7 +1827,7 @@ void *variant_open(unsigned char *self, unsigned mode) {
 void free_projection(VehicleMap *) {}               // the maps stay in make_projection's cache
 // Which model a texture belongs to: every material of the game's vehicles, read once. The repository is a std::map of
 // file names (root at [[1556ee8]+8]; node: +0 left, +0x10 right, +0x19 nil, +0x20 the name); its lock is 1556ec0.
-constexpr uintptr_t G_REPOSITORY = 0x1556ee8, G_REPOSITORY_LOCK = 0x1556ec0;
+constexpr uintptr_t G_REPOSITORY = 0x1584818, G_REPOSITORY_LOCK = 0x15846e8;
 void collect_names(uintptr_t node, std::vector<std::string> &out, int depth) {
     if (!node || depth > 200 || *(unsigned char *)(node + 0x19)) return;
     collect_names(*(uintptr_t *)node, out, depth + 1);

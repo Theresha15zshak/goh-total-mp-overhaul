@@ -29,13 +29,13 @@ typedef struct {
     uint32_t users_begin;       // users: eUserInfo at user+0x58, its roster at +0x30, read once at start
 } Layout;
 static const Layout LAYOUTS[] = {
-    {"call_to_arms.exe", 0x663c30, 0x1060678, 0x10c6258, 0x10315d8, 0x148dd38, 0x156e250},
-    {"call_to_arms_server.exe", 0x47a170, 0xd6d208, 0xdc8c98, 0xdd2160, 0x10f9538, 0x11b8730},
+    {"call_to_arms.exe", 0x673cb0, 0x1081ca8, 0x10e8ab8, 0x1052908, 0x14b51f0, 0x159b990},
+    {"call_to_arms_server.exe", 0x4874a0, 0xd8a568, 0xde7238, 0xdf07a0, 0x111d8a0, 0x11e2e80},
 };
 static const Layout *L = &LAYOUTS[0];
 // stream: +8 buffer, +0x20 file offset of the buffer, +0x28 end of data, +0x30 read position; a buffer
 // stream also keeps +0x10 end and +0x18 size (its constructor 6796c0)
-static const uint8_t REPO_OPEN_INS[10] = {0x48, 0x89, 0x5c, 0x24, 0x10, 0x48, 0x89, 0x4c, 0x24, 0x08};
+static const uint8_t REPO_OPEN_INS[10] = {0x48, 0x89, 0x5c, 0x24, 0x08, 0x48, 0x89, 0x74, 0x24, 0x10};
 
 // the game's switch, for the server it starts: named memory both processes open
 #define SHARE_NAME  "Local\\goh_balance_switch"
@@ -461,7 +461,7 @@ static void fix_all(int on) {
     rosters++;
     MEMORY_BASIC_INFORMATION mi;
     static uint64_t chunk[1 << 16];
-    for (uint8_t *a = (uint8_t *)0x10000; VirtualQuery(a, &mi, sizeof mi); a = (uint8_t *)mi.BaseAddress + mi.RegionSize) {
+    for (uint8_t *a = (uint8_t *)0x10170; VirtualQuery(a, &mi, sizeof mi); a = (uint8_t *)mi.BaseAddress + mi.RegionSize) {
         if (mi.State != MEM_COMMIT || mi.Type != MEM_PRIVATE || mi.Protect != PAGE_READWRITE) continue;
         for (size_t off = 0; off < mi.RegionSize; off += sizeof chunk) {
             size_t n = mi.RegionSize - off < sizeof chunk ? mi.RegionSize - off : sizeof chunk;

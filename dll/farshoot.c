@@ -10,8 +10,8 @@
 #include <string.h>
 #include "goh_replay.h"
 
-#define TPC_CAMERA 0x159e218        // eGameControl; eManualControl at +0x3b0, on if its byte +0x10
-#define CAMERA     0x159ae88        // +0xc distance: 2 in a sight, hundreds over the field
+#define TPC_CAMERA 0x15cbf08        // eGameControl; eManualControl at +0x3b0, on if its byte +0x10
+#define CAMERA     0x15c8b78        // +0xc distance: 2 in a sight, hundreds over the field
 #define RAY_MAX    3990.f
 #define UNITS_PER_M 20.f
 #define SIGHT_BEHIND_M 2.2f         // the game counts from further forward than the sight: 129 here was its 126.8
