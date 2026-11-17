@@ -39,7 +39,9 @@ void pathing_init(uint8_t *exe, const char *ini, int server) {
     g_server = server;
     W = &WHERE[server ? 1 : 0];
     // what was tried and kept; [debug] path_... in goh_snapshots.ini changes it, on every machine of a match or not at all
-    g_test = GetPrivateProfileIntA("debug", "path_test", 1, ini);
+    // Off on 1.068 (2026-11-17): the game's code for a soldier's quant, his rules and his moves was rewritten, and with the
+    // hooks on every battle crashed at its first quant. path_test=1 brings it back for whoever re-checks it against 1.068.
+    g_test = GetPrivateProfileIntA("debug", "path_test", 0, ini);
     g_stat = GetPrivateProfileIntA("debug", "path_stat", 1, ini);
     g_smooth = GetPrivateProfileIntA("debug", "path_smooth", 2, ini);
     g_no_idle = GetPrivateProfileIntA("debug", "path_no_idle", 1, ini);

@@ -884,6 +884,7 @@ static const char *NEWS_RU[] = {
     "Рейтинг: закрытие боя хостом засчитывается, даже если у хоста нет мода",
     "Рейтинг: уход игрока перед закрытием боя хостом теперь замечается — штраф получает ушедший, а не хост",
     "Мод работает с игрой 1.068; каждый матч снова записывается в реплей (в 1.068 игра перестала это делать сама)",
+    "1.068: исправлен вылет в начале боя; при вылете мод пишет причину в свой лог",
 };
 static const char *NEWS_EN[] = {
     "Competitive: infantry answers orders much faster, groups turn together",
@@ -906,6 +907,7 @@ static const char *NEWS_EN[] = {
     "Rating: a host closing the battle counts even when the host has no mod",
     "Rating: a player leaving before the host closes the battle is now seen: the leaver is penalised, not the host",
     "The mod works with game 1.068; every match is recorded as a replay again (in 1.068 the game stopped doing it by itself)",
+    "1.068: a crash at the start of a battle fixed; on a crash the mod writes its cause to its log",
 };
 
 // which news the player has read: by their text, so a build with the same news stays quiet

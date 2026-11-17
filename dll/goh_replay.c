@@ -757,9 +757,11 @@ static double ms_since(LARGE_INTEGER t0) {
 
 // while the test runs: where the game faults, if a restore broke something
 static volatile LONG g_fault_logs;
+static int g_dump_ok;
 static LONG CALLBACK fault_log(EXCEPTION_POINTERS *e) {
     DWORD code = e->ExceptionRecord->ExceptionCode;
-    if (code != EXCEPTION_ACCESS_VIOLATION && code != EXCEPTION_ILLEGAL_INSTRUCTION && code != 0xc0000374) return EXCEPTION_CONTINUE_SEARCH;
+    if (code != EXCEPTION_ACCESS_VIOLATION && code != EXCEPTION_ILLEGAL_INSTRUCTION && code != 0xc0000374 && code != EXCEPTION_STACK_OVERFLOW &&
+        code != 0xc0000409 && code != EXCEPTION_PRIV_INSTRUCTION && code != EXCEPTION_INT_DIVIDE_BY_ZERO) return EXCEPTION_CONTINUE_SEARCH;
     if (InterlockedIncrement(&g_fault_logs) > 20) return EXCEPTION_CONTINUE_SEARCH;
     uintptr_t ip = (uintptr_t)e->ExceptionRecord->ExceptionAddress;
     HMODULE m = NULL;
@@ -768,9 +770,42 @@ static LONG CALLBACK fault_log(EXCEPTION_POINTERS *e) {
     if (m) GetModuleFileNameA(m, name, MAX_PATH);
     const char *base = strrchr(name, '\\') ? strrchr(name, '\\') + 1 : name;
     ULONG_PTR *info = e->ExceptionRecord->ExceptionInformation;
+    // and the whole process once, for a look by hand (goh_crash.dmp beside this log)
+    if (g_fault_logs == 1) {
+        HMODULE dbg = LoadLibraryA("dbghelp.dll");
+        BOOL (WINAPI *write)(HANDLE, DWORD, HANDLE, int, void *, void *, void *) = dbg ? (void *)GetProcAddress(dbg, "MiniDumpWriteDump") : NULL;
+        char path[MAX_PATH];
+        snprintf(path, sizeof path, "%sgoh_crash.dmp", g_dir);
+        HANDLE f = CreateFileA(path, GENERIC_WRITE, 0, NULL, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
+        struct { DWORD tid; EXCEPTION_POINTERS *ep; BOOL client; } info_ = {GetCurrentThreadId(), e, FALSE};
+        BOOL ok = write && f != INVALID_HANDLE_VALUE && write(GetCurrentProcess(), GetCurrentProcessId(), f, 0x1000 | 0x20 | 0x40, &info_, NULL, NULL);
+        if (f != INVALID_HANDLE_VALUE) CloseHandle(f);
+        g_dump_ok = ok;
+    }
     rc_log("fault %08lx at %s+%llx (%s %p), thread %lu, test phase %d, clock %d ms", code, base,
            (unsigned long long)(ip - (uintptr_t)m), info[0] == 1 ? "writing" : info[0] == 8 ? "executing" : "reading",
            (void *)info[1], GetCurrentThreadId(), g_test_phase, game_ms());
+    if (g_fault_logs == 1) rc_log("  %s goh_crash.dmp", g_dump_ok ? "dump written:" : "no dump:");
+    // where it came from: return addresses on the stack, into the game (g+rva) or into us (m+offset). An "executing" fault
+    // has jumped somewhere wild, and the first of these is who jumped.
+    {
+        uintptr_t self = (uintptr_t)&fault_log, mine = 0;
+        HMODULE me = NULL;
+        if (GetModuleHandleExA(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT, (LPCSTR)self, &me)) mine = (uintptr_t)me;
+        const uintptr_t *sp = (const uintptr_t *)e->ContextRecord->Rsp;
+        char line[1400]; int len = 0, found = 0;
+        for (int i = 0; i < 0x800 && found < 24 && len < (int)sizeof line - 40; i++) {
+            uintptr_t q = 0;
+            if (!rd(sp + i, &q, 8)) break;
+            if (q >= (uintptr_t)g_base + 0x1000 && q < (uintptr_t)g_base + IMAGE_END) {
+                len += snprintf(line + len, sizeof line - len, " g+%llx", (unsigned long long)(q - (uintptr_t)g_base)); found++;
+            } else if (mine && q >= mine + 0x1000 && q < mine + 0x400000) {
+                len += snprintf(line + len, sizeof line - len, " m+%llx", (unsigned long long)(q - mine)); found++;
+            }
+        }
+        line[len] = 0;
+        rc_log("  rsp %p, stack%s", (void *)e->ContextRecord->Rsp, line);
+    }
     return EXCEPTION_CONTINUE_SEARCH;
 }
 
@@ -993,6 +1028,9 @@ static void widen_autoreplays(void) {
     rc_log("autoreplays: %d names, none overwritten before that", n);
     // 1.068: a match is recorded only if the profile has game/multiplayer/create_replay, and nothing in the game sets it
     // (c91f06: test al, al ; je -> no session). Our match reports are read from these replays: record always.
+    char ini[MAX_PATH];
+    snprintf(ini, sizeof ini, "%sgoh_snapshots.ini", g_dir);
+    if (!GetPrivateProfileIntA("debug", "force_replay", 1, ini)) { rc_log("autoreplays: recording is the profile's (force_replay=0)"); return; }
     static const uint8_t ASK[8] = {0x84, 0xc0, 0x74, 0x06, 0x45, 0x0f, 0xb6, 0xfe};
     uint8_t *ask = g_base + SITE_CREATE_REPLAY;
     if (memcmp(ask, ASK, sizeof ASK)) { rc_log("autoreplays: unexpected code where the game asks for the option, recording is the profile's"); return; }
@@ -1290,6 +1328,8 @@ static int in_battle(void) {
     int mode = game_mode(), live = g_battle_tick && GetTickCount() - g_battle_tick < 10000;
     if (mode != was_mode) {
         rc_log("game mode %s", mode ? "on" : "off");
+        // the game sets handlers of its own after we start (crash reporting): ours goes first again for the battle
+        if (mode) { static void *h; if (h) RemoveVectoredExceptionHandler(h); h = AddVectoredExceptionHandler(1, fault_log); }
         if (was_mode == 1) g_stats = 0;  // the match is gone: its stats object with it
         was_mode = mode;
     }
