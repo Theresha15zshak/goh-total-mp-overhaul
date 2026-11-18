@@ -29,8 +29,8 @@ typedef struct {
     uint32_t users_begin;       // users: eUserInfo at user+0x58, its roster at +0x30, read once at start
 } Layout;
 static const Layout LAYOUTS[] = {
-    {"call_to_arms.exe", 0x673cb0, 0x1081ca8, 0x10e8ab8, 0x1052908, 0x14b51f0, 0x159b990},
-    {"call_to_arms_server.exe", 0x4874a0, 0xd8a568, 0xde7238, 0xdf07a0, 0x111d8a0, 0x11e2e80},
+    {"call_to_arms.exe", 0x673c90, 0x1081ca8, 0x10e8a48, 0x1052908, 0x14b51f0, 0x159b990},
+    {"call_to_arms_server.exe", 0x487480, 0xd8a568, 0xde71c8, 0xdf0730, 0x111d8a0, 0x11e2e80},
 };
 static const Layout *L = &LAYOUTS[0];
 // stream: +8 buffer, +0x20 file offset of the buffer, +0x28 end of data, +0x30 read position; a buffer
@@ -461,7 +461,7 @@ static void fix_all(int on) {
     rosters++;
     MEMORY_BASIC_INFORMATION mi;
     static uint64_t chunk[1 << 16];
-    for (uint8_t *a = (uint8_t *)0x10170; VirtualQuery(a, &mi, sizeof mi); a = (uint8_t *)mi.BaseAddress + mi.RegionSize) {
+    for (uint8_t *a = (uint8_t *)0x10000; VirtualQuery(a, &mi, sizeof mi); a = (uint8_t *)mi.BaseAddress + mi.RegionSize) {
         if (mi.State != MEM_COMMIT || mi.Type != MEM_PRIVATE || mi.Protect != PAGE_READWRITE) continue;
         for (size_t off = 0; off < mi.RegionSize; off += sizeof chunk) {
             size_t n = mi.RegionSize - off < sizeof chunk ? mi.RegionSize - off : sizeof chunk;

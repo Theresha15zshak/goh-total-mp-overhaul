@@ -86,7 +86,7 @@ static bool dds_add_mips(std::vector<unsigned char> &f) {
     }
     uint32_t flags, caps;
     memcpy(&flags, &f[8], 4); memcpy(&caps, &f[108], 4);
-    flags |= 0x201c0; caps |= 0x409f78;
+    flags |= 0x20000; caps |= 0x400008;
     memcpy(&f[8], &flags, 4); memcpy(&f[108], &caps, 4); memcpy(&f[28], &levels, 4);
     return true;
 }

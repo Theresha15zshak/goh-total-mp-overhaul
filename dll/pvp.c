@@ -22,16 +22,16 @@
 #define NUI (sizeof UI_FILES / sizeof UI_FILES[0])
 #define PVP_CMD 0x4f50
 
-#define FN_REPO_OPEN   0x673cb0
+#define FN_REPO_OPEN   0x673c90
 #define VT_ZIP_STREAM  0x1081ca8
-#define VT_BUF_STREAM  0x10e8ab8
+#define VT_BUF_STREAM  0x10e8a48
 #define FN_BIND        0x2e7d40
 #define FN_COMMAND     0x2e8990
-#define FN_ON_EVENT    0xac2cc0     // (dialog, target, event, command)
-#define FN_DYNCAST     0xf3a628     // __RTDynamicCast
+#define FN_ON_EVENT    0xac2c50     // (dialog, target, event, command)
+#define FN_DYNCAST     0xf3a598     // __RTDynamicCast
 #define TD_DIALOG      0x14d91d8
 #define TD_BUTTON      0x14fc5d0
-#define FN_IS_SHOWN    0xac3620     // eDialog's own vtable +0x108: the screen's root has another
+#define FN_IS_SHOWN    0xac35b0     // eDialog's own vtable +0x108: the screen's root has another
 
 static const uint8_t REPO_OPEN_INS[10] = {0x48, 0x89, 0x5c, 0x24, 0x08, 0x48, 0x89, 0x74, 0x24, 0x10};
 
@@ -417,7 +417,7 @@ unsigned char *pvp_sound_file(const char *name, size_t *n) { return pak_file(g_s
 // eUserNameView (vtable 105b538) whose +0x178 is the player's SteamID. They are found twice a second by
 // walking the interface down from the screen's root, eDesktop (the game keeps it at 159ca68), through each
 // dialog's children (+0xd8..+0xe0); their places are taken every frame.
-#define VT_DESKTOP 0x11255f0
+#define VT_DESKTOP 0x1125580
 #define VT_SESSION_VIEW 0x10645e0
 #define VT_NAME_VIEW 0x107cb68
 #define MAX_NAMES 16
@@ -447,8 +447,8 @@ static volatile DWORD g_game_menu_at;
 #define VT_LINE_ITEM 0x103a508          // eListboxItem
 #define VT_MENU_LISTBOX 0x1074988       // eMenuListbox
 #define LB_LINE_SIZE 0x1c0
-#define FN_LB_LAYOUT 0xae5230
-#define FN_DLG_NOTIFY 0xac29e0
+#define FN_LB_LAYOUT 0xae51c0
+#define FN_DLG_NOTIFY 0xac2970
 #define LINE_H 50                       // the game's 22 and more: the name and the MMR under it
 // The session view gives its list the game's 22 again whenever it updates (through ac7e97 / ac909b and the like,
 // each followed by the listbox's "lines' size changed", vtable +0x248, ac52e0): the lines flickered between that
@@ -478,7 +478,7 @@ static void lb_apply(void *self) {
 
 static void lb_apply_install(void (*patch)(void *, const void *, size_t)) {
     void **slot = (void **)(g_base + VT_MENU_LISTBOX + 0x248);
-    if (*slot != (void *)(g_base + 0xae3d60)) { rc_log("pvp: the menu listbox is not as expected, its lines may flicker"); return; }
+    if (*slot != (void *)(g_base + 0xae3cf0)) { rc_log("pvp: the menu listbox is not as expected, its lines may flicker"); return; }
     g_lb_apply = (void (*)(void *))*slot;
     void *ours = (void *)lb_apply;
     patch(slot, &ours, sizeof ours);
@@ -496,7 +496,7 @@ static const char *const SCREEN_NAMES[SCREEN_N] = {"camo_root", "lb_replays", "b
 typedef struct { uint64_t listbox; void *names[MAX_NAMES]; int n, menu, session, looked; void *panel, *named[SCREEN_N]; } ScreenFind;
 
 static void screen_walk(uint64_t d, int depth, int in_session, int *budget, ScreenFind *f) {
-    if (d < 0x10170 || (d & 7) || depth > 72 || --*budget < 0) return;
+    if (d < 0x10000 || (d & 7) || depth > 72 || --*budget < 0) return;
     const uint8_t *p = (const uint8_t *)(uintptr_t)d;
     if (!(*(const uint32_t *)(p + 0x48) & 2)) return;       // not on screen: nothing under it is
     f->looked++;
@@ -710,14 +710,14 @@ static int vt_slot(uint32_t vt, int slot, uint32_t want) {
 // Steam P2P; the first packets to a host go while Steam still sets up the P2P session and get no answer, and each
 // try waits for the next tick: the column filled in slowly (2026-11-02). The timer's period, the "mov r8d, 2500"
 // at 43b7ae, becomes PING_PERIOD_MS: the answers come about five times sooner, a small packet per lobby each time.
-#define FN_PING_PERIOD 0x44572e
+#define FN_PING_PERIOD 0x44570e
 #define PING_PERIOD_MS 500
 // Each answer (or a ping given up on, as -1) goes to 43bf70: a lost one counts a miss (+0x48, five in a row show
 // the "no answer" icon, -2) and, as the game has it, went into the average too. With pings sent before Steam had
 // the P2P session up, those -1s came back later among the answers and pulled the average under 0: the column
 // went icon, number, icon (2026-11-02). Now a lost ping only counts its miss: at 43bfac, "mov eax,[rdx+48];
 // inc eax" (falling into the store and the average) becomes "inc dword [rdx+48]; jmp 43bfdd" (the five check).
-#define FN_PING_MISS 0x445f2c
+#define FN_PING_MISS 0x445f0c
 // Off for now (2026-11-02): the column stayed unreliable to use; the game keeps its own (no column, no service).
 #define LOBBY_PINGS 0
 
@@ -740,7 +740,7 @@ void pvp_lobby_pings(void) {
 // what the player applies (options slot 2, 468730) is also kept in goh_online.ini [lobby] game_type, and put back
 // into a new page's filter and a new filter window. "Reset" and "all" apply an empty text, which clears it.
 #define VT_SEARCH_OPTS 0x10700b8
-#define FN_SEARCH_APPLY 0x476e40
+#define FN_SEARCH_APPLY 0x476e20
 #define VT_SEARCH_POPUP 0x10700e0
 #define FN_POPUP_BUILD 0x30b820
 #define FN_PAGE_CREATE 0x2e7830

@@ -406,8 +406,9 @@ static int replay_name(const char *ss, const char *me, wchar_t *out, size_t n) {
         const char *next = strstr(p + 1, "{type ");
         if (!next || next > teams) next = teams;
         char t[16], tm[4], id[24], ar[16];
-        if (!field(p, next, "type", t, sizeof t) || strcmp(t, "player") || !field(p, next, "team", tm, sizeof tm)) continue;
-        if (tm[0] >= 'a' && tm[0] <= 'h') count[tm[0] - 'a']++;
+        if (!field(p, next, "type", t, sizeof t) || (strcmp(t, "player") && strcmp(t, "bot")) || !field(p, next, "team", tm, sizeof tm)) continue;
+        if (tm[0] >= 'a' && tm[0] <= 'h') count[tm[0] - 'a']++;     // bots count for the sides' sizes: 2v2 with bots is 2v2
+        if (strcmp(t, "player")) continue;
         if (field(p, next, "steamId", id, sizeof id) && !strcmp(id, me) && (field(p, next, "army", ar, sizeof ar) || team_army(ss, tm, ar, sizeof ar))) name_part(army, sizeof army, ar);
     }
     int a = 0, b = 0;

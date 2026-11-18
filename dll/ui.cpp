@@ -885,6 +885,7 @@ static const char *NEWS_RU[] = {
     "Рейтинг: уход игрока перед закрытием боя хостом теперь замечается — штраф получает ушедший, а не хост",
     "Мод работает с игрой 1.068; каждый матч снова записывается в реплей (в 1.068 игра перестала это делать сама)",
     "1.068: исправлен вылет в начале боя; при вылете мод пишет причину в свой лог",
+    "Мод работает с игрой 1.069; каждый матч снова записывается в реплей, вылет в начале боя исправлен",
 };
 static const char *NEWS_EN[] = {
     "Competitive: infantry answers orders much faster, groups turn together",
@@ -908,6 +909,7 @@ static const char *NEWS_EN[] = {
     "Rating: a player leaving before the host closes the battle is now seen: the leaver is penalised, not the host",
     "The mod works with game 1.068; every match is recorded as a replay again (in 1.068 the game stopped doing it by itself)",
     "1.068: a crash at the start of a battle fixed; on a crash the mod writes its cause to its log",
+    "The mod works with game 1.069; every match is recorded as a replay again, the crash at the start of a battle fixed",
 };
 
 // which news the player has read: by their text, so a build with the same news stays quiet

@@ -176,8 +176,8 @@ void lobby_dump_tick(const char *ini) {
 
 // The tab asks for the list; this, on the game's thread, keeps it fresh while the tab is open. Names as the game's own
 // list shows them: GameType "battle_zones" is the text mp/game/battle_zones, mapname "multi/x:mode" is mission/multi/x/name.
-#define FN_TEXT 0x485cf0                // (key): the text's object
-#define FN_TEXT_STR 0x506e10            // (object): its std::string
+#define FN_TEXT 0x485cd0                // (key): the text's object
+#define FN_TEXT_STR 0x506df0            // (object): its std::string
 typedef struct { union { char buf[16]; const char *ptr; }; size_t size, cap; } Str;
 static const char *text_of(const char *key) {
     static struct { char key[112], text[160]; } cache[512];

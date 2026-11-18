@@ -8,14 +8,18 @@ sys.path.insert(0, HERE)
 from port import Port
 
 WRITE = '--write' in sys.argv
-client = Port(os.path.join(HERE, 'gx_index_1067_old.pkl'), os.path.join(HERE, 'gx_index.pkl'))
-server = Port(os.path.join(HERE, 'gx_server_1067_old.pkl'), os.path.join(HERE, 'gx_server.pkl'))
+client = Port(os.path.join(HERE, 'gx_index_1068_old.pkl'), os.path.join(HERE, 'gx_index.pkl'))
+server = Port(os.path.join(HERE, 'gx_server_1068_old.pkl'), os.path.join(HERE, 'gx_server.pkl'))
 DLL = os.path.join(HERE, '..', 'dll')
 # lines whose constants are the server exe's: (file, text the line contains)
-SERVER_LINES = [('pathing.c', '{0x10ee430,'), ('balance.c', '{"call_to_arms_server.exe",')]
+SERVER_LINES = [('pathing.c', '// server row'), ('balance.c', '{"call_to_arms_server.exe",')]
 # server ? A : B on one line: the first constant of each pair is the server's
 SERVER_FIRST = [('always_day.c', 'const uintptr_t vt = server ?')]
-NOT_ADDRESSES = {0x1700000, 0x1707000}      # image size bounds, set by hand
+# not addresses: image/section bounds (set by hand), round sizes, steps and flag bits that happen to fall in the
+# image's range; the 1.068 port rewrote several of them (DDS flags, VirtualQuery steps, a rule bit)
+NOT_ADDRESSES = {0x1700000, 0x1707000, 0x1737000, 0x100d000, 0x10000, 0x20000, 0x80000, 0x100000, 0x400000,
+                 0x400008, 0x1000000}
+NOT_ADDRESS_LINES = ('|=', 'VirtualQuery', 'flags')     # bit masks and memory walks
 
 todo = []
 for name in sorted(os.listdir(DLL)):
@@ -45,7 +49,7 @@ for name in sorted(os.listdir(DLL)):
                 return '0x%x' % new
             todo.append('%s:%d  %x  %s%s' % (name, n, v, how, ' (server)' if use_server else ''))
             return m.group(0)
-        if line.lstrip().startswith('//'):
+        if line.lstrip().startswith('//') or any(k in line.split('//')[0] for k in NOT_ADDRESS_LINES):
             out.append(line)
         else:
             out.append(re.sub(r'0x([0-9a-fA-F]{5,7})\b', sub, line))

@@ -83,7 +83,7 @@ static void scan_steam_ids(void) {
     static uint8_t buf[1 << 20];
     MEMORY_BASIC_INFORMATION mi;
     int bin = 0, txt = 0;
-    for (uintptr_t a = 0x10170; VirtualQuery((void *)a, &mi, sizeof mi) == sizeof mi; a = (uintptr_t)mi.BaseAddress + mi.RegionSize) {
+    for (uintptr_t a = 0x10000; VirtualQuery((void *)a, &mi, sizeof mi) == sizeof mi; a = (uintptr_t)mi.BaseAddress + mi.RegionSize) {
         if (mi.State != MEM_COMMIT || !(mi.Protect & (PAGE_READWRITE | PAGE_WRITECOPY)) || (mi.Protect & PAGE_GUARD)) continue;
         for (uintptr_t p = (uintptr_t)mi.BaseAddress; p < (uintptr_t)mi.BaseAddress + mi.RegionSize; p += sizeof buf) {
             size_t n = (uintptr_t)mi.BaseAddress + mi.RegionSize - p;
@@ -135,7 +135,7 @@ static void graph(uintptr_t obj, size_t size, int depth, const char *indent) {
             continue;
         }
         uint64_t e = pq(obj + off + 8), cap = pq(obj + off + 16);
-        if (q < e && e <= cap && e - q < 0x105080 && !((e - q) & 7)) {
+        if (q < e && e <= cap && e - q < 0x100000 && !((e - q) & 7)) {
             uint64_t first = pq(q);
             if (cls(first, c2, sizeof c2)[0]) clog("%s+0x%zx -> vector of %llu x %s*", indent, off, (unsigned long long)((e - q) / 8), c2);
             else {

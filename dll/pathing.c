@@ -19,8 +19,8 @@ typedef struct {
     uint32_t vt_human, vt_brain, add_order, set_beo, message, rule, follow, squad_tick, squad_range, squad_ahead, squad_ahead2;
 } Where;
 static const Where WHERE[2] = {
-    {0x14a9680, 0x14a96b0, 0x14a99a0, 0x14a99b8, 0x14aa478, 0x14a96d0, 0x1584568, 0xa3ae57, 0x5f3d40, 0xba640, 0x152740, 0x110f630, 0x110fff8, 0x91dc90, 0x91dba0, 0x95aee0, 0x92aa70, 0x969f20, 0x93107b, 0x9311e2, 0x94c7fa, 0x94c8b7},
-    {0x11126f0, 0x1112720, 0x1112a10, 0x1112a28, 0x11134e8, 0x1112740, 0x11cba58, 0x84cd6b, 0x407040, 0x8eb40, 0xf1b00, 0xe0dfb0, 0xe0e948, 0x72ffe0, 0x72fef0, 0x76d170, 0x73cf10, 0x77c1b0, 0x74626b, 0x7463d2, 0x75ec9a, 0x75ed57},
+    {0x14a9680, 0x14a96b0, 0x14a99a0, 0x14a99b8, 0x14aa478, 0x14a96d0, 0x1584568, 0xa3ade7, 0x5f3d20, 0xba640, 0x152740, 0x110f5c0, 0x110ff88, 0x91dc20, 0x91db30, 0x95ae70, 0x92aa00, 0x969eb0, 0x93100b, 0x931172, 0x94c78a, 0x94c847},
+    {0x11126f0, 0x1112720, 0x1112a10, 0x1112a28, 0x11134e8, 0x1112740, 0x11cba58, 0x84ccfb, 0x407020, 0x8eb40, 0xf1b00, 0xe0df40, 0xe0e8d8, 0x72ff70, 0x72fe80, 0x76d100, 0x73cea0, 0x77c140, 0x7461fb, 0x746362, 0x75ec2a, 0x75ece7},   // server row
 };
 static const Where *W = &WHERE[0];
 static int g_server;
@@ -266,10 +266,10 @@ static void pipe_event(char kind, int a, int b) {
     Event e = {(float)((uistat_now() - click) / 1000), 0, "", a, b, kind};
     g_pipe[i] = e;
 }
-#define FN_SERVER_MESSAGE 0xc96d80
-#define FN_CLIENT_EXEC 0x549630
-#define VT_CLIENT_EXEC 0x10d9a10
-static const uint32_t SERVER_SLOTS[3] = {0x105a1b0, 0x10d97b0, 0x1161748};
+#define FN_SERVER_MESSAGE 0xc96cf0
+#define FN_CLIENT_EXEC 0x549610
+#define VT_CLIENT_EXEC 0x10d99a0
+static const uint32_t SERVER_SLOTS[3] = {0x105a1b0, 0x10d9740, 0x1161708};
 static void *(*g_server_real)(void *, uint8_t *, void *, void *);
 static void *(*g_client_real)(void *);
 static void *server_message(void *self, uint8_t *msg, void *x, void *y) {
@@ -289,7 +289,7 @@ static void *client_exec(void *self) {
     last = m;
     return r;
 }
-#define FN_MOVE_EXEC 0x8f3e00
+#define FN_MOVE_EXEC 0x8f3d90
 #define VT_MOVE 0x10e9770
 static void (*g_add_real)(void *, void *, void *);
 static void (*g_beo_real)(void *, void *);
@@ -438,7 +438,7 @@ static const char *const FIGHT_RULES[] = {"hide_check", "injured_by_enemy", "ene
 #define BRAIN_ENEMY 0x3b8
 static volatile long g_held[NFIGHT], g_alarms, g_alarms_back, g_hot_clash;
 #define HOT_REST_MS 700
-#define RULE_STOP 0x409f70
+#define RULE_STOP 0x400000
 // 0 not told, 1 told and not moving yet, 2 going
 static int told(uint8_t *brain) {
     Hot *h = &g_hot[((uintptr_t)brain >> 4) % 2048];
@@ -567,10 +567,10 @@ static void *human_quant(void *self) {
 // moves. When not, it stops (state 3), waits at least 0.3 s (state 4, 8f4201) and asks again: a squad turned around runs into
 // itself, so every soldier stands for that long. Under the test a soldier ordered less than g_free_ms ago goes on: he is the one
 // who was told to. A vehicle still waits, and so does a soldier well on his way.
-#define SITE_ASK_MOVING 0x8f44f5
-#define SITE_ASK_WAITING 0x8f425b
-#define SITE_WAIT 0x8f4201
-#define FN_RESOLVER 0x8aa360
+#define SITE_ASK_MOVING 0x8f4485
+#define SITE_ASK_WAITING 0x8f41eb
+#define SITE_WAIT 0x8f4191
+#define FN_RESOLVER 0x8aa2f0
 static volatile long g_stopped, g_let_go;
 static float *g_wait;
 static int resolver_ask(void *resolver, uint8_t *actor, const uint8_t *move) {
@@ -737,7 +737,7 @@ brain:;
     memcpy(&vt_beo, exe + W->vt_brain + 0x68, 8);
     memcpy(&vt_msg, exe + W->vt_brain + 0x98, 8);
     memcpy(&slot, exe + W->vt_human + 8 * 23, 8);
-    if (vt_add != exe + W->add_order || vt_beo != exe + W->set_beo || vt_msg != exe + W->message || (uint8_t *)slot < exe || (uint8_t *)slot >= exe + 0x1020138) { rc_log("pathing: the brain is not as expected"); return; }
+    if (vt_add != exe + W->add_order || vt_beo != exe + W->set_beo || vt_msg != exe + W->message || (uint8_t *)slot < exe || (uint8_t *)slot >= exe + 0x1000000) { rc_log("pathing: the brain is not as expected"); return; }
     g_add_real = (void (*)(void *, void *, void *))vt_add;
     g_beo_real = (void (*)(void *, void *))vt_beo;
     our = (void *)add_order; patch(exe + W->vt_brain + 0x90, &our, 8);

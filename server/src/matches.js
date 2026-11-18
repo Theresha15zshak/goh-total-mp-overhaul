@@ -31,7 +31,7 @@ const SIDE = { ger: 'axis', fin: 'axis', eng: 'allies', usa: 'allies', rus: 'all
 const MIN_DURATION_S = 120, MAX_AGE_S = 14 * 86400, REPORTS_PER_HOUR = 30, HISTORY = 30, PAGE = 15, MAX_PAGES = 999, BOARD_PAGE = 100;
 // Balance tags of the builds we take reports from. An older build also sends matches its host closed early (116, 2026-11-07, from F919).
 // The tag comes with the heartbeat; a release with a new tag goes in here.
-const REPORT_TAGS = new Set(['4D2C', 'C7DB', 'A5B2']);   // C7DB, A5B2: builds for game 1.068
+const REPORT_TAGS = new Set(['4D2C', 'C7DB', 'A5B2', '7B0D']);   // C7DB, A5B2: game 1.068; 7B0D: 1.069
 const SMALL_LOSS = 0.25, QUIT_MU = 1.5;   // QUIT_MU: leaving costs at least this, 60 MMR, or leaving would pay against a stronger team
 
 const clean = (s, n) => Array.from(s.replace(/[\u0000-\u001f\u007f]/g, '').trim()).slice(0, n).join('') || '?';

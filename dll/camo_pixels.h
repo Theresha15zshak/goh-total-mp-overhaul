@@ -44,7 +44,7 @@ static bool camo_double_dds(std::vector<unsigned char> &f) {
     if (f.size() < 128 + bw * bh * size) return false;
     std::vector<unsigned char> o(128 + bw * bh * 4 * size + (f.size() - 128));
     memcpy(o.data(), f.data(), 128);
-    const uint32_t nw = w * 2, nh = h * 2, linear = (uint32_t)(bw * bh * 4 * size), more = (mips ? mips : 1) + 1, flags = 0x201c0 | 0x81410;
+    const uint32_t nw = w * 2, nh = h * 2, linear = (uint32_t)(bw * bh * 4 * size), more = (mips ? mips : 1) + 1, flags = 0x20000 | 0x80000;
     uint32_t have; memcpy(&have, &o[8], 4); have |= flags;
     memcpy(&o[8], &have, 4); memcpy(&o[12], &nh, 4); memcpy(&o[16], &nw, 4); memcpy(&o[20], &linear, 4); memcpy(&o[28], &more, 4);
     for (size_t y = 0; y < bh * 2; y++) for (size_t x = 0; x < bw * 2; x++) {
