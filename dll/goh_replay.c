@@ -125,6 +125,14 @@ static uintptr_t replay_core(void) {
     return core && rdq(core) == (uintptr_t)g_base + VT_CORE ? core : 0;
 }
 
+// a replay's session (its client is the replay client), already while the mission is being set up: always_day.c
+// leaves a replay's weather as it was recorded, or the replay plays a different battle and breaks
+int rc_replay_session(void) {
+    if (!g_base) return 0;
+    uintptr_t sc = rdq((uintptr_t)g_base + MP_SINGLETON + SESSION_CLIENT);
+    return sc && rdq(sc) == (uintptr_t)g_base + VT_REPLAY_CLIENT;
+}
+
 static int game_ms(void) { int v = 0; rd(g_base + GAME_TIME_MS, &v, 4); return v; }
 
 static void replay_path(char *out, size_t n) {
@@ -757,12 +765,13 @@ static double ms_since(LARGE_INTEGER t0) {
 
 // while the test runs: where the game faults, if a restore broke something
 static volatile LONG g_fault_logs;
-static int g_dump_ok;
 static LONG CALLBACK fault_log(EXCEPTION_POINTERS *e) {
     DWORD code = e->ExceptionRecord->ExceptionCode;
     if (code != EXCEPTION_ACCESS_VIOLATION && code != EXCEPTION_ILLEGAL_INSTRUCTION && code != 0xc0000374 && code != EXCEPTION_STACK_OVERFLOW &&
         code != 0xc0000409 && code != EXCEPTION_PRIV_INSTRUCTION && code != EXCEPTION_INT_DIVIDE_BY_ZERO) return EXCEPTION_CONTINUE_SEARCH;
-    if (InterlockedIncrement(&g_fault_logs) > 20) return EXCEPTION_CONTINUE_SEARCH;
+    static __thread int inside;               // a fault while logging one: leave it to the game
+    if (inside || InterlockedIncrement(&g_fault_logs) > 20) return EXCEPTION_CONTINUE_SEARCH;
+    inside = 1;
     uintptr_t ip = (uintptr_t)e->ExceptionRecord->ExceptionAddress;
     HMODULE m = NULL;
     char name[MAX_PATH] = "?";
@@ -770,22 +779,11 @@ static LONG CALLBACK fault_log(EXCEPTION_POINTERS *e) {
     if (m) GetModuleFileNameA(m, name, MAX_PATH);
     const char *base = strrchr(name, '\\') ? strrchr(name, '\\') + 1 : name;
     ULONG_PTR *info = e->ExceptionRecord->ExceptionInformation;
-    // and the whole process once, for a look by hand (goh_crash.dmp beside this log)
-    if (g_fault_logs == 1) {
-        HMODULE dbg = LoadLibraryA("dbghelp.dll");
-        BOOL (WINAPI *write)(HANDLE, DWORD, HANDLE, int, void *, void *, void *) = dbg ? (void *)GetProcAddress(dbg, "MiniDumpWriteDump") : NULL;
-        char path[MAX_PATH];
-        snprintf(path, sizeof path, "%sgoh_crash.dmp", g_dir);
-        HANDLE f = CreateFileA(path, GENERIC_WRITE, 0, NULL, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
-        struct { DWORD tid; EXCEPTION_POINTERS *ep; BOOL client; } info_ = {GetCurrentThreadId(), e, FALSE};
-        BOOL ok = write && f != INVALID_HANDLE_VALUE && write(GetCurrentProcess(), GetCurrentProcessId(), f, 0x1000 | 0x20 | 0x40, &info_, NULL, NULL);
-        if (f != INVALID_HANDLE_VALUE) CloseHandle(f);
-        g_dump_ok = ok;
-    }
+    // No dump here (2026-11-20): this runs first, for exceptions the game catches and goes on from too (a replay's quant
+    // thread has such), and MiniDumpWriteDump from inside the faulting thread crashed in dbgcore and took the game down.
     rc_log("fault %08lx at %s+%llx (%s %p), thread %lu, test phase %d, clock %d ms", code, base,
            (unsigned long long)(ip - (uintptr_t)m), info[0] == 1 ? "writing" : info[0] == 8 ? "executing" : "reading",
            (void *)info[1], GetCurrentThreadId(), g_test_phase, game_ms());
-    if (g_fault_logs == 1) rc_log("  %s goh_crash.dmp", g_dump_ok ? "dump written:" : "no dump:");
     // where it came from: return addresses on the stack, into the game (g+rva) or into us (m+offset). An "executing" fault
     // has jumped somewhere wild, and the first of these is who jumped.
     {
@@ -806,6 +804,7 @@ static LONG CALLBACK fault_log(EXCEPTION_POINTERS *e) {
         line[len] = 0;
         rc_log("  rsp %p, stack%s", (void *)e->ContextRecord->Rsp, line);
     }
+    inside = 0;
     return EXCEPTION_CONTINUE_SEARCH;
 }
 

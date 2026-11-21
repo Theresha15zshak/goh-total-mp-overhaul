@@ -53,7 +53,38 @@ static volatile bool g_chat_drawn;      // the global chat was drawn this frame:
 static volatile bool g_pvp_drawn;       // the PVP block over the game list was drawn this frame: the mouse over it is ours
 static ImFont *g_game_font;             // the game's anka 15 (the game list's rows), loaded from interface.pak
 static ImFont *g_game_font_small;       // anka 12: MMR under the names in the lobby
-ImFont *ui_game_font() { return g_game_font; }   // for the rows set in the game's pages elsewhere
+ImFont *ui_game_font() { return g_game_font; }
+static ImFont *g_title_font;             // anka 18: window titles (the skin's gc_hint title)
+static ImFont *g_button_font;            // pobeda 21: the skin's buttons (HOST GAME, JOIN...)
+ImFont *ui_title_font() { return g_title_font ? g_title_font : g_game_font; }
+ImFont *ui_button_font() { return g_button_font ? g_button_font : g_game_font; }
+
+// A button as the game's menus draw theirs (main_menu_dark_skin, button / button_main): the label in pobeda, light
+// grey, gold under the mouse, a dark band behind it with a hairline above and below. Labels are given in capitals.
+bool ui_goh_button(const char *label, ImVec2 size) {
+    ImFont *f = ui_button_font();
+    if (f) ImGui::PushFont(f);
+    ImVec2 ts = ImGui::CalcTextSize(label, nullptr, true);
+    float pad = ImGui::GetFontSize() * 0.9f;
+    if (size.x <= 0) size.x = ts.x + pad * 2;
+    if (size.y <= 0) size.y = ts.y + 12;
+    ImVec2 a = ImGui::GetCursorScreenPos(), b(a.x + size.x, a.y + size.y);
+    bool hit = ImGui::InvisibleButton(label, size);
+    bool hot = ImGui::IsItemHovered(), down = ImGui::IsItemActive();
+    ImDrawList *dl = ImGui::GetWindowDrawList();
+    if (!GImGuiSkin.Button || !GImGuiSkin.Button(dl, a, b, hot, down)) {
+        dl->AddRectFilled(a, b, hot ? IM_COL32(32, 28, 24, 215) : IM_COL32(0, 0, 0, 150));
+        dl->AddLine(ImVec2(a.x, a.y), ImVec2(b.x, a.y), IM_COL32(110, 104, 94, hot ? 200 : 110));
+        dl->AddLine(ImVec2(a.x, b.y - 1), ImVec2(b.x, b.y - 1), IM_COL32(110, 104, 94, hot ? 200 : 110));
+    }
+    ImU32 col = down ? IM_COL32(216, 164, 104, 255) : hot ? IM_COL32(178, 135, 84, 255) : IM_COL32(216, 216, 216, 255);
+    ImVec2 at(floorf(a.x + (size.x - ts.x) / 2 + 0.5f), floorf(a.y + (size.y - ts.y) / 2 + 0.5f));
+    const char *end = ImGui::FindRenderedTextEnd(label);
+    dl->AddText(ImVec2(at.x + 1, at.y + 1), IM_COL32(0, 0, 0, 200), label, end);     // the skin's e(shadow)
+    dl->AddText(at, col, label, end);
+    if (f) ImGui::PopFont();
+    return hit;
+}   // for the rows set in the game's pages elsewhere
 static bool g_failed;
 
 static const float SPEEDS[] = {0.25f, 0.5f, 1, 2, 4, 8, 16};
@@ -886,6 +917,13 @@ static const char *NEWS_RU[] = {
     "Мод работает с игрой 1.068; каждый матч снова записывается в реплей (в 1.068 игра перестала это делать сама)",
     "1.068: исправлен вылет в начале боя; при вылете мод пишет причину в свой лог",
     "Мод работает с игрой 1.069; каждый матч снова записывается в реплей, вылет в начале боя исправлен",
+    "Реплеи: исправлен вылет при просмотре реплея (Always Day больше не меняет погоду в реплее)",
+    "Окна мода в стиле игры: её текстуры и шрифты",
+    "PVP: исправлен вылет при нажатии «Создать» с открытым блоком PVP",
+    "Лобби: Always Day больше не перекрывает длинный список дек, деку снова можно выбрать мышью",
+    "Лобби: кнопка «Камуфляж» выровнена по шапке окна",
+    "Карточка игрока: калибровка рейтинга больше не наезжает на соседний рейтинг",
+    "Камуфляж: у Финляндии появились трофейные Т-34 и КВ",
 };
 static const char *NEWS_EN[] = {
     "Competitive: infantry answers orders much faster, groups turn together",
@@ -910,6 +948,13 @@ static const char *NEWS_EN[] = {
     "The mod works with game 1.068; every match is recorded as a replay again (in 1.068 the game stopped doing it by itself)",
     "1.068: a crash at the start of a battle fixed; on a crash the mod writes its cause to its log",
     "The mod works with game 1.069; every match is recorded as a replay again, the crash at the start of a battle fixed",
+    "Replays: fixed a crash while watching a replay (Always Day no longer changes the weather in a replay)",
+    "The mod's windows in the game's style: its textures and fonts",
+    "PVP: fixed a crash on CREATE with the PVP block open",
+    "Lobby: Always Day no longer covers a long list of decks, a deck can be picked with the mouse again",
+    "Lobby: the Camouflage button lines up with the window's header",
+    "Player card: the rating calibration no longer runs into the other rating",
+    "Camouflage: Finland's captured T-34s and KVs are in the list",
 };
 
 // which news the player has read: by their text, so a build with the same news stays quiet
@@ -1224,16 +1269,20 @@ static void tab_stats(const Pane &p, float top, float bottom) {
     for (int l = 0; l < 2; l++) {
         float x = x0 + l * 0.5f * p.size.x;
         van_text(dl, x, y, VAN_TITLE, lad_name[l]);
-        char line[128];
+        // two lines, each kept in its half: with the calibration in it one line ran into the other ladder's
+        char line[128], line2[96] = "";
         snprintf(line, sizeof line, "%s", TR("Ещё не играл", "Not played yet"));
         for (int k = 0; k < d.n; k++)
             if (d.nf[k] >= 5 && !strcmp(d.f[k][0], "L") && !strcmp(d.f[k][1], lad[l])) {
                 int g = atoi(d.f[k][3]), w = atoi(d.f[k][4]);
                 char mm[64];
                 mmr_text(mm, sizeof mm, d.f[k][2], g);
-                snprintf(line, sizeof line, TR("MMR %s  ·  игр %d  ·  побед %d%%", "MMR %s  ·  games %d  ·  won %d%%"), mm, g, g ? w * 100 / g : 0);
+                snprintf(line, sizeof line, "MMR %s", mm);
+                snprintf(line2, sizeof line2, TR("игр %d  ·  побед %d%%", "games %d  ·  won %d%%"), g, g ? w * 100 / g : 0);
             }
-        van_text(dl, x, y + p.lh * 1.3f, VAN_TEXT, line);
+        float half = 0.5f * p.size.x - 12 * p.sx;
+        van_cell(dl, x, y + p.lh * 1.3f, half, VAN_TEXT, line);
+        if (line2[0]) van_cell(dl, x, y + p.lh * 2.15f, half, VAN_TEXT, line2);
     }
     // by nation
     float ny = y + p.lh * 3.2f, nrow = p.lh * 1.45f;
@@ -1735,10 +1784,22 @@ static void card_tile(ImDrawList *dl, ImFont *font, float size, ImVec2 a, ImVec2
     dl->AddRectFilled(a, b, IM_COL32(10, 11, 12, 150));
     dl->AddRect(a, b, IM_COL32(58, 58, 56, 255));
     dl->AddLine(ImVec2(a.x + 1, a.y + 1), ImVec2(b.x - 1, a.y + 1), IM_COL32(178, 135, 84, 200));
-    float x = a.x + 12 * s;
+    float x = a.x + 12 * s, room = b.x - a.x - 24 * s;
+    // nothing leaves its tile: "1234 (calibration 3/10)" at the big size is wider than a tile and ran over the next one
+    dl->PushClipRect(a, b, true);
     dl->AddText(font, size * .9f, ImVec2(x, a.y + 9 * s), VAN_TITLE, title);
-    dl->AddText(font, size * 1.9f, ImVec2(x, a.y + 27 * s), ACCENT, big);
+    const char *tail = strstr(big, " (");
+    const char *end = tail ? tail : big + strlen(big);
+    float bs = size * 1.9f, bw = font->CalcTextSizeA(bs, FLT_MAX, 0, big, end).x;
+    if (bw > room && bw > 0) bs *= room / bw;           // a long name of a nation: smaller, still whole
+    dl->AddText(font, bs, ImVec2(x, a.y + 27 * s), ACCENT, big, end);
+    if (tail) {                                          // the parenthesis on a line of its own, small, under the number
+        float ts = size * .8f, tw = font->CalcTextSizeA(ts, FLT_MAX, 0, tail + 1).x;
+        if (tw > room && tw > 0) ts *= room / tw;
+        dl->AddText(font, ts, ImVec2(x, a.y + 27 * s + bs + 1 * s), VAN_TITLE, tail + 1);
+    }
     dl->AddText(font, size * .9f, ImVec2(x, b.y - 36 * s), VAN_TEXT, line);
+    dl->PopClipRect();
     if (bar >= 0) {
         float y = b.y - 13 * s, w = b.x - a.x - 24 * s;
         dl->AddRectFilled(ImVec2(x, y), ImVec2(x + w, y + 4 * s), IM_COL32(50, 48, 44, 255));
@@ -2547,8 +2608,8 @@ static void pvp_block() {
 // Glyphs are packed into the texture's channels (each glyph's chnl: 1 blue, 2 green, 4 red, 8 alpha). They go
 // into ImGui's atlas as custom glyphs, their pixels copied in once the atlas is built.
 struct GameGlyph { int rect, x, y, w, h, chnl, tex; };
-static unsigned char *g_font_tex[4];        // each font's texture, BGRA, top row first, until the atlas has them
-static int g_font_tex_w[4], g_font_texs;
+static unsigned char *g_font_tex[8];        // each font's texture, BGRA, top row first, until the atlas has them
+static int g_font_tex_w[8], g_font_texs;
 static ImVector<GameGlyph> g_game_glyphs;
 
 static unsigned char *tga_bgra(const unsigned char *b, size_t n, int *w_out, int *h_out) {
@@ -2593,7 +2654,7 @@ static ImFont *add_game_font(ImFontAtlas *atlas, const char *name) {
         if (type == 4) { chars = blk; nchars = len / 20; }
         p += 5 + len;
     }
-    unsigned char *t = page[0] && g_font_texs < 4 ? pvp_pak_file(page, &tn) : nullptr;
+    unsigned char *t = page[0] && g_font_texs < 8 ? pvp_pak_file(page, &tn) : nullptr;
     unsigned char *tex = t ? tga_bgra(t, tn, &tw, &th) : nullptr;
     free(t);
     if (!tex || !chars || line <= 0) { free(tex); free(f); rc_log("ui: game font %s not loaded", name); return nullptr; }
@@ -2643,6 +2704,185 @@ static void fill_game_glyphs(ImFontAtlas *atlas) {
     g_font_texs = 0;
 }
 
+
+// ---- the game's own UI textures (interface.pak skin/game/...), drawn through ImGui's skin hooks -------------------
+// window: the dotted cloth of frame/window/client.tga tiled, its header.tga band across the title; buttons: the
+// three states of button/window/medium_*.tga (dark band, gold cloth under the mouse, gold lines pressed); checkboxes
+// checkbox_00..03; the scrollbar's gold grip v_point_*.png; separators listbox/separator.tga.
+extern "C" unsigned char *stbi_load_from_memory(const unsigned char *, int, int *, int *, int *, int);
+extern "C" void stbi_image_free(void *);
+struct SkinTex { ID3D11ShaderResourceView *srv; int w, h; };
+enum { SK_CLIENT, SK_HEADER, SK_BTN0, SK_BTN1, SK_BTN2, SK_CHK_ON, SK_CHK_ON_HOT, SK_CHK_OFF, SK_CHK_OFF_HOT, SK_GRIP, SK_GRIP_HOT,
+       SK_SEP, SK_COUNT };
+static const char *SKIN_FILES[SK_COUNT] = {
+    "skin/game/frame/window/client.tga", "skin/game/frame/window/header.tga",
+    "skin/game/button/window/medium_00.tga", "skin/game/button/window/medium_01.tga", "skin/game/button/window/medium_02.tga",
+    "skin/game/checkbox/checkbox_00.tga", "skin/game/checkbox/checkbox_01.tga", "skin/game/checkbox/checkbox_02.tga",
+    "skin/game/checkbox/checkbox_03.tga", "skin/game/scrollbar/v_point_00.png", "skin/game/scrollbar/v_point_01.png",
+    "skin/game/listbox/separator.tga"};
+static SkinTex g_skin[SK_COUNT];
+static bool g_skin_tried;
+
+static void skin_load() {
+    if (g_skin_tried || !g_dev) return;
+    g_skin_tried = true;
+    int got = 0;
+    for (int i = 0; i < SK_COUNT; i++) {
+        size_t n = 0;
+        unsigned char *f = pvp_pak_file(SKIN_FILES[i], &n);
+        if (!f) continue;
+        int w = 0, h = 0, comp = 0;
+        unsigned char *px;
+        DXGI_FORMAT fmt;
+        bool png = strstr(SKIN_FILES[i], ".png") != nullptr;
+        if (png) { px = stbi_load_from_memory(f, (int)n, &w, &h, &comp, 4); fmt = DXGI_FORMAT_R8G8B8A8_UNORM; }
+        else { px = tga_bgra(f, n, &w, &h); fmt = DXGI_FORMAT_B8G8R8A8_UNORM; }
+        free(f);
+        if (!px) continue;
+        D3D11_TEXTURE2D_DESC td = {};
+        td.Width = w; td.Height = h; td.MipLevels = 1; td.ArraySize = 1; td.Format = fmt; td.SampleDesc.Count = 1;
+        td.Usage = D3D11_USAGE_IMMUTABLE; td.BindFlags = D3D11_BIND_SHADER_RESOURCE;
+        D3D11_SUBRESOURCE_DATA sd = {px, (UINT)w * 4, 0};
+        ID3D11Texture2D *tex = nullptr;
+        if (SUCCEEDED(g_dev->CreateTexture2D(&td, &sd, &tex))) {
+            g_dev->CreateShaderResourceView(tex, nullptr, &g_skin[i].srv);
+            tex->Release();
+            g_skin[i].w = w; g_skin[i].h = h;
+            got++;
+        }
+        if (png) stbi_image_free(px); else free(px);
+    }
+    rc_log("ui: %d of %d skin textures of the game", got, (int)SK_COUNT);
+}
+static bool sk(int i) { skin_load(); return g_skin[i].srv != nullptr; }
+static ImTextureID skid(int i) { return (ImTextureID)g_skin[i].srv; }
+
+// the cloth tiled from a's corner, cut at b, at the given strength
+static void skin_tile(ImDrawList *dl, int i, ImVec2 a, ImVec2 b, int alpha) {
+    float tw = (float)g_skin[i].w, th = (float)g_skin[i].h;
+    dl->PushClipRect(a, b, true);
+    for (float y = a.y; y < b.y; y += th)
+        for (float x = a.x; x < b.x; x += tw) {
+            float w = ImMin(tw, b.x - x), h = ImMin(th, b.y - y);
+            dl->AddImage(skid(i), ImVec2(x, y), ImVec2(x + w, y + h), ImVec2(0, 0), ImVec2(w / tw, h / th), IM_COL32(255, 255, 255, alpha));
+        }
+    dl->PopClipRect();
+}
+
+static bool skin_window_bg(ImDrawList *dl, const ImVec2 &a, const ImVec2 &b, ImU32 col) {
+    int alpha = (col >> IM_COL32_A_SHIFT) & 0xff;
+    if (alpha < 8) return false;                        // a see-through window of ours over the game's page
+    dl->AddRectFilled(a, b, col);
+    if (sk(SK_CLIENT)) skin_tile(dl, SK_CLIENT, a, b, alpha);
+    return true;
+}
+static bool skin_title_bg(ImDrawList *dl, const ImVec2 &a, const ImVec2 &b, bool active) {
+    dl->AddRectFilled(a, b, IM_COL32(18, 18, 17, 250));
+    if (sk(SK_CLIENT)) skin_tile(dl, SK_CLIENT, a, b, 200);
+    if (sk(SK_HEADER)) dl->AddImage(skid(SK_HEADER), a, b, ImVec2(0, 0), ImVec2(1, 1), IM_COL32(255, 255, 255, active ? 255 : 150));
+    return true;
+}
+static bool skin_button(ImDrawList *dl, const ImVec2 &a, const ImVec2 &b, bool hovered, bool held) {
+    int i = held ? SK_BTN2 : hovered ? SK_BTN1 : SK_BTN0;
+    if (!sk(i)) return false;
+    dl->AddRectFilled(a, b, IM_COL32(0, 0, 0, 120));
+    dl->AddImage(skid(i), a, b);
+    dl->AddRect(a, b, hovered ? IM_COL32(178, 135, 84, 170) : IM_COL32(74, 70, 62, 150));
+    return true;
+}
+static bool skin_checkbox(ImDrawList *dl, const ImVec2 &a, const ImVec2 &b, bool checked, bool hovered) {
+    int i = checked ? (hovered ? SK_CHK_ON_HOT : SK_CHK_ON) : (hovered ? SK_CHK_OFF_HOT : SK_CHK_OFF);
+    if (!sk(i)) return false;
+    dl->AddImage(skid(i), a, b);
+    return true;
+}
+static bool skin_scroll_grab(ImDrawList *dl, const ImVec2 &a, const ImVec2 &b, bool vertical, bool hovered, bool held) {
+    int i = hovered || held ? SK_GRIP_HOT : SK_GRIP;
+    if (!vertical || !sk(i)) return false;
+    dl->AddImage(skid(i), a, b);
+    return true;
+}
+static bool skin_separator(ImDrawList *dl, const ImVec2 &a, const ImVec2 &b) {
+    if (!sk(SK_SEP)) return false;
+    dl->AddImage(skid(SK_SEP), a, ImVec2(b.x, ImMax(b.y, a.y + 1)));
+    return true;
+}
+
+// The game's menu skin (gamelogic.pak set/registry/main_menu_dark_skin.inc): dialogs 23,23,23 with a 20,20,20 frame,
+// anka text, list rows 176,151,121 that turn 235,178,108 on 44,37,30 under the mouse, gold 178,135,84 / 216,164,104
+// for what is hovered and pressed, inputs on near-black with 176,151,121 selection. Square corners, hairline borders.
+static void goh_skin(float scale) {
+    ImGuiStyle &st = ImGui::GetStyle();
+    st.WindowRounding = st.ChildRounding = st.FrameRounding = st.PopupRounding = 0;
+    st.ScrollbarRounding = st.GrabRounding = st.TabRounding = 0;
+    st.WindowBorderSize = 1; st.ChildBorderSize = 1; st.PopupBorderSize = 1; st.FrameBorderSize = 1;
+    st.WindowPadding = ImVec2(10, 8);
+    st.FramePadding = ImVec2(6, 4);
+    st.ItemSpacing = ImVec2(8, 5);
+    st.ScrollbarSize = 10;
+    st.GrabMinSize = 8;
+    st.WindowTitleAlign = ImVec2(0, 0.5f);
+    st.ScaleAllSizes(scale);
+    auto c = [](int r, int g, int b, int a = 255) { return ImVec4(r / 255.f, g / 255.f, b / 255.f, a / 255.f); };
+    ImVec4 *k = st.Colors;
+    k[ImGuiCol_Text] = c(220, 216, 206);
+    k[ImGuiCol_TextDisabled] = c(128, 128, 128);
+    k[ImGuiCol_WindowBg] = c(23, 23, 23, 238);
+    k[ImGuiCol_ChildBg] = c(16, 16, 16, 150);
+    k[ImGuiCol_PopupBg] = c(23, 23, 23, 248);
+    k[ImGuiCol_Border] = c(58, 56, 52, 255);
+    k[ImGuiCol_BorderShadow] = c(0, 0, 0, 0);
+    k[ImGuiCol_FrameBg] = c(12, 12, 12, 220);
+    k[ImGuiCol_FrameBgHovered] = c(44, 37, 30, 230);
+    k[ImGuiCol_FrameBgActive] = c(60, 49, 37, 240);
+    k[ImGuiCol_TitleBg] = c(14, 14, 14, 245);
+    k[ImGuiCol_TitleBgActive] = c(30, 27, 23, 250);
+    k[ImGuiCol_TitleBgCollapsed] = c(14, 14, 14, 200);
+    k[ImGuiCol_MenuBarBg] = c(20, 20, 20, 255);
+    k[ImGuiCol_ScrollbarBg] = c(16, 16, 16, 200);
+    k[ImGuiCol_ScrollbarGrab] = c(70, 68, 63);
+    k[ImGuiCol_ScrollbarGrabHovered] = c(120, 98, 70);
+    k[ImGuiCol_ScrollbarGrabActive] = c(178, 135, 84);
+    k[ImGuiCol_CheckMark] = c(216, 164, 104);
+    k[ImGuiCol_SliderGrab] = c(178, 135, 84);
+    k[ImGuiCol_SliderGrabActive] = c(216, 164, 104);
+    k[ImGuiCol_Button] = c(0, 0, 0, 150);
+    k[ImGuiCol_ButtonHovered] = c(44, 37, 30, 235);
+    k[ImGuiCol_ButtonActive] = c(98, 74, 47, 255);
+    k[ImGuiCol_Header] = c(44, 37, 30, 220);
+    k[ImGuiCol_HeaderHovered] = c(56, 46, 35, 235);
+    k[ImGuiCol_HeaderActive] = c(98, 74, 47, 255);
+    k[ImGuiCol_Separator] = c(58, 56, 52);
+    k[ImGuiCol_SeparatorHovered] = c(178, 135, 84);
+    k[ImGuiCol_SeparatorActive] = c(216, 164, 104);
+    k[ImGuiCol_ResizeGrip] = c(58, 56, 52, 120);
+    k[ImGuiCol_ResizeGripHovered] = c(178, 135, 84, 200);
+    k[ImGuiCol_ResizeGripActive] = c(216, 164, 104, 255);
+    k[ImGuiCol_Tab] = c(0, 0, 0, 150);
+    k[ImGuiCol_TabHovered] = c(93, 93, 93, 255);
+    k[ImGuiCol_TabActive] = c(44, 37, 30, 255);
+    k[ImGuiCol_TabUnfocused] = c(0, 0, 0, 150);
+    k[ImGuiCol_TabUnfocusedActive] = c(44, 37, 30, 220);
+    k[ImGuiCol_PlotLines] = c(178, 135, 84);
+    k[ImGuiCol_PlotLinesHovered] = c(235, 178, 108);
+    k[ImGuiCol_PlotHistogram] = c(178, 135, 84);
+    k[ImGuiCol_PlotHistogramHovered] = c(235, 178, 108);
+    k[ImGuiCol_TableHeaderBg] = c(20, 20, 20);
+    k[ImGuiCol_TableBorderStrong] = c(58, 56, 52);
+    k[ImGuiCol_TableBorderLight] = c(40, 40, 38);
+    k[ImGuiCol_TableRowBg] = c(0, 0, 0, 0);
+    k[ImGuiCol_TableRowBgAlt] = c(255, 255, 255, 8);
+    k[ImGuiCol_TextSelectedBg] = c(176, 151, 121, 90);
+    k[ImGuiCol_NavHighlight] = c(178, 135, 84);
+    k[ImGuiCol_ModalWindowDimBg] = c(0, 0, 0, 140);
+    GImGuiSkin.WindowBg = skin_window_bg;
+    GImGuiSkin.TitleBg = skin_title_bg;
+    GImGuiSkin.Button = skin_button;
+    GImGuiSkin.Checkbox = skin_checkbox;
+    GImGuiSkin.ScrollGrab = skin_scroll_grab;
+    GImGuiSkin.Separator = skin_separator;
+}
+
 static void init_imgui(IDXGISwapChain *sc) {
     DXGI_SWAP_CHAIN_DESC d;
     if (FAILED(sc->GetDesc(&d)) || !d.OutputWindow || FAILED(sc->GetDevice(__uuidof(ID3D11Device), (void **)&g_dev))) {
@@ -2674,18 +2914,13 @@ static void init_imgui(IDXGISwapChain *sc) {
         io.Fonts->AddFontDefault();
     g_game_font = add_game_font(io.Fonts, "anka_15");
     g_game_font_small = add_game_font(io.Fonts, "anka_12");
+    g_title_font = add_game_font(io.Fonts, "anka_18");
+    g_button_font = add_game_font(io.Fonts, "pobeda_21");
+    if (g_game_font) io.FontDefault = g_game_font;      // every window of ours in the game's own letters
 
     rc_log("ui: font loaded");
     ImGui::StyleColorsDark();
-    ImGuiStyle &st = ImGui::GetStyle();
-    st.WindowRounding = 6;
-    st.FrameRounding = 4;
-    st.WindowPadding = ImVec2(10, 8);
-    st.ScaleAllSizes(scale);
-    st.Colors[ImGuiCol_WindowBg] = ImVec4(0.106f, 0.114f, 0.122f, 1);
-    st.Colors[ImGuiCol_Button] = ImVec4(0.17f, 0.18f, 0.19f, 1);
-    st.Colors[ImGuiCol_ButtonHovered] = ImVec4(0.26f, 0.27f, 0.28f, 1);
-    st.Colors[ImGuiCol_ButtonActive] = ImVec4(0.85f, 0.64f, 0.25f, 1);
+    goh_skin(scale);
 
     ImGui_ImplWin32_Init(g_hwnd);
     ImGui_ImplDX11_Init(g_dev, g_ctx);
@@ -2695,6 +2930,11 @@ static void init_imgui(IDXGISwapChain *sc) {
                                 ImFontAtlas *atlas = ImGui::GetIO().Fonts;
                                 atlas->Build();
                                 fill_game_glyphs(atlas);
+                                for (ImFont *f : atlas->Fonts)          // anka and pobeda have no en or em dash
+                                    if (f != atlas->Fonts[0] && f->FindGlyphNoFallback('-')) {
+                                        if (!f->FindGlyphNoFallback(0x2014)) f->AddRemapChar(0x2014, '-');
+                                        if (!f->FindGlyphNoFallback(0x2013)) f->AddRemapChar(0x2013, '-');
+                                    }
                                 return ImGui_ImplDX11_CreateDeviceObjects() ? 0 : 1;
                             },
                             nullptr, STACK_SIZE_PARAM_IS_A_RESERVATION, nullptr);

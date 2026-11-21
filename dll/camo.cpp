@@ -19,6 +19,8 @@
 #include "goh_replay.h"
 #include "camo.h"
 #include "camo_pixels.h"
+ImFont *ui_title_font();             // ui.cpp: the game's anka 18, and a button drawn as the game's menus draw theirs
+bool ui_goh_button(const char *label, ImVec2 size);
 extern "C" {
 unsigned char *stbi_load_from_memory(const unsigned char *, int, int *, int *, int *, int);
 int stbi_info_from_memory(const unsigned char *, int, int *, int *, int *);
@@ -797,6 +799,68 @@ void lowest_row(uintptr_t d, const Panel &area, Panel &last, int depth, int &bud
     if (!b || e < b || e - b > 8 * 4096) return;
     for (uintptr_t k = b; k < e; k += 8) lowest_row(q(k), area, last, depth + 1, budget);
 }
+// a dialog by its id in the layout (+0x58 the id, short ones in place), under d
+uintptr_t find_id(uintptr_t d, const char *id, int depth, int &budget) {
+    if (!d || depth > 30 || --budget < 0) return 0;
+    uint64_t size = 0, cap = 0;
+    char s[16] = {};
+    if (read(d + 0x68, &size, 8) && read(d + 0x70, &cap, 8) && cap == 15 && size == strlen(id) && size < 16 &&
+        read(d + 0x58, s, (size_t)size) && !memcmp(s, id, (size_t)size)) return d;
+    uintptr_t b = q(d + 0xd8), e = q(d + 0xe0);
+    if (!b || e < b || e - b > 8 * 4096) return 0;
+    for (uintptr_t k = b; k < e; k += 8) if (uintptr_t f = find_id(q(k), id, depth + 1, budget)) return f;
+    return 0;
+}
+// The lobby's window header (breadcrumbs ... back arrow): the back button's row, found from the map's info button up
+Panel lobby_head, lobby_back;
+void find_lobby_head(void *info) {
+    static void *was;
+    static uintptr_t back;
+    if (info != was) {
+        was = info;
+        back = 0;
+        uintptr_t d = (uintptr_t)info;
+        for (int up = 0; up < 14 && d && !back; up++) {
+            d = q(d + 0xf0);
+            int budget = 3000;
+            back = find_id(d, "btn_back", 0, budget);
+        }
+        static int told;
+        if (told++ < 4) rc_log("camo: the lobby's back button %s", back ? "found" : "not found");
+    }
+    Panel head = {}, b = {};
+    if (back && bounds(back, b)) bounds(q(back + 0xf0), head);
+    AcquireSRWLockExclusive(&lock);
+    lobby_head = head; lobby_back = b;
+    ReleaseSRWLockExclusive(&lock);
+}
+// Something of the game's opened over our row: a drop-down list of the settings above it (a long list of decks went down
+// over "Always Day", and the row, drawn over the game, took the clicks meant for the list's lines). Such a list starts
+// above the row, reaches into it, is taller than a row, and is no page or panel (those hold the whole settings area).
+// The game's thread, between its GUI updates (as pvp.c's look at the screen): the dialogs are read directly, each one's
+// place is its parent's plus its own.
+bool row_overlaid(uintptr_t d, float px, float py, const Panel &row, const Panel &area, int depth, int &budget) {
+    if (d < 0x10000 || (d & 7) || depth > 40 || --budget < 0) return false;
+    const unsigned char *p = (const unsigned char *)d;
+    if (!(*(const unsigned *)(p + 0x48) & 2)) return false;
+    const int *pos = (const int *)(p + 0x98), *size = (const int *)(p + 0xa0);
+    Panel h = {true, px + pos[0], py + pos[1], (float)size[0], (float)size[1]};
+    if (depth) {
+        bool holds_area = h.x <= area.x + 1 && h.y <= area.y + 1 && h.x + h.w >= area.x + area.w - 1 && h.y + h.h >= area.y + area.h - 1;
+        bool across = h.x < row.x + row.w && h.x + h.w > row.x;
+        // only a list (eListbox, 106d158): a splitter 5 wide crossing the panel was taken for one (2026-11-21)
+        if (*(const uintptr_t *)p == base + 0x106d158 && !holds_area && across && h.y < row.y - 1 && h.y + h.h > row.y + 2 &&
+            h.h > row.h * 1.5f && h.w < area.w * .9f) {
+            static int told;
+            if (told++ < 6) rc_log("day: over the row: %llx at %.0f %.0f %.0f x %.0f", (unsigned long long)(*(const uintptr_t *)p - base), h.x, h.y, h.w, h.h);
+            return true;
+        }
+    } else h.x = h.y = 0;              // the screen's root is the origin
+    uintptr_t b = *(const uintptr_t *)(p + 0xd8), e = *(const uintptr_t *)(p + 0xe0);
+    if (!b || e < b || e - b > 8 * 4096) return false;
+    for (uintptr_t k = b; k < e; k += 8) if (row_overlaid(*(const uintptr_t *)k, h.x, h.y, row, area, depth + 1, budget)) return true;
+    return false;
+}
 void warm_start();
 extern "C" void camo_tick() {
     static bool in_game;
@@ -827,7 +891,8 @@ extern "C" void camo_tick() {
         };
         of(SCREEN_CAMO, p);
         of(SCREEN_REPLAYS, list);
-        of(SCREEN_LOBBY, info);
+        void *info_d = of(SCREEN_LOBBY, info);
+        find_lobby_head(info.shown ? info_d : nullptr);
         Panel button = {}, area = {};
         of(SCREEN_START, button);
         void *settings = of(SCREEN_SETTINGS, area);
@@ -846,6 +911,19 @@ extern "C" void camo_tick() {
             float h = last.shown ? last.h : 33;
             day = {true, last.shown ? last.x : area.x, last.shown ? last.y + last.h + 1 : area.y + area.h - h - 8, last.shown ? last.w : area.w, h};
             if (day.y + day.h > area.y + area.h) day.y = area.y + area.h - day.h;
+            static DWORD over_at;
+            static bool over;
+            if (now - over_at >= 50) {
+                over_at = now;
+                uintptr_t root = (uintptr_t)settings;
+                for (int i = 0; i < 64; i++) { uintptr_t up = q(root + 0xf0); if (!up) break; root = up; }
+                int budget = 20000;
+                bool was = over;
+                over = q(root) == base + 0x1125580 && row_overlaid(root, 0, 0, day, area, 0, budget);   // eDesktop, as bounds()
+                static int told;
+                if (over != was && told++ < 10) rc_log("day: a list of the game's %s the row", over ? "opened over" : "gone from");
+            }
+            if (over) day.shown = false;
         } else last = {};
         // under the last row of the Game tab, when the list is at its end
         static Panel option;
@@ -2414,9 +2492,17 @@ DWORD WINAPI read_vehicles(LPVOID) {
             parts.push_back(m.substr(i, e - i));
             i = e + 1;
         }
-        if (parts.size() != 4 || parts[3] != parts[2] + ".mdl") continue;
+        if (parts.size() != 4 || parts[3].size() <= 4 || parts[3].compare(parts[3].size() - 4, 4, ".mdl")) continue;
+        // the model is named as its folder, or the folder is a captured one named after it: Finland's T-34s and KVs
+        // are finland/tank_medium/t3476_41_fin/t3476_41.mdl, finland/tank_heavy/kv1_42_fin/kv1_42.mdl
+        const std::string stem = parts[3].substr(0, parts[3].size() - 4);
+        const bool exact = stem == parts[2];
+        if (!exact && (parts[2].compare(0, stem.size(), stem) || parts[2].size() == stem.size())) continue;
         const std::string &k = parts[1];
         if (k != "tank_light" && k != "tank_medium" && k != "tank_heavy" && k != "btr" && k != "car" && k.find("spg") == std::string::npos) continue;
+        // one line per folder: the exact one if there is one
+        auto same = std::find_if(out.begin(), out.end(), [&](const Vehicle &v) { return v.country == parts[0] && v.kind == k && v.name == parts[2]; });
+        if (same != out.end()) { if (exact) same->model = m; continue; }
         out.push_back({m, parts[2], parts[0], k});
     }
     std::sort(out.begin(), out.end(), [](const Vehicle &a, const Vehicle &b) {
@@ -2907,7 +2993,7 @@ void crop_window(ID3D11Device *device) {
 void vehicle_settings() {
     const bool disable_import = importing || presets.size() >= 256;
     if (disable_import) ImGui::BeginDisabled();
-    if (ImGui::Button(TR("Загрузить PNG", "Import PNG"), ImVec2(-1,0))) {
+    if (ui_goh_button(TR("ЗАГРУЗИТЬ PNG", "IMPORT PNG"), ImVec2(ImGui::GetContentRegionAvail().x, 0))) {
         InterlockedExchange(&importing,1);
         HANDLE thread = CreateThread(nullptr, 4<<20, pick, nullptr, STACK_SIZE_PARAM_IS_A_RESERVATION, nullptr);
         if (thread) CloseHandle(thread); else { InterlockedExchange(&importing,0); status = TR("Не удалось открыть окно выбора файла", "Cannot open file picker"); }
@@ -3052,11 +3138,13 @@ void replays_button() {
     if (!l.shown) return;
     ImGui::SetNextWindowPos(ImVec2(l.x + 24, l.y - 76));
     ImGui::SetNextWindowBgAlpha(0);
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowBorderSize, 0);
     if (ImGui::Begin("###goh_replays_folder", nullptr, ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_AlwaysAutoResize |
                      ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoFocusOnAppearing)) {
-        if (ImGui::Button(TR("Открыть папку реплеев", "Open replays folder"), ImVec2(0, 34))) replays_open_folder();
+        if (ui_goh_button(TR("ОТКРЫТЬ ПАПКУ РЕПЛЕЕВ", "OPEN REPLAYS FOLDER"), ImVec2(0, 0))) replays_open_folder();
     }
     ImGui::End();
+    ImGui::PopStyleVar();
 }
 // The lobby: the camouflage in a window of its own over it, in the header left of the back button. A battle takes it away.
 void lobby_button() {
@@ -3064,19 +3152,28 @@ void lobby_button() {
         from_lobby_close = false;
         if (from_lobby) { from_lobby = false; floating = false; }
     }
-    Panel l; AcquireSRWLockShared(&lock); l = lobby_info; ReleaseSRWLockShared(&lock);
+    Panel l, head, back;
+    AcquireSRWLockShared(&lock); l = lobby_info; head = lobby_head; back = lobby_back; ReleaseSRWLockShared(&lock);
     if (!l.shown) return;
-    ImGui::SetNextWindowPos(ImVec2(l.x + l.w - 64, l.y - 4), 0, ImVec2(1, 1));
+    // in the window's header, as tall as it, left of the back arrow; without the header found, where it was before
+    const bool in_head = head.shown && back.shown && head.h > 10;
+    if (in_head) ImGui::SetNextWindowPos(ImVec2(floorf(back.x - 12), floorf(head.y)), 0, ImVec2(1, 0));
+    else ImGui::SetNextWindowPos(ImVec2(l.x + l.w - 64, l.y - 4), 0, ImVec2(1, 1));
     ImGui::SetNextWindowBgAlpha(0);
-    if (ImGui::Begin("###goh_lobby_camo", nullptr, ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_AlwaysAutoResize |
-                     ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoFocusOnAppearing)) {
-        if (ImGui::Button(TR("Камуфляж", "Camouflage"))) {
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowBorderSize, 0);
+    if (in_head) ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0, 0));
+    bool open = ImGui::Begin("###goh_lobby_camo", nullptr, ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_AlwaysAutoResize |
+                             ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoFocusOnAppearing);
+    if (in_head) ImGui::PopStyleVar();
+    if (open) {
+        if (ui_goh_button(TR("КАМУФЛЯЖ", "CAMOUFLAGE"), ImVec2(0, in_head ? floorf(head.h) : 0))) {
             floating = !floating;
             from_lobby = floating;
             if (floating) ImGui::SetWindowFocus("###goh_camo");
         }
     }
     ImGui::End();
+    ImGui::PopStyleVar();
 }
 ImFont *ui_game_font();
 // A row of ours in a list of the game's, drawn as the game draws its own: a name, and a box in the column of the values
@@ -3161,7 +3258,10 @@ extern "C" void camo_draw(ID3D11Device *device, void *window) {
         ImGui::SetNextWindowBgAlpha(1);
         flags |= ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoCollapse;
     } else ImGui::SetNextWindowSize(ImVec2(1100, 680), ImGuiCond_FirstUseEver);
-    if (!ImGui::Begin(TR("КАМУФЛЯЖ###goh_camo", "CAMOUFLAGE###goh_camo"), p.shown ? nullptr : &floating, flags)) { ImGui::End(); return; }
+    ImGui::PushFont(ui_title_font());
+    bool open_ = ImGui::Begin(TR("КАМУФЛЯЖ###goh_camo", "CAMOUFLAGE###goh_camo"), p.shown ? nullptr : &floating, flags);
+    ImGui::PopFont();
+    if (!open_) { ImGui::End(); return; }
     float all = ImGui::GetContentRegionAvail().x;
     ImGui::BeginChild("vehicles", ImVec2(all * .22f, 0), true);
     vehicle_list();

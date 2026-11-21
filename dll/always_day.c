@@ -34,9 +34,12 @@ static int term_kind(const unsigned char *term) {
     return 0;
 }
 
+int rc_replay_session(void);     // goh_replay.c
 static unsigned char term_check(void *self, void *arg) {
     unsigned char real = g_term_real(self, arg);
-    if (!day_on()) return real;
+    // a replay keeps the weather it was recorded with: forced day there made it a different battle, it went apart
+    // from its commands (missing entities) and crashed in damage on a null shooter (2026-11-20)
+    if (!day_on() || (!g_server && rc_replay_session())) return real;
     int kind = term_kind((const unsigned char *)self);
     static int told;
     if (told++ < 8) rc_log("day: the mission asks for option %d, the game says %d", kind, real);

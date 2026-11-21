@@ -189,11 +189,21 @@ static void log_chain(const char *what, void *d) {
 
 // the page's own list of games and its column titles on or off the screen (bit 1 of the flags, then the
 // layout is told, as the dialog's own vtable +0x60 does); the game's thread only
+// Each is touched only while its vtable is still the one it had when the page was bound: a dialog being taken
+// down has its base class's (eEventable) and the call through +0x60 read a null (crash seen 2026-11-09 at
+// HOST with the block on, "gui:dialog:ku(btn_host_game)", RAX the eEventable vtable).
+static uint64_t g_list_vt, g_head_vt;
 static void list_shown(int on) {
     void *ds[2] = {g_list, g_head};
+    const uint64_t vts[2] = {g_list_vt, g_head_vt};
     for (int i = 0; i < 2; i++) {
         uint8_t *d = ds[i];
         if (!d) continue;
+        if (!vts[i] || pq((uintptr_t)d) != vts[i]) {
+            static volatile long logged;
+            if (InterlockedIncrement(&logged) <= 4) rc_log("pvp: the page's %s is not what was bound, left alone", i ? "header" : "list");
+            continue;
+        }
         uint32_t *flags = (uint32_t *)(d + 0x48);
         *flags = on ? *flags | 2 : *flags & ~2u;
         (*(void (***)(void *))d)[0x60 / 8](d);
@@ -219,6 +229,7 @@ static void bind_page(int k, void *page) {
     ((void (*)(void *, void *, int, int))(g_base + FN_ON_EVENT))(button, target, 7, PVP_CMD);
     if (page != g_page && g_pvp_on) { list_shown(1); g_pvp_on = 0; }   // another page: the last one gets its list back
     g_head = head; g_list = list; g_btn = btn; g_page = page;
+    g_head_vt = head ? pq((uintptr_t)head) : 0; g_list_vt = list ? pq((uintptr_t)list) : 0;
     if (g_pvp_on) list_shown(0);
 }
 
@@ -241,14 +252,22 @@ static int command(void *msg) {
         static uint32_t logged;
         if (!(logged & 1u << (id - 0x15))) { logged |= 1u << (id - 0x15); rc_log("pvp: page command %#x with the block on", id); }
     }
+    // HOST and JOIN leave the page (its dialogs may go while the game handles them): the block goes off and the
+    // list comes back first, and nothing of the page is touched after the game's handling.
+    if ((id == 0x15 || id == 0x18) && g_pvp_on) {
+        g_pvp_on = 0;
+        list_shown(1);
+        rc_log("pvp: page command %#x leaves the page, block off", id);
+        return 2;
+    }
     return 0;
 }
 
 // after the page's own handling: whatever it did to its list, ours stays over it
 static void after_command(void) { if (g_pvp_on) list_shown(0); }
 
-static void cmd_online(void *self, void *msg) { if (!command(msg)) { g_cmd[0](self, msg); after_command(); } }
-static void cmd_lan(void *self, void *msg) { if (!command(msg)) { g_cmd[1](self, msg); after_command(); } }
+static void cmd_online(void *self, void *msg) { int c = command(msg); if (c != 1) { g_cmd[0](self, msg); if (!c) after_command(); } }
+static void cmd_lan(void *self, void *msg) { int c = command(msg); if (c != 1) { g_cmd[1](self, msg); if (!c) after_command(); } }
 
 static void forget(void *page) {
     if (page != g_page) return;

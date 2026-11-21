@@ -270,6 +270,7 @@ def mod_version():
 
 def main():
     os.makedirs(OBJ, exist_ok=True)
+    subprocess.run([sys.executable, os.path.join(ROOT, 'tools', 'imgui_skin.py'), IMGUI], check=True)   # GImGuiSkin into the submodule
     os.makedirs(os.path.dirname(OUT), exist_ok=True)
     tag = balance_tag(balance_header())
     ui_header()
