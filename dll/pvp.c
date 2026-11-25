@@ -883,12 +883,20 @@ int pvp_install(uint8_t *exe, const char *dir, uint8_t *(*alloc)(size_t), void (
         patch(exe + FN_PING_MISS, MISS_NEW, 5);
     else
         rc_log("pvp: the lobby ping average is not as expected, left as it is");
-    lb_apply_install(patch);
-    filter_install(dir, patch);
-    camo_install(exe, alloc, patch);
-    day_install(exe, patch, 0);
-    farshoot_init(exe);
-    pathing_install(exe, alloc, patch);
+    // [debug] in goh_snapshots.ini: each of these off by itself, to find one that breaks a game or a replay
+    char ini[MAX_PATH];
+    snprintf(ini, sizeof ini, "%sgoh_snapshots.ini", dir);
+#define PVP_PART(name) GetPrivateProfileIntA("debug", name, 1, ini)
+    if (PVP_PART("lobby_lines")) lb_apply_install(patch);
+    if (PVP_PART("lobby_filter")) filter_install(dir, patch);
+    if (PVP_PART("camo")) camo_install(exe, alloc, patch);
+    else { void camo_base_only(unsigned char *exe); camo_base_only(exe); }
+    if (PVP_PART("day")) day_install(exe, patch, 0);
+    if (PVP_PART("farshoot")) farshoot_init(exe);
+    if (PVP_PART("pathing")) pathing_install(exe, alloc, patch);
+    rc_log("pvp parts: lobby_lines %d lobby_filter %d camo %d day %d farshoot %d pathing %d", PVP_PART("lobby_lines"),
+           PVP_PART("lobby_filter"), PVP_PART("camo"), PVP_PART("day"), PVP_PART("farshoot"), PVP_PART("pathing"));
+#undef PVP_PART
     // the pages: their vtable slots point at ours, which call the game's
     void *binds[2] = {(void *)bind_online, (void *)bind_lan}, *cmds[2] = {(void *)cmd_online, (void *)cmd_lan};
     void *dtors[2] = {(void *)dtor_online, (void *)dtor_lan};

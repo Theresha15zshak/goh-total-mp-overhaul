@@ -2144,6 +2144,8 @@ extern "C" void camo_selftest_tick(const char *ini_path) {
     if ((LONG)(GetTickCount() - at) >= 0 && open_prev) { state = 2; selftest(); preview_test(); }
 }
 
+// [debug] camo=0: the game's code is left alone, the rest (the editor, its reads of the game) still knows where the game is
+extern "C" void camo_base_only(unsigned char *exe) { base = (uintptr_t)exe; }
 extern "C" void camo_install(unsigned char *exe, unsigned char *(*alloc)(size_t), void (*patch)(void *, const void *, size_t)) {
     base = (uintptr_t)exe;
     for (uintptr_t site : TEX_MODS_CALLS) {

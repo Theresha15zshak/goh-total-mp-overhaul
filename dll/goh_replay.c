@@ -674,10 +674,20 @@ static void hang_dump(void) {
     rc_log("the game has not called the timer for 10 s: %s %s", ok ? "stacks written to" : "could not write", path);
 }
 
+static volatile long g_ai_cell_skipped;     // guard_ai_cell below: lookups outside the AI table, skipped
+static volatile long g_reg_missing;         // guard_reg_erase below
 static void dump_threads(void) {
     static HRESULT (WINAPI *get_desc)(HANDLE, PWSTR *);
     static int reports;
     long total = 0;
+    {
+        static long told;
+        long now = g_ai_cell_skipped;
+        if (now != told) { rc_log("AI table: %ld lookups outside it skipped (the game's out-of-bounds read)", now - told); told = now; }
+        static long told_reg;
+        long reg = g_reg_missing;
+        if (reg != told_reg) { rc_log("registry: %ld ids not in it, left alone (the game would delete the map's head)", reg - told_reg); told_reg = reg; }
+    }
     if (!get_desc) get_desc = (void *)GetProcAddress(GetModuleHandleA("kernel32.dll"), "GetThreadDescription");
     for (size_t i = 0; i < 64 && g_qpc[i].tid; i++) {
         LONG c = InterlockedExchange(&g_qpc[i].count, 0);
@@ -997,6 +1007,86 @@ static int hook_main_iter(void) {
     if (rel64 != (int32_t)rel64) return 0;
     int32_t rel = (int32_t)rel64;
     patch(target + 5, &rel, 4);
+    return 1;
+}
+
+// ---- the game's own out-of-bounds read in a table of the units' AI (1.069) --------------------------------
+// 77e010(table, column dx, level r8d, out r9) walks a table of node pointers [table+0x18 .. +0x20), columns [table+0x28],
+// levels [table+0x2c], at column + columns * level, from the given level down. Nothing checks the column: a replay
+// (2v2 hunting 2026-11-24, clock 97156 ms every time, the mod reduced to its Replays tab or not) asked for column 9 of
+// 8, read the heap's header after the table as a node and crashed (cdb, 2026-11-25). A lookup outside the table now
+// finds nothing, which is what the function does for an empty cell: its two callers (77dfad, 781315) call a check
+// that tail-jumps to it; its own recursive call stays inside.
+#define FN_AI_CELL      0x77e010
+static const uint8_t AI_CELL_INS[5] = {0x48, 0x89, 0x5c, 0x24, 0x08};
+static const uint32_t AI_CELL_CALLS[2] = {0x77dfad, 0x781315};
+
+static int guard_ai_cell(void) {
+    if (memcmp(g_base + FN_AI_CELL, AI_CELL_INS, sizeof AI_CELL_INS)) return 0;
+    for (int i = 0; i < 2; i++) {
+        uint8_t *c = g_base + AI_CELL_CALLS[i];
+        if (c[0] != 0xe8 || c + 5 + *(int32_t *)(c + 1) != g_base + FN_AI_CELL) return 0;
+    }
+    uint8_t *s = page_alloc(64), *p = s;
+    if (!s) return 0;
+    static const uint8_t check[] = {
+        0x3b, 0x51, 0x28,               // cmp edx, [rcx+0x28]      column < columns (unsigned)
+        0x73, 0x14,                     // jae out
+        0x44, 0x3b, 0x41, 0x2c,         // cmp r8d, [rcx+0x2c]      level < levels
+        0x73, 0x0e,                     // jae out
+        0xff, 0x25, 0, 0, 0, 0};        // jmp [rip+0]: the game's function
+    memcpy(p, check, sizeof check); p += sizeof check;
+    uint64_t fn = (uint64_t)(uintptr_t)(g_base + FN_AI_CELL); memcpy(p, &fn, 8); p += 8;
+    static const uint8_t out[] = {0x48, 0xb8};      // out: mov rax, &g_ai_cell_skipped; lock inc dword [rax]; ret
+    memcpy(p, out, sizeof out); p += sizeof out;
+    uint64_t cnt = (uint64_t)(uintptr_t)&g_ai_cell_skipped; memcpy(p, &cnt, 8); p += 8;
+    static const uint8_t tail[] = {0xf0, 0xff, 0x00, 0xc3};
+    memcpy(p, tail, sizeof tail);
+    for (int i = 0; i < 2; i++) {
+        uint8_t *c = g_base + AI_CELL_CALLS[i];
+        int64_t rel64 = (int64_t)(s - (c + 5));
+        if (rel64 != (int32_t)rel64) return 0;
+        int32_t rel = (int32_t)rel64;
+        patch(c + 1, &rel, 4);
+    }
+    return 1;
+}
+
+// ---- leaving a replay: an id missing from the entity registry (1.069) -------------------------------------------
+// a7ecc0 takes an entity's id out of the registry (a std::map at 15ca080): a lower_bound walk, then a7fe50 extracts the
+// node and da1e38 deletes its 0x30 bytes. When the id is not there the walk ends on the map's head and the game extracts
+// and deletes the head itself: leaving the 2v2 hunting replay that goes apart ~32 s in, that was RtlFreeHeap's
+// DOUBLE_FREE after "Replay: Stop", and with only the delete held back the broken tree made the next walk loop forever
+// (cdb, 2026-11-25). The extract call at a7ee6d goes through a stub: for the head it extracts and deletes nothing and
+// the registry stays whole; any other node is the game's.
+#define SITE_REG_EXTRACT    0xa7ee6d
+#define FN_REG_EXTRACT      0xa7fe50
+
+static int guard_reg_erase(void) {
+    static const uint8_t BEFORE[7] = {0x48, 0x8d, 0x0d, 0x13, 0xb2, 0xb4, 0x00};   // lea rcx, [rip+..]: the map at 15ca080
+    uint8_t *c = g_base + SITE_REG_EXTRACT;
+    static const uint8_t AFTER[13] = {0xba, 0x30, 0, 0, 0, 0x48, 0x8b, 0xc8, 0xe8, 0xb9, 0x2f, 0x32, 0x00};  // the delete
+    if (c[0] != 0xe8 || c + 5 + *(int32_t *)(c + 1) != g_base + FN_REG_EXTRACT || memcmp(c - 7, BEFORE, 7)
+        || memcmp(c + 5, AFTER, 13)) return 0;
+    uint8_t *s = page_alloc(64), *p = s;
+    if (!s) return 0;
+    static const uint8_t head[] = {
+        0x48, 0x3b, 0x11,               // cmp rdx, [rcx]           the node is the map's head: the id was not found
+        0x74, 0x0e,                     // je missing
+        0xff, 0x25, 0, 0, 0, 0};        // jmp [rip+0] the game's extract
+    memcpy(p, head, sizeof head); p += sizeof head;
+    uint64_t fn = (uint64_t)(uintptr_t)(g_base + FN_REG_EXTRACT); memcpy(p, &fn, 8); p += 8;
+    // missing: mov rax, &g_reg_missing; lock inc dword [rax]; add qword [rsp], 0xd; ret -- back at a7ee7f, past the
+    // delete (a7ee72: mov edx, 0x30; mov rcx, rax; call da1e38 is 13 bytes): nothing extracted, nothing deleted
+    static const uint8_t mis[] = {0x48, 0xb8};
+    memcpy(p, mis, sizeof mis); p += sizeof mis;
+    uint64_t cnt = (uint64_t)(uintptr_t)&g_reg_missing; memcpy(p, &cnt, 8); p += 8;
+    static const uint8_t tail[] = {0xf0, 0xff, 0x00, 0x48, 0x83, 0x04, 0x24, 0x0d, 0xc3};
+    memcpy(p, tail, sizeof tail);
+    int64_t rel64 = (int64_t)(s - (c + 5));
+    if (rel64 != (int32_t)rel64) return 0;
+    int32_t rel = (int32_t)rel64;
+    patch(c + 1, &rel, 4);
     return 1;
 }
 
@@ -1685,10 +1775,10 @@ static void startup(HMODULE self) {
 #endif
     // [debug] in goh_snapshots.ini: switch parts off one by one to find one that breaks a game
 #define PART(name) GetPrivateProfileIntA("debug", name, 1, ini)
-    lift_camera_limits();
-    widen_autoreplays();
+    if (PART("camera")) lift_camera_limits();
+    if (PART("autoreplays")) widen_autoreplays();
     if (PART("balance")) balance_install(g_base, g_dir, page_alloc, patch, 0);
-    int forced = force_ratio_stub(SITE_RATIO_STORE1, RATIO_STORE1_INS, 1) + force_ratio_stub(SITE_RATIO_STORE2, RATIO_STORE2_INS, 0);
+    int forced = PART("seek_pacing") ? force_ratio_stub(SITE_RATIO_STORE1, RATIO_STORE1_INS, 1) + force_ratio_stub(SITE_RATIO_STORE2, RATIO_STORE2_INS, 0) : 0;
     rc_log("seek pacing %s (%d of 2 sites)", forced == 2 ? "forced while seeking" : "partly or not forced", forced);
     g_pov_ok = !memcmp(g_base + FN_CAMERA_SET, CAMERA_SET_INS, sizeof CAMERA_SET_INS) &&
                rdq((uintptr_t)g_base + VT_CAMERA_STATE) != 0;
@@ -1698,6 +1788,8 @@ static void startup(HMODULE self) {
                   g_watch_count[1] == 0 && !memcmp(g_base + WATCH[1].rva, "\xe9", 1) &&   // Load is watched
                   PART("main_iter") && hook_main_iter();
     rc_log("rewind %s", g_rewind_ok ? "ready" : "unavailable (code mismatch)");
+    rc_log("AI table guard %s", PART("ai_guard") ? guard_ai_cell() ? "on" : "unavailable (code mismatch)" : "off");
+    rc_log("registry guard %s", PART("reg_erase") ? guard_reg_erase() ? "on" : "unavailable (code mismatch)" : "off");
     g_media_ok = PART("media") && hook_media_play();
     rc_log("music hook %s", g_media_ok ? "ready" : "unavailable (code mismatch)");
     rc_log("seek without drawing %s", PART("filter") && hook_filter(FN_RENDER_SCREEN, RENDER_SCREEN_INS, render_filter) ? "ready" : "unavailable (code mismatch)");
@@ -1724,6 +1816,8 @@ static void startup(HMODULE self) {
     g_ui_on = PART("ui");
     rc_log("parts: balance %d watch %d main_iter %d media %d filter %d music %d qpc %d ui %d", PART("balance"), PART("watch"),
            PART("main_iter"), PART("media"), PART("filter"), PART("music"), PART("qpc"), PART("ui"));
+    rc_log("parts: camera %d autoreplays %d seek_pacing %d online %d pvp %d", PART("camera"), PART("autoreplays"), PART("seek_pacing"),
+           PART("online"), PART("pvp"));
 #undef PART
 }
 
