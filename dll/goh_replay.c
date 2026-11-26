@@ -676,6 +676,7 @@ static void hang_dump(void) {
 
 static volatile long g_ai_cell_skipped;     // guard_ai_cell below: lookups outside the AI table, skipped
 static volatile long g_reg_missing;         // guard_reg_erase below
+static volatile long g_pierce_skipped;      // guard_pierce below
 static void dump_threads(void) {
     static HRESULT (WINAPI *get_desc)(HANDLE, PWSTR *);
     static int reports;
@@ -687,6 +688,9 @@ static void dump_threads(void) {
         static long told_reg;
         long reg = g_reg_missing;
         if (reg != told_reg) { rc_log("registry: %ld ids not in it, left alone (the game would delete the map's head)", reg - told_reg); told_reg = reg; }
+        static long told_pierce;
+        long pierce = g_pierce_skipped;
+        if (pierce != told_pierce) { rc_log("pierce: %ld hits with no source data, no damage (the game would read through null)", pierce - told_pierce); told_pierce = pierce; }
     }
     if (!get_desc) get_desc = (void *)GetProcAddress(GetModuleHandleA("kernel32.dll"), "GetThreadDescription");
     for (size_t i = 0; i < 64 && g_qpc[i].tid; i++) {
@@ -1087,6 +1091,46 @@ static int guard_reg_erase(void) {
     if (rel64 != (int32_t)rel64) return 0;
     int32_t rel = (int32_t)rel64;
     patch(c + 1, &rel, 4);
+    return 1;
+}
+
+// ---- a pierce hit whose source has no data (1.069) ----------------------------------------------------------------
+// Interaction::eHealthDamagePierce (vtable 10f6018) works out a hit's damage in two methods, slots 10 (759fb0) and 11
+// (759f70): both take the hit source's data at +0x120 and read through it (+0x10c, +0x130) without a check. The base
+// apply (758e10, slot 9) reads +0x120 only when the source's flag 0x400000 says it is there. A 2v2 Domination replay
+// (Suishka, 2026-11-26) gives a pierce hit with +0x120 empty 66 s in: EXCEPTION_ACCESS_VIOLATION reading 0x10c at
+// 759f82 for everyone watching it. Both slots now go through a stub: no data, no damage (0.0, as slot 10 itself returns
+// when its product is too small); else the game's method. Only the pierce class's own slots: the other damage classes
+// share slot 9, not these.
+#define VT_PIERCE       0x10f6018
+static const uint32_t PIERCE_FN[2] = {0x759fb0, 0x759f70};          // slots 10 and 11
+static const uint8_t PIERCE_INS[2][12] = {
+    {0x40, 0x55, 0x56, 0x41, 0x56, 0x48, 0x83, 0xec, 0x60, 0x48, 0x8b, 0xaa},   // push rbp; push rsi; push r14; sub rsp, 0x60; mov rbp, [rdx+0x120]
+    {0x40, 0x53, 0x48, 0x83, 0xec, 0x30, 0x48, 0x8b, 0x82, 0x20, 0x01, 0x00}};  // push rbx; sub rsp, 0x30; mov rax, [rdx+0x120]
+
+static int guard_pierce(void) {
+    for (int i = 0; i < 2; i++) {
+        uintptr_t *slot = (uintptr_t *)(g_base + VT_PIERCE + 8 * (10 + i));
+        if (*slot != (uintptr_t)(g_base + PIERCE_FN[i]) || memcmp(g_base + PIERCE_FN[i], PIERCE_INS[i], 12)) return 0;
+    }
+    for (int i = 0; i < 2; i++) {
+        uint8_t *s = page_alloc(64), *p = s;
+        if (!s) return 0;
+        static const uint8_t check[] = {
+            0x48, 0x8b, 0x82, 0x20, 0x01, 0x00, 0x00,   // mov rax, [rdx+0x120]     the hit source's data
+            0x48, 0x85, 0xc0,                           // test rax, rax
+            0x74, 0x0e,                                 // jz none (past the 14 bytes of the jump)
+            0xff, 0x25, 0, 0, 0, 0};                    // jmp [rip+0]: the game's method
+        memcpy(p, check, sizeof check); p += sizeof check;
+        uint64_t fn = (uint64_t)(uintptr_t)(g_base + PIERCE_FN[i]); memcpy(p, &fn, 8); p += 8;
+        static const uint8_t none[] = {0x48, 0xb8};      // none: mov rax, &g_pierce_skipped; lock inc dword [rax]; xorps xmm0, xmm0; ret
+        memcpy(p, none, sizeof none); p += sizeof none;
+        uint64_t cnt = (uint64_t)(uintptr_t)&g_pierce_skipped; memcpy(p, &cnt, 8); p += 8;
+        static const uint8_t tail[] = {0xf0, 0xff, 0x00, 0x0f, 0x57, 0xc0, 0xc3};
+        memcpy(p, tail, sizeof tail);
+        uint64_t stub = (uint64_t)(uintptr_t)s;
+        patch(g_base + VT_PIERCE + 8 * (10 + i), &stub, 8);
+    }
     return 1;
 }
 
@@ -1790,6 +1834,7 @@ static void startup(HMODULE self) {
     rc_log("rewind %s", g_rewind_ok ? "ready" : "unavailable (code mismatch)");
     rc_log("AI table guard %s", PART("ai_guard") ? guard_ai_cell() ? "on" : "unavailable (code mismatch)" : "off");
     rc_log("registry guard %s", PART("reg_erase") ? guard_reg_erase() ? "on" : "unavailable (code mismatch)" : "off");
+    rc_log("pierce guard %s", PART("pierce") ? guard_pierce() ? "on" : "unavailable (code mismatch)" : "off");
     g_media_ok = PART("media") && hook_media_play();
     rc_log("music hook %s", g_media_ok ? "ready" : "unavailable (code mismatch)");
     rc_log("seek without drawing %s", PART("filter") && hook_filter(FN_RENDER_SCREEN, RENDER_SCREEN_INS, render_filter) ? "ready" : "unavailable (code mismatch)");

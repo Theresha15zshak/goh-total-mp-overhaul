@@ -926,6 +926,7 @@ static const char *NEWS_RU[] = {
     "Камуфляж: у Финляндии появились трофейные Т-34 и КВ",
     "Реплеи: игра больше не вылетает и не зависает при выходе из реплея",
     "Реплеи: исправлено чтение за пределами таблицы ИИ в реплеях",
+    "Реплеи: исправлен вылет при просмотре (ACCESS_VIOLATION в ia:call, урон от пробивающего попадания)",
 };
 static const char *NEWS_EN[] = {
     "Competitive: infantry answers orders much faster, groups turn together",
@@ -959,6 +960,7 @@ static const char *NEWS_EN[] = {
     "Camouflage: Finland's captured T-34s and KVs are in the list",
     "Replays: the game no longer crashes or hangs when you leave a replay",
     "Replays: fixed a read past the end of the AI table in replays",
+    "Replays: fixed a crash while watching (ACCESS_VIOLATION in ia:call, damage of a piercing hit)",
 };
 
 // which news the player has read: by their text, so a build with the same news stays quiet
