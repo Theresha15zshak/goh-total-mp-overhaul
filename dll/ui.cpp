@@ -924,6 +924,8 @@ static const char *NEWS_RU[] = {
     "Лобби: кнопка «Камуфляж» выровнена по шапке окна",
     "Карточка игрока: калибровка рейтинга больше не наезжает на соседний рейтинг",
     "Камуфляж: у Финляндии появились трофейные Т-34 и КВ",
+    "Реплеи: игра больше не вылетает и не зависает при выходе из реплея",
+    "Реплеи: исправлено чтение за пределами таблицы ИИ в реплеях",
 };
 static const char *NEWS_EN[] = {
     "Competitive: infantry answers orders much faster, groups turn together",
@@ -955,6 +957,8 @@ static const char *NEWS_EN[] = {
     "Lobby: the Camouflage button lines up with the window's header",
     "Player card: the rating calibration no longer runs into the other rating",
     "Camouflage: Finland's captured T-34s and KVs are in the list",
+    "Replays: the game no longer crashes or hangs when you leave a replay",
+    "Replays: fixed a read past the end of the AI table in replays",
 };
 
 // which news the player has read: by their text, so a build with the same news stays quiet
